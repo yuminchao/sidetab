@@ -1,4 +1,5 @@
 import type { TabViewModel } from "./tab-model";
+import { createFaviconCandidates } from "./favicon-model";
 
 export type TabRendererElements = {
   list: HTMLElement;
@@ -20,7 +21,17 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
     }
 
     const container = target.parentElement;
-    if (!container?.classList.contains("tab-favicon")) {
+    if (
+      !container?.classList.contains("tab-favicon") ||
+      container.querySelector(":scope > .tab-favicon-image") !== target
+    ) {
+      return;
+    }
+
+    const nextUrl = target.dataset.nextUrl;
+    if (nextUrl) {
+      target.dataset.nextUrl = "";
+      target.src = nextUrl;
       return;
     }
 
@@ -67,6 +78,10 @@ function createTabRow(tab: TabViewModel): HTMLElement {
   main.type = "button";
   main.dataset.action = "activate";
 
+  const pin = document.createElement("span");
+  pin.className = "pin-indicator";
+  pin.setAttribute("aria-hidden", "true");
+
   const favicon = document.createElement("span");
   favicon.className = "tab-favicon";
   favicon.setAttribute("aria-hidden", "true");
@@ -74,7 +89,7 @@ function createTabRow(tab: TabViewModel): HTMLElement {
   const title = document.createElement("span");
   title.className = "tab-title";
 
-  main.append(favicon, title);
+  main.append(pin, favicon, title);
 
   const close = document.createElement("button");
   close.className = "tab-close";
@@ -116,31 +131,21 @@ function updateTabRow(row: HTMLElement, tab: TabViewModel): void {
 }
 
 function updatePin(main: HTMLElement, pinned: boolean): void {
-  const existing = main.querySelector<HTMLElement>(":scope > .pin-indicator");
-  if (!pinned) {
-    existing?.remove();
-    return;
+  const pin = main.querySelector<HTMLElement>(":scope > .pin-indicator");
+  if (pin) {
+    pin.dataset.visible = String(pinned);
   }
-  if (existing) {
-    return;
-  }
-
-  const pin = document.createElement("span");
-  pin.className = "pin-indicator";
-  pin.setAttribute("aria-hidden", "true");
-  main.prepend(pin);
 }
 
 function updateFavicon(container: HTMLElement, tab: TabViewModel): void {
-  const url = getAllowedFaviconUrl(tab.favIconUrl);
-  const mode = url ? "image" : "fallback";
+  const candidates = createFaviconCandidates(tab.favIconUrl, tab.url);
+  const candidatesKey = JSON.stringify(candidates);
   const fallbackText = getFallbackText(tab.title);
-  const sourceChanged = container.dataset.mode !== mode || container.dataset.url !== url;
+  const sourceChanged = container.dataset.candidatesKey !== candidatesKey;
 
   if (sourceChanged) {
-    container.replaceChildren(createFavicon(tab));
-    container.dataset.mode = mode;
-    container.dataset.url = url;
+    container.replaceChildren(createFavicon(candidates, fallbackText));
+    container.dataset.candidatesKey = candidatesKey;
     return;
   }
 
@@ -156,9 +161,8 @@ function updateFavicon(container: HTMLElement, tab: TabViewModel): void {
   }
 }
 
-function createFavicon(tab: TabViewModel): HTMLElement {
-  const fallback = getFallbackText(tab.title);
-  const faviconUrl = getAllowedFaviconUrl(tab.favIconUrl);
+function createFavicon(candidates: readonly string[], fallback: string): HTMLElement {
+  const [faviconUrl, nextUrl = ""] = candidates;
   if (!faviconUrl) {
     return createFaviconFallback(fallback);
   }
@@ -171,23 +175,8 @@ function createFavicon(tab: TabViewModel): HTMLElement {
   image.height = 16;
   image.alt = "";
   image.dataset.fallback = fallback;
+  image.dataset.nextUrl = nextUrl;
   return image;
-}
-
-function getAllowedFaviconUrl(url: string | undefined): string {
-  return url && isAllowedFaviconUrl(url) ? url : "";
-}
-
-function isAllowedFaviconUrl(raw: string): boolean {
-  if (/^data:image\//i.test(raw)) {
-    return true;
-  }
-
-  try {
-    return new URL(raw).protocol === "https:";
-  } catch {
-    return false;
-  }
 }
 
 function createFaviconFallback(text: string): HTMLElement {

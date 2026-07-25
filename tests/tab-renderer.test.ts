@@ -68,7 +68,10 @@ describe("tab renderer", () => {
     ]);
     const ordinaryRow = list.children[1] as HTMLElement;
     expect(ordinaryRow.dataset.hasPin).toBe("false");
-    expect(ordinaryRow.querySelector(".pin-indicator")).toBeNull();
+    const ordinaryPin = ordinaryRow.querySelector<HTMLElement>(".pin-indicator");
+    expect(ordinaryPin?.dataset.visible).toBe("false");
+    expect(ordinaryRow.querySelector(".tab-main")?.firstElementChild).toBe(ordinaryPin);
+    expect(pin?.dataset.visible).toBe("true");
   });
 
   it("shows the empty state and clears stale rows", () => {
@@ -86,6 +89,7 @@ describe("tab renderer", () => {
     renderer.render([tab(), tab({ id: 8, title: "Second" })]);
     const row = list.firstElementChild as HTMLElement;
     const second = list.lastElementChild;
+    const pin = row.querySelector(".pin-indicator");
 
     renderer.patch(
       tab({
@@ -113,7 +117,8 @@ describe("tab renderer", () => {
     expect(row.hasAttribute("aria-current")).toBe(false);
     expect(row.dataset.pinned).toBe("false");
     expect(row.dataset.hasPin).toBe("false");
-    expect(row.querySelector(".pin-indicator")).toBeNull();
+    expect(row.querySelector(".pin-indicator")).toBe(pin);
+    expect((pin as HTMLElement).dataset.visible).toBe("false");
     expect(row.querySelector<HTMLButtonElement>(".tab-main")?.ariaLabel).toBe(
       "Example page",
     );
@@ -143,6 +148,23 @@ describe("tab renderer", () => {
     expect(list.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,second");
   });
 
+  it("restarts the favicon chain when the page URL changes its root candidate", () => {
+    const renderer = createTabRenderer({ list, empty });
+    const item = tab({ favIconUrl: "data:image/png;base64,stable" });
+    renderer.render([item]);
+    const original = list.querySelector("img");
+
+    renderer.patch({ ...item, url: "https://other.example/page" });
+
+    expect(list.querySelector("img")).not.toBe(original);
+    expect(list.querySelector("img")?.getAttribute("src")).toBe(
+      "data:image/png;base64,stable",
+    );
+    expect(list.querySelector<HTMLImageElement>("img")?.dataset.nextUrl).toBe(
+      "https://other.example/favicon.ico",
+    );
+  });
+
   it("renders a Chrome-provided HTTPS favicon without rewriting its URL", () => {
     const renderer = createTabRenderer({ list, empty });
     const faviconUrl = "https://cdn.example.com/icons/page.png?size=16#chrome";
@@ -155,33 +177,57 @@ describe("tab renderer", () => {
     expect(list.querySelector(".tab-domain")).toBeNull();
   });
 
-  it.each([
-    "http://example.com/icon.png",
-    "javascript:alert(1)",
-    "file:///tmp/icon.png",
-  ])("uses a text fallback for a disallowed favicon URL: %s", (favIconUrl) => {
+  it("allows a Chrome-provided HTTP favicon", () => {
     const renderer = createTabRenderer({ list, empty });
 
-    renderer.render([tab({ title: "Private", favIconUrl })]);
+    renderer.render([tab({ favIconUrl: "http://cdn.example/icon.png" })]);
 
-    expect(list.querySelector("img")).toBeNull();
-    expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("P");
+    expect(list.querySelector("img")?.getAttribute("src")).toBe(
+      "http://cdn.example/icon.png",
+    );
   });
+
+  it.each(["javascript:alert(1)", "file:///tmp/icon.png", "chrome://favicon/"])(
+    "skips a dangerous primary and uses the HTTP page root: %s",
+    (favIconUrl) => {
+      const renderer = createTabRenderer({ list, empty });
+
+      renderer.render([tab({ favIconUrl })]);
+
+      expect(list.querySelector("img")?.getAttribute("src")).toBe(
+        "https://example.com/favicon.ico",
+      );
+    },
+  );
+
+  it.each(["javascript:alert(1)", "file:///tmp/icon.png", "chrome://favicon/"])(
+    "uses a letter when a non-HTTP page has no safe primary: %s",
+    (favIconUrl) => {
+      const renderer = createTabRenderer({ list, empty });
+
+      renderer.render([tab({ title: "Private", url: "chrome://newtab/", favIconUrl })]);
+
+      expect(list.querySelector("img")).toBeNull();
+      expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("P");
+    },
+  );
 
   it("preserves a fallback for title changes and replaces it when favicon mode changes", () => {
     const renderer = createTabRenderer({ list, empty });
-    renderer.render([tab({ title: "Alpha" })]);
+    renderer.render([tab({ title: "Alpha", url: "chrome://newtab/" })]);
     const originalFallback = list.querySelector(".tab-favicon-fallback");
 
-    renderer.patch(tab({ title: "Beta", active: true }));
+    renderer.patch(tab({ title: "Beta", active: true, url: "chrome://newtab/" }));
     expect(list.querySelector(".tab-favicon-fallback")).toBe(originalFallback);
     expect(originalFallback?.textContent).toBe("B");
 
-    renderer.patch(tab({ title: "Beta", favIconUrl: "data:image/png;base64,abc" }));
+    renderer.patch(
+      tab({ title: "Beta", url: "chrome://newtab/", favIconUrl: "data:image/png;base64,abc" }),
+    );
     expect(list.querySelector(".tab-favicon-fallback")).toBeNull();
     expect(list.querySelector("img")).not.toBeNull();
 
-    renderer.patch(tab({ title: "Gamma" }));
+    renderer.patch(tab({ title: "Gamma", url: "chrome://newtab/" }));
     expect(list.querySelector("img")).toBeNull();
     expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("G");
   });
@@ -198,11 +244,53 @@ describe("tab renderer", () => {
     expect(empty.hidden).toBe(false);
   });
 
-  it("replaces a failed favicon through one delegated error handler", () => {
+  it("falls back from the primary favicon to the root and then the title letter", () => {
     const renderer = createTabRenderer({ list, empty });
-    renderer.render([tab({ title: "Alpha", favIconUrl: "data:image/png;base64,broken" })]);
+    renderer.render([tab({ title: "Alpha", favIconUrl: "https://cdn.example/broken.png" })]);
     const image = list.querySelector("img");
 
+    image?.dispatchEvent(new Event("error"));
+
+    expect(list.querySelector("img")).toBe(image);
+    expect(image?.getAttribute("src")).toBe("https://example.com/favicon.ico");
+    expect(image?.dataset.nextUrl).toBe("");
+
+    renderer.patch(
+      tab({
+        title: "Beta",
+        active: true,
+        favIconUrl: "https://cdn.example/broken.png",
+      }),
+    );
+    expect(list.querySelector("img")).toBe(image);
+    expect(image?.dataset.fallback).toBe("B");
+
+    image?.dispatchEvent(new Event("error"));
+
+    expect(list.querySelector("img")).toBeNull();
+    expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("B");
+  });
+
+  it("starts at the root favicon when Chrome provides no primary", () => {
+    const renderer = createTabRenderer({ list, empty });
+    renderer.render([tab({ title: "Alpha" })]);
+    const image = list.querySelector("img");
+
+    expect(image?.getAttribute("src")).toBe("https://example.com/favicon.ico");
+    expect(image?.dataset.nextUrl).toBe("");
+
+    image?.dispatchEvent(new Event("error"));
+    expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("A");
+  });
+
+  it("does not retry a root favicon that duplicates the primary", () => {
+    const renderer = createTabRenderer({ list, empty });
+    renderer.render([
+      tab({ title: "Alpha", favIconUrl: "https://example.com/favicon.ico" }),
+    ]);
+    const image = list.querySelector("img");
+
+    expect(image?.dataset.nextUrl).toBe("");
     image?.dispatchEvent(new Event("error"));
 
     expect(list.querySelector("img")).toBeNull();
@@ -211,7 +299,13 @@ describe("tab renderer", () => {
 
   it("treats tab titles as text and never renders model domains", () => {
     const renderer = createTabRenderer({ list, empty });
-    renderer.render([tab({ title: "<img src=x onerror=alert(1)>", domain: "<script>x</script>" })]);
+    renderer.render([
+      tab({
+        title: "<img src=x onerror=alert(1)>",
+        domain: "<script>x</script>",
+        url: "chrome://newtab/",
+      }),
+    ]);
 
     expect(list.querySelector("script")).toBeNull();
     expect(list.querySelectorAll("img")).toHaveLength(0);
@@ -225,14 +319,20 @@ describe("tab renderer", () => {
     renderer.render([item]);
     const favicon = list.querySelector(".tab-favicon");
     const image = list.querySelector("img");
+    const pin = list.querySelector(".pin-indicator");
+
+    expect((pin as HTMLElement).dataset.visible).toBe("false");
 
     renderer.patch({ ...item, pinned: true });
+    expect(list.querySelector(".pin-indicator")).toBe(pin);
+    expect((pin as HTMLElement).dataset.visible).toBe("true");
     expect(list.querySelector(".pin-indicator")).toBe(list.querySelector(".tab-main")?.firstElementChild);
     expect(list.querySelector(".tab-favicon")).toBe(favicon);
     expect(list.querySelector("img")).toBe(image);
 
     renderer.patch(item);
-    expect(list.querySelector(".pin-indicator")).toBeNull();
+    expect(list.querySelector(".pin-indicator")).toBe(pin);
+    expect((pin as HTMLElement).dataset.visible).toBe("false");
     expect(list.querySelector(".tab-favicon")).toBe(favicon);
     expect(list.querySelector("img")).toBe(image);
   });
@@ -251,7 +351,7 @@ describe("tab renderer", () => {
   it("keeps an emoji intact when deriving a favicon fallback", () => {
     const renderer = createTabRenderer({ list, empty });
 
-    renderer.render([tab({ title: "😀 Tab" })]);
+    renderer.render([tab({ title: "😀 Tab", url: "chrome://newtab/" })]);
 
     expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("😀");
   });
