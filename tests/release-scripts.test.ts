@@ -28,6 +28,7 @@ type ReleaseFilesModule = {
 
 type CheckDistModule = {
   checkDist(distDirectory: string): Promise<{ totalBytes: number }>;
+  validateExtensionCsp(value: string): void;
 };
 
 type PackageModule = {
@@ -71,7 +72,8 @@ async function createReleaseFixture(): Promise<{ root: string; dist: string; rel
     minimum_chrome_version: "114",
     permissions: ["sidePanel", "tabs", "storage"],
     content_security_policy: {
-      extension_pages: "script-src 'self'; object-src 'self'",
+      extension_pages:
+        "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data:; style-src 'self'; frame-src 'none'",
     },
     background: {
       service_worker: "background/service-worker.js",
@@ -148,6 +150,45 @@ describe("release file contract", () => {
     ]) {
       expect(() => safeReleasePath(root, unsafe), unsafe).toThrow();
     }
+  });
+});
+
+describe("extension CSP validation", () => {
+  it("accepts the exact policy regardless of directive and source order", async () => {
+    const { validateExtensionCsp } = await loadCheckDist();
+
+    expect(() =>
+      validateExtensionCsp(
+        "frame-src 'none'; style-src 'self'; img-src data: 'self'; connect-src 'none'; object-src 'self'; script-src 'self'",
+      ),
+    ).not.toThrow();
+  });
+
+  it.each([
+    [
+      "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data:; style-src 'self'",
+      "missing frame-src",
+    ],
+    [
+      "script-src 'self'; object-src 'self'; connect-src https:; img-src 'self' data:; style-src 'self'; frame-src 'none'",
+      "remote connect-src",
+    ],
+    [
+      "script-src 'self'; object-src 'self'; connect-src 'none'; img-src * data:; style-src 'self'; frame-src 'none'",
+      "wildcard img-src",
+    ],
+    [
+      "script-src 'self' 'unsafe-inline'; object-src 'self'; connect-src 'none'; img-src 'self' data:; style-src 'self'; frame-src 'none'",
+      "unsafe-inline",
+    ],
+    [
+      "script-src 'self' 'unsafe-eval'; object-src 'self'; connect-src 'none'; img-src 'self' data:; style-src 'self'; frame-src 'none'",
+      "unsafe-eval",
+    ],
+  ])("rejects an unsafe or incomplete extension CSP: %s", async (value) => {
+    const { validateExtensionCsp } = await loadCheckDist();
+
+    expect(() => validateExtensionCsp(value)).toThrow(/csp|directive|source|forbidden/i);
   });
 });
 
@@ -239,6 +280,9 @@ describe("dist validation", () => {
     ["new WebSocket(url);", "WebSocket"],
     ["new XMLHttpRequest();", "XMLHttpRequest"],
     ["new EventSource(url);", "EventSource"],
+    ["const image = new Image(); image.src = 'https://example.com/pixel.png';", "Image"],
+    ["globalThis['fe' + 'tch'](url);", "computed fetch"],
+    ["new globalThis[`WebSocket`](url);", "computed template WebSocket"],
     ["navigator.sendBeacon(url, data);", "sendBeacon"],
     ["const { sendBeacon } = navigator; sendBeacon(url);", "destructured sendBeacon"],
     ["const beacon = navigator.sendBeacon; beacon(url);", "aliased member sendBeacon"],

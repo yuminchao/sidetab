@@ -26,4 +26,4 @@ npm run package
 
 ## 隐私与权限
 
-扩展只申请 `sidePanel`、`tabs` 和 `storage` 权限，不申请主机权限，也不注入 content script。扩展自身不执行主动网络请求；默认快捷入口图标来自本地资源。为避免 favicon 带来的扩展网络请求，只有 Chrome 已提供的 `data:image/` favicon 会显示为图片，HTTP/HTTPS favicon 使用标题首字符回退。用户点击快捷入口后才会由 Chrome 打开对应网站。
+扩展只申请 `sidePanel`、`tabs` 和 `storage` 权限，不申请主机权限，也不注入 content script。扩展自身不执行主动网络请求；默认快捷入口图标来自本地资源。扩展页面 CSP 明确禁止网络连接和 frame，只允许加载扩展自身的脚本、样式和图片，以及 `data:` 图片。为避免 favicon 带来的扩展网络请求，只有 Chrome 已提供的 `data:image/` favicon 会显示为图片，HTTP/HTTPS favicon 使用标题首字符回退。用户点击快捷入口后才会由 Chrome 打开对应网站。

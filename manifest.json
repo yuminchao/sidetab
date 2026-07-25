@@ -6,7 +6,7 @@
   "description": "A fast side panel for managing tabs in the current Chrome window.",
   "permissions": ["sidePanel", "tabs", "storage"],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data:; style-src 'self'; frame-src 'none'"
   },
   "background": {
     "service_worker": "background/service-worker.js",

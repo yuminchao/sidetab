@@ -26,6 +26,14 @@ const expectedManifestKeys = [
   "side_panel",
   "version",
 ].sort();
+const expectedCspDirectives = new Map([
+  ["connect-src", ["'none'"]],
+  ["frame-src", ["'none'"]],
+  ["img-src", ["'self'", "data:"].sort()],
+  ["object-src", ["'self'"]],
+  ["script-src", ["'self'"]],
+  ["style-src", ["'self'"]],
+]);
 const forbiddenJavaScriptApis = new Set([
   "eval",
   "Function",
@@ -34,6 +42,7 @@ const forbiddenJavaScriptApis = new Set([
   "WebSocket",
   "EventSource",
   "sendBeacon",
+  "Image",
 ]);
 const forbiddenHtmlElements = new Set(["iframe", "object", "embed"]);
 const htmlUrlAttributes = new Set([
@@ -58,6 +67,43 @@ const pngSizes = new Map([
 function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
+  }
+}
+
+export function validateExtensionCsp(value) {
+  assert(typeof value === "string" && value.trim().length > 0, "extension CSP is missing");
+  const directives = new Map();
+  for (const rawDirective of value.split(";")) {
+    const directive = rawDirective.trim();
+    if (!directive) {
+      continue;
+    }
+    const [rawName, ...sources] = directive.split(/\s+/);
+    const name = rawName.toLowerCase();
+    assert(!directives.has(name), `duplicate extension CSP directive: ${name}`);
+    assert(sources.length > 0, `extension CSP directive has no sources: ${name}`);
+    for (const source of sources) {
+      assert(
+        !source.includes("*") &&
+          !/^https?:/i.test(source) &&
+          source !== "'unsafe-inline'" &&
+          source !== "'unsafe-eval'",
+        `forbidden extension CSP source: ${source}`,
+      );
+    }
+    directives.set(name, [...sources].sort());
+  }
+
+  assert(
+    directives.size === expectedCspDirectives.size,
+    "extension CSP directives must exactly match the required policy",
+  );
+  for (const [name, expectedSources] of expectedCspDirectives) {
+    assert(directives.has(name), `extension CSP is missing directive: ${name}`);
+    assert(
+      JSON.stringify(directives.get(name)) === JSON.stringify(expectedSources),
+      `extension CSP sources do not match for ${name}`,
+    );
   }
 }
 
@@ -153,9 +199,24 @@ function getCalleeName(node) {
     if (!node.computed && node.property?.type === "Identifier") {
       return node.property.name;
     }
-    if (node.computed && node.property?.type === "Literal") {
-      return node.property.value;
+    if (node.computed) {
+      return getStaticString(node.property);
     }
+  }
+  return undefined;
+}
+
+function getStaticString(node) {
+  if (node?.type === "Literal" && typeof node.value === "string") {
+    return node.value;
+  }
+  if (node?.type === "TemplateLiteral" && node.expressions.length === 0) {
+    return node.quasis[0]?.value.cooked ?? node.quasis[0]?.value.raw;
+  }
+  if (node?.type === "BinaryExpression" && node.operator === "+") {
+    const left = getStaticString(node.left);
+    const right = getStaticString(node.right);
+    return typeof left === "string" && typeof right === "string" ? left + right : undefined;
   }
   return undefined;
 }
@@ -216,7 +277,7 @@ export async function checkDist(distDirectory) {
   assert(!Object.hasOwn(manifest, "host_permissions"), "host_permissions must not be present");
   assert(!Object.hasOwn(manifest, "content_scripts"), "content_scripts must not be present");
   assert(manifest.minimum_chrome_version === "114", "minimum_chrome_version must be 114");
-  assert(manifest.content_security_policy?.extension_pages === "script-src 'self'; object-src 'self'", "extension page CSP must allow self only");
+  validateExtensionCsp(manifest.content_security_policy?.extension_pages);
 
   const manifestPaths = [
     manifest.background?.service_worker,

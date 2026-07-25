@@ -1,6 +1,19 @@
 import manifest from "../manifest.json";
 import { describe, expect, it } from "vitest";
 
+function parseCsp(value: string): Record<string, string[]> {
+  return Object.fromEntries(
+    value
+      .split(";")
+      .map((directive) => directive.trim())
+      .filter(Boolean)
+      .map((directive) => {
+        const [name, ...sources] = directive.split(/\s+/);
+        return [name, sources.sort()];
+      }),
+  );
+}
+
 describe("extension manifest", () => {
   it("uses the required restricted MV3 permissions", () => {
     expect(manifest.manifest_version).toBe(3);
@@ -8,9 +21,14 @@ describe("extension manifest", () => {
     expect(manifest.permissions).toEqual(["sidePanel", "tabs", "storage"]);
     expect(manifest).not.toHaveProperty("host_permissions");
     expect(manifest).not.toHaveProperty("content_scripts");
-    expect(manifest.content_security_policy.extension_pages).toBe(
-      "script-src 'self'; object-src 'self'",
-    );
+    expect(parseCsp(manifest.content_security_policy.extension_pages)).toEqual({
+      "connect-src": ["'none'"],
+      "frame-src": ["'none'"],
+      "img-src": ["'self'", "data:"].sort(),
+      "object-src": ["'self'"],
+      "script-src": ["'self'"],
+      "style-src": ["'self'"],
+    });
     expect(manifest.background.service_worker).toBe("background/service-worker.js");
     expect(manifest.background.type).toBe("module");
     expect(manifest.side_panel.default_path).toBe("sidepanel/index.html");
