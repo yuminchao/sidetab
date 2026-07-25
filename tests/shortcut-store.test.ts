@@ -32,6 +32,7 @@ describe("shortcut store", () => {
 
     await expect(createShortcutStore(area).load()).resolves.toEqual({
       enabled: true,
+      tabTitleFontSize: 14,
       items: [{ id: "example", name: "Example", url: "https://example.com/", icon: "letter" }],
     });
   });
@@ -64,16 +65,19 @@ describe("shortcut store", () => {
     const area = createArea();
     const settings = {
       enabled: true,
+      tabTitleFontSize: 18,
       items: [{ id: "example", name: "  Example  ", url: " example.com ", icon: "letter" as const }],
     };
 
     await expect(createShortcutStore(area).save(settings)).resolves.toEqual({
       enabled: true,
+      tabTitleFontSize: 18,
       items: [{ id: "example", name: "Example", url: "https://example.com/", icon: "letter" }],
     });
     expect(area.set).toHaveBeenCalledWith({
       [storedKey]: {
         enabled: true,
+        tabTitleFontSize: 18,
         items: [{ id: "example", name: "Example", url: "https://example.com/", icon: "letter" }],
       },
     });
@@ -81,7 +85,7 @@ describe("shortcut store", () => {
 
   it("rejects invalid saves with the validator message without writing", async () => {
     const area = createArea();
-    const invalid = { enabled: true, items: [{ id: "example", name: "", url: "https://example.com", icon: "letter" as const }] };
+    const invalid = { enabled: true, tabTitleFontSize: 14, items: [{ id: "example", name: "", url: "https://example.com", icon: "letter" as const }] };
     const validation = validateShortcutSettings(invalid);
     if (validation.ok) throw new Error("test setup expected invalid settings");
 
@@ -98,6 +102,7 @@ describe("shortcut store", () => {
   it("returns a private normalized snapshot when storage mutates the save payload", async () => {
     const settings = {
       enabled: true,
+      tabTitleFontSize: 17,
       items: [{ id: "example", name: "  Example  ", url: " example.com ", icon: "letter" as const }],
     };
     const area = createArea({
@@ -109,10 +114,12 @@ describe("shortcut store", () => {
 
     await expect(createShortcutStore(area).save(settings)).resolves.toEqual({
       enabled: true,
+      tabTitleFontSize: 17,
       items: [{ id: "example", name: "Example", url: "https://example.com/", icon: "letter" }],
     });
     expect(settings).toEqual({
       enabled: true,
+      tabTitleFontSize: 17,
       items: [{ id: "example", name: "  Example  ", url: " example.com ", icon: "letter" }],
     });
   });

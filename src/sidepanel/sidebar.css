@@ -1,5 +1,6 @@
 :root {
   --tab-row-height: 30px;
+  --tab-title-font-size: 14px;
   color-scheme: light dark;
   font-family:
     system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -236,6 +237,7 @@ input:focus-visible {
   display: block;
   min-width: 0;
   overflow: hidden;
+  font-size: var(--tab-title-font-size);
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -315,6 +317,34 @@ input:focus-visible {
   margin: 0;
   font-size: 15px;
   line-height: 1.3;
+}
+
+.settings-section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-section h3 {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.number-setting {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.number-setting input {
+  width: 64px;
+  height: 32px;
+  padding: 0 7px;
+  border: 1px solid ButtonBorder;
+  border-radius: 5px;
+  background: Field;
 }
 
 .toggle-label {

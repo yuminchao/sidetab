@@ -1,4 +1,6 @@
 import {
+  MAX_TAB_TITLE_FONT_SIZE,
+  MIN_TAB_TITLE_FONT_SIZE,
   createDefaultShortcutSettings,
   validateShortcutSettings,
   type Shortcut,
@@ -10,6 +12,7 @@ export type ShortcutRendererElements = {
   dialog: HTMLDialogElement;
   form: HTMLFormElement;
   enabled: HTMLInputElement;
+  fontSize: HTMLInputElement;
   editor: HTMLElement;
   error: HTMLElement;
   add: HTMLButtonElement;
@@ -20,6 +23,7 @@ export type ShortcutRendererElements = {
 export type ShortcutRendererCallbacks = {
   onOpen(url: string): void | Promise<void>;
   onOpenError?(message: string): void;
+  onFontSizePreview?(size: number): void;
   onSave(settings: ShortcutSettings): Promise<ShortcutSettings>;
 };
 
@@ -83,6 +87,16 @@ export function createShortcutRenderer(
     elements.strip.hidden = !settings.enabled;
   };
 
+  const previewFontSize = (size: number) => {
+    callbacks.onFontSizePreview?.(size);
+  };
+
+  const isValidFontSize = (size: number): boolean =>
+    Number.isFinite(size) &&
+    Number.isInteger(size) &&
+    size >= MIN_TAB_TITLE_FONT_SIZE &&
+    size <= MAX_TAB_TITLE_FONT_SIZE;
+
   const renderEditor = () => {
     const fragment = document.createDocumentFragment();
     const items = session?.draft.items ?? [];
@@ -104,6 +118,7 @@ export function createShortcutRenderer(
       saving: false,
     };
     elements.enabled.checked = session.draft.enabled;
+    elements.fontSize.value = String(session.draft.tabTitleFontSize);
     setError("");
     renderEditor();
     if (!elements.dialog.open) {
@@ -189,6 +204,19 @@ export function createShortcutRenderer(
     }
   };
 
+  const onFontSizeInput = () => {
+    const editorSession = session;
+    if (!editorSession || editorSession.saving) {
+      return;
+    }
+    const size = elements.fontSize.valueAsNumber;
+    editorSession.draft.tabTitleFontSize = size;
+    setError("");
+    if (isValidFontSize(size)) {
+      previewFontSize(size);
+    }
+  };
+
   const onEditorInput = () => {
     if (!session?.saving) {
       syncDraftFromEditor();
@@ -262,6 +290,8 @@ export function createShortcutRenderer(
     }
     session.draft = createDefaultShortcutSettings();
     elements.enabled.checked = session.draft.enabled;
+    elements.fontSize.value = String(session.draft.tabTitleFontSize);
+    previewFontSize(session.draft.tabTitleFontSize);
     setError("");
     renderEditor();
   };
@@ -280,6 +310,7 @@ export function createShortcutRenderer(
     if (session?.saving) {
       return;
     }
+    previewFontSize(current.tabTitleFontSize);
     invalidateSession();
     setError("");
     elements.dialog.close();
@@ -289,11 +320,13 @@ export function createShortcutRenderer(
     if (session?.saving) {
       event.preventDefault();
     } else {
+      previewFontSize(current.tabTitleFontSize);
       invalidateSession();
     }
   };
 
   const onDialogClose = () => {
+    previewFontSize(current.tabTitleFontSize);
     invalidateSession();
     setFormBusy(false);
   };
@@ -322,6 +355,7 @@ export function createShortcutRenderer(
       }
       current = copySettings(saved);
       renderStrip(current);
+      previewFontSize(current.tabTitleFontSize);
       submittedSession.saving = false;
       setFormBusy(false);
       invalidateSession();
@@ -340,6 +374,7 @@ export function createShortcutRenderer(
   elements.strip.addEventListener("error", onShortcutIconError, true);
   elements.settingsButton.addEventListener("click", onSettingsClick);
   elements.enabled.addEventListener("change", onEnabledChange);
+  elements.fontSize.addEventListener("input", onFontSizeInput);
   elements.editor.addEventListener("input", onEditorInput);
   elements.editor.addEventListener("click", onEditorClick);
   elements.add.addEventListener("click", onAddClick);
@@ -353,6 +388,7 @@ export function createShortcutRenderer(
     render(settings) {
       current = copySettings(settings);
       renderStrip(current);
+      previewFontSize(current.tabTitleFontSize);
     },
 
     openSettings(settings) {
@@ -369,6 +405,7 @@ export function createShortcutRenderer(
       elements.strip.removeEventListener("error", onShortcutIconError, true);
       elements.settingsButton.removeEventListener("click", onSettingsClick);
       elements.enabled.removeEventListener("change", onEnabledChange);
+      elements.fontSize.removeEventListener("input", onFontSizeInput);
       elements.editor.removeEventListener("input", onEditorInput);
       elements.editor.removeEventListener("click", onEditorClick);
       elements.add.removeEventListener("click", onAddClick);
@@ -494,6 +531,7 @@ function getFirstCharacter(value: string): string {
 function copySettings(settings: ShortcutSettings): ShortcutSettings {
   return {
     enabled: settings.enabled,
+    tabTitleFontSize: settings.tabTitleFontSize,
     items: settings.items.map((shortcut) => ({ ...shortcut })),
   };
 }

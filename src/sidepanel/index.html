@@ -45,14 +45,33 @@
     <dialog id="shortcut-dialog" aria-labelledby="shortcut-dialog-title">
       <form id="shortcut-form" method="dialog" novalidate>
         <header class="dialog-header">
-          <h2 id="shortcut-dialog-title">快捷网站</h2>
+          <h2 id="shortcut-dialog-title">设置</h2>
+        </header>
+
+        <section class="settings-section" aria-labelledby="appearance-heading">
+          <h3 id="appearance-heading">外观</h3>
+          <label class="number-setting" for="tab-title-font-size">
+            <span>标签标题字号</span>
+            <input
+              id="tab-title-font-size"
+              type="number"
+              min="12"
+              max="18"
+              step="1"
+              inputmode="numeric"
+            />
+          </label>
+        </section>
+
+        <section class="settings-section" aria-labelledby="shortcuts-heading">
+          <h3 id="shortcuts-heading">快捷网站</h3>
           <label class="toggle-label" for="shortcut-enabled">
             <input id="shortcut-enabled" type="checkbox" />
             <span>启用快捷入口</span>
           </label>
-        </header>
 
-        <div id="shortcut-editor-list" class="editor-list"></div>
+          <div id="shortcut-editor-list" class="editor-list"></div>
+        </section>
         <p id="shortcut-error" class="shortcut-error" role="alert"></p>
 
         <div class="dialog-actions dialog-actions-secondary">

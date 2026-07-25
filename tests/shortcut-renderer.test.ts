@@ -23,6 +23,7 @@ function shortcut(overrides: Partial<Shortcut> = {}): Shortcut {
 function settings(overrides: Partial<ShortcutSettings> = {}): ShortcutSettings {
   return {
     enabled: true,
+    tabTitleFontSize: 14,
     items: [shortcut()],
     ...overrides,
   };
@@ -39,6 +40,8 @@ function createFixture(): ShortcutRendererElements & {
   const form = document.createElement("form");
   const enabled = document.createElement("input");
   enabled.type = "checkbox";
+  const fontSize = document.createElement("input");
+  fontSize.type = "number";
   const editor = document.createElement("div");
   const error = document.createElement("p");
   const add = document.createElement("button");
@@ -50,7 +53,7 @@ function createFixture(): ShortcutRendererElements & {
   cancel.dataset.action = "cancel";
   const save = document.createElement("button");
   save.type = "submit";
-  form.append(enabled, editor, error, add, reset, cancel, save);
+  form.append(fontSize, enabled, editor, error, add, reset, cancel, save);
   dialog.append(form);
   document.body.append(strip, settingsButton, dialog);
 
@@ -60,7 +63,7 @@ function createFixture(): ShortcutRendererElements & {
     dialog.dispatchEvent(new Event("close"));
   });
 
-  return { strip, dialog, form, enabled, editor, error, add, reset, settingsButton, cancel, save };
+  return { strip, dialog, form, fontSize, enabled, editor, error, add, reset, settingsButton, cancel, save };
 }
 
 function click(element: Element | null): void {
@@ -76,11 +79,69 @@ describe("shortcut renderer", () => {
   let elements: ReturnType<typeof createFixture>;
   let onOpen: ReturnType<typeof vi.fn>;
   let onSave: ReturnType<typeof vi.fn>;
+  let onFontSizePreview: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     elements = createFixture();
     onOpen = vi.fn();
     onSave = vi.fn(async (value: ShortcutSettings) => value);
+    onFontSizePreview = vi.fn();
+  });
+
+  it("previews valid font sizes and restores the saved size on cancel, Escape, or close", () => {
+    const renderer = createShortcutRenderer(elements, { onOpen, onSave, onFontSizePreview });
+    renderer.render(settings());
+    renderer.openSettings(settings());
+    expect(elements.fontSize.value).toBe("14");
+
+    elements.fontSize.value = "18";
+    elements.fontSize.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(onFontSizePreview).toHaveBeenLastCalledWith(18);
+    click(elements.cancel);
+    expect(onFontSizePreview).toHaveBeenLastCalledWith(14);
+
+    renderer.openSettings(settings());
+    elements.fontSize.value = "17";
+    elements.fontSize.dispatchEvent(new Event("input", { bubbles: true }));
+    elements.dialog.dispatchEvent(new Event("cancel", { cancelable: true }));
+    expect(onFontSizePreview).toHaveBeenLastCalledWith(14);
+
+    renderer.openSettings(settings());
+    elements.fontSize.value = "16";
+    elements.fontSize.dispatchEvent(new Event("input", { bubbles: true }));
+    elements.dialog.close();
+    expect(onFontSizePreview).toHaveBeenLastCalledWith(14);
+  });
+
+  it("keeps a saved font size after close and resets an open draft to 14", async () => {
+    const renderer = createShortcutRenderer(elements, { onOpen, onSave, onFontSizePreview });
+    renderer.openSettings(settings());
+    elements.fontSize.value = "16";
+    elements.fontSize.dispatchEvent(new Event("input", { bubbles: true }));
+    submit(elements.form);
+    await vi.waitFor(() => expect(elements.dialog.close).toHaveBeenCalledOnce());
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ tabTitleFontSize: 16 }));
+    expect(onFontSizePreview).toHaveBeenLastCalledWith(16);
+
+    renderer.openSettings(settings({ tabTitleFontSize: 18 }));
+    click(elements.reset);
+    expect(elements.fontSize.value).toBe("14");
+    expect(onFontSizePreview).toHaveBeenLastCalledWith(14);
+  });
+
+  it("does not preview or save an invalid font size", () => {
+    const renderer = createShortcutRenderer(elements, { onOpen, onSave, onFontSizePreview });
+    renderer.openSettings(settings());
+    onFontSizePreview.mockClear();
+    elements.fontSize.value = "14.5";
+    elements.fontSize.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(onFontSizePreview).not.toHaveBeenCalled();
+    submit(elements.form);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(elements.dialog.open).toBe(true);
+    expect(elements.error.textContent).not.toBe("");
   });
 
   it("hides and clears a disabled strip, then renders enabled shortcuts", () => {
@@ -215,6 +276,7 @@ describe("shortcut renderer", () => {
 
     expect(onSave).toHaveBeenCalledWith({
       enabled: true,
+      tabTitleFontSize: 14,
       items: [shortcut({ name: "Saved name" })],
     });
     expect(elements.strip.querySelector(".shortcut-button")?.getAttribute("title")).toBe(
@@ -225,8 +287,10 @@ describe("shortcut renderer", () => {
 
   it("keeps a rejected save open with its draft and error", async () => {
     onSave.mockRejectedValueOnce(new Error("Storage unavailable"));
-    const renderer = createShortcutRenderer(elements, { onOpen, onSave });
+    const renderer = createShortcutRenderer(elements, { onOpen, onSave, onFontSizePreview });
     renderer.openSettings(settings());
+    elements.fontSize.value = "18";
+    elements.fontSize.dispatchEvent(new Event("input", { bubbles: true }));
     const name = elements.editor.querySelector<HTMLInputElement>(".shortcut-name");
     if (name) {
       name.value = "Draft name";
@@ -242,6 +306,10 @@ describe("shortcut renderer", () => {
     );
     expect(elements.dialog.close).not.toHaveBeenCalled();
     expect(elements.cancel.disabled).toBe(false);
+    expect(onFontSizePreview).toHaveBeenLastCalledWith(18);
+
+    click(elements.cancel);
+    expect(onFontSizePreview).toHaveBeenLastCalledWith(14);
   });
 
   it("disables form actions and blocks cancel or repeat submit while saving", async () => {

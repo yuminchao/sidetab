@@ -26,6 +26,7 @@ type SidebarElements = {
   form: HTMLFormElement;
   dialogTitle: HTMLElement;
   shortcutEnabled: HTMLInputElement;
+  tabTitleFontSize: HTMLInputElement;
   shortcutEditor: HTMLElement;
   shortcutError: HTMLElement;
   shortcutAdd: HTMLButtonElement;
@@ -100,6 +101,7 @@ async function startSidebarInternal(
       dialog: elements.dialog,
       form: elements.form,
       enabled: elements.shortcutEnabled,
+      fontSize: elements.tabTitleFontSize,
       editor: elements.shortcutEditor,
       error: elements.shortcutError,
       add: elements.shortcutAdd,
@@ -121,6 +123,9 @@ async function startSidebarInternal(
         }
       },
       onOpenError: (message) => setStatus("operation", message),
+      onFontSizePreview: (size) => {
+        deps.document.documentElement.style.setProperty("--tab-title-font-size", `${size}px`);
+      },
       onSave: (settings) => shortcutStore.save(settings),
     },
   );
@@ -484,6 +489,7 @@ function getSidebarElements(document: Document): SidebarElements {
     form: requireElement(document, "shortcut-form", HTMLFormElement),
     dialogTitle: requireElement(document, "shortcut-dialog-title", HTMLElement),
     shortcutEnabled: requireElement(document, "shortcut-enabled", HTMLInputElement),
+    tabTitleFontSize: requireElement(document, "tab-title-font-size", HTMLInputElement),
     shortcutEditor: requireElement(document, "shortcut-editor-list", HTMLElement),
     shortcutError: requireElement(document, "shortcut-error", HTMLElement),
     shortcutAdd: requireElement(document, "shortcut-add", HTMLButtonElement),

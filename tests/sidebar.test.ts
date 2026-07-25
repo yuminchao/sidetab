@@ -6,6 +6,7 @@ import { createFakeChrome, deferred, fakeTab } from "./helpers/fake-chrome";
 
 function installFixture(): void {
   delete document.documentElement.dataset.ready;
+  document.documentElement.style.removeProperty("--tab-title-font-size");
   document.body.innerHTML = `
     <div id="shortcut-strip" hidden></div>
     <input id="tab-search" />
@@ -18,6 +19,7 @@ function installFixture(): void {
     <dialog id="shortcut-dialog">
       <form id="shortcut-form">
         <h2 id="shortcut-dialog-title"></h2>
+        <input id="tab-title-font-size" type="number" min="12" max="18" step="1" />
         <input id="shortcut-enabled" type="checkbox" />
         <div id="shortcut-editor-list"></div>
         <p id="shortcut-error"></p>
@@ -98,7 +100,52 @@ describe("sidebar lifecycle", () => {
     expect(rowIds()).toEqual([1, 2]);
     expect(element("shortcut-strip").hidden).toBe(true);
     expect(element("shortcut-strip").childElementCount).toBe(0);
+    expect(document.documentElement.style.getPropertyValue("--tab-title-font-size")).toBe("14px");
     cleanup();
+  });
+
+  it("migrates legacy settings to 14px and previews by changing only the root CSS variable", async () => {
+    const fake = createFakeChrome({
+      stored: { shortcutSettings: { enabled: false, items: [] } },
+    });
+    const setProperty = vi.spyOn(document.documentElement.style, "setProperty");
+    const cleanup = await startSidebar(fake);
+    expect(document.documentElement.style.getPropertyValue("--tab-title-font-size")).toBe("14px");
+
+    click(element("shortcut-settings"));
+    setProperty.mockClear();
+    const fontSize = element<HTMLInputElement>("tab-title-font-size");
+    fontSize.value = "18";
+    fontSize.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(setProperty).toHaveBeenCalledOnce();
+    expect(setProperty).toHaveBeenCalledWith("--tab-title-font-size", "18px");
+    expect(document.body.getAttribute("style")).toBeNull();
+    cleanup();
+  });
+
+  it("persists font size 17 and applies it when loaded again", async () => {
+    const fake = createFakeChrome();
+    const cleanup = await startSidebar(fake);
+    click(element("shortcut-settings"));
+    const fontSize = element<HTMLInputElement>("tab-title-font-size");
+    fontSize.value = "17";
+    fontSize.dispatchEvent(new Event("input", { bubbles: true }));
+    element<HTMLFormElement>("shortcut-form").dispatchEvent(
+      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+    );
+    await vi.waitFor(() => expect(fake.methods.storageSet).toHaveBeenCalledOnce());
+    const saved = {
+      shortcutSettings: { ...createDefaultShortcutSettings(), tabTitleFontSize: 17 },
+    };
+    expect(fake.methods.storageSet).toHaveBeenCalledWith(saved);
+    cleanup();
+
+    installFixture();
+    const reloaded = createFakeChrome({ stored: saved });
+    const cleanupReloaded = await startSidebar(reloaded);
+    expect(document.documentElement.style.getPropertyValue("--tab-title-font-size")).toBe("17px");
+    cleanupReloaded();
   });
 
   it("keeps tabs usable with defaults when storage loading fails", async () => {
@@ -571,6 +618,7 @@ describe("sidebar lifecycle", () => {
     "shortcut-dialog-title",
     "shortcut-cancel",
     "shortcut-save",
+    "tab-title-font-size",
   ])("rejects a missing required element with its id: %s", async (id) => {
     element(id).remove();
     const fake = createFakeChrome();
@@ -591,6 +639,28 @@ describe("sidebar lifecycle", () => {
 });
 
 describe("sidebar document structure", () => {
+  it("provides the bounded tab title font size control in the appearance section", () => {
+    const html = readFileSync("src/sidepanel/index.html", "utf8");
+    const page = new DOMParser().parseFromString(html, "text/html");
+    const input = page.querySelector<HTMLInputElement>("#tab-title-font-size");
+
+    expect(page.querySelector("#shortcut-dialog-title")?.textContent).toBe("设置");
+    expect(input?.type).toBe("number");
+    expect(input?.min).toBe("12");
+    expect(input?.max).toBe("18");
+    expect(input?.step).toBe("1");
+    expect(input?.getAttribute("inputmode")).toBe("numeric");
+    expect(input?.closest("section")?.querySelector("h3")?.textContent).toBe("外观");
+    expect(input?.closest("label")?.textContent).toContain("标签标题字号");
+  });
+
+  it("scopes the configurable font size to tab titles", () => {
+    const css = readFileSync("src/sidepanel/sidebar.css", "utf8");
+    expect(css).toMatch(/:root\s*\{[^}]*--tab-title-font-size:\s*14px/s);
+    expect(css).toMatch(/\.tab-title\s*\{[^}]*font-size:\s*var\(--tab-title-font-size\)/s);
+    expect(css.match(/var\(--tab-title-font-size\)/g)).toHaveLength(1);
+  });
+
   it("keeps shortcuts, tabs, status, and the fixed bottom toolbar in shell order", () => {
     const html = readFileSync("src/sidepanel/index.html", "utf8");
     const page = new DOMParser().parseFromString(html, "text/html");

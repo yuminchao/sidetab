@@ -9,8 +9,13 @@ export type Shortcut = {
 
 export type ShortcutSettings = {
   enabled: boolean;
+  tabTitleFontSize: number;
   items: Shortcut[];
 };
+
+export const DEFAULT_TAB_TITLE_FONT_SIZE = 14;
+export const MIN_TAB_TITLE_FONT_SIZE = 12;
+export const MAX_TAB_TITLE_FONT_SIZE = 18;
 
 export type ValidationResult =
   | { ok: true; value: ShortcutSettings }
@@ -27,6 +32,7 @@ const supportedIcons = new Set<ShortcutIcon>(["openai", "google", "github", "let
 export function createDefaultShortcutSettings(): ShortcutSettings {
   return {
     enabled: false,
+    tabTitleFontSize: DEFAULT_TAB_TITLE_FONT_SIZE,
     items: defaultShortcuts.map((shortcut) => ({ ...shortcut })),
   };
 }
@@ -58,7 +64,22 @@ export function validateShortcutSettings(input: unknown): ValidationResult {
 
     const enabled = input.enabled;
     const rawItems = input.items;
+    const rawTabTitleFontSize = input.tabTitleFontSize;
     if (typeof enabled !== "boolean" || !Array.isArray(rawItems)) {
+      return invalidFormat();
+    }
+
+    const tabTitleFontSize =
+      rawTabTitleFontSize === undefined
+        ? DEFAULT_TAB_TITLE_FONT_SIZE
+        : rawTabTitleFontSize;
+    if (
+      typeof tabTitleFontSize !== "number" ||
+      !Number.isFinite(tabTitleFontSize) ||
+      !Number.isInteger(tabTitleFontSize) ||
+      tabTitleFontSize < MIN_TAB_TITLE_FONT_SIZE ||
+      tabTitleFontSize > MAX_TAB_TITLE_FONT_SIZE
+    ) {
       return invalidFormat();
     }
 
@@ -113,7 +134,7 @@ export function validateShortcutSettings(input: unknown): ValidationResult {
       items.push({ id, name, url, icon });
     }
 
-    return { ok: true, value: { enabled, items } };
+    return { ok: true, value: { enabled, tabTitleFontSize, items } };
   } catch {
     return invalidFormat();
   }

@@ -59,6 +59,7 @@ export function createShortcutStore(area: StorageArea) {
 function copySettings(settings: ShortcutSettings): ShortcutSettings {
   return {
     enabled: settings.enabled,
+    tabTitleFontSize: settings.tabTitleFontSize,
     items: settings.items.map((item) => ({ ...item })),
   };
 }
