@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDefaultShortcutSettings } from "../src/sidepanel/shortcut-model";
 import { startSidebar, type SidebarDependencies } from "../src/sidepanel/sidebar";
@@ -586,5 +587,33 @@ describe("sidebar lifecycle", () => {
     };
     const dependencies: SidebarDependencies = null as unknown as RealChromeDependencies;
     expect(dependencies).toBeNull();
+  });
+});
+
+describe("sidebar document structure", () => {
+  it("keeps shortcuts, tabs, status, and the fixed bottom toolbar in shell order", () => {
+    const html = readFileSync("src/sidepanel/index.html", "utf8");
+    const page = new DOMParser().parseFromString(html, "text/html");
+    const shell = page.querySelector(".sidebar-shell");
+    expect(Array.from(shell?.children ?? [], (child) => child.id || child.className)).toEqual([
+      "shortcut-strip",
+      "tab-region",
+      "status-message",
+      "bottom-toolbar",
+    ]);
+    expect(page.querySelector<HTMLElement>("#shortcut-strip")?.hidden).toBe(true);
+  });
+
+  it("places the unique search and settings controls only in the bottom toolbar", () => {
+    const html = readFileSync("src/sidepanel/index.html", "utf8");
+    const page = new DOMParser().parseFromString(html, "text/html");
+    const footer = page.querySelector("footer.bottom-toolbar");
+
+    expect(page.querySelectorAll("#tab-search")).toHaveLength(1);
+    expect(page.querySelectorAll("#shortcut-settings")).toHaveLength(1);
+    expect(page.querySelectorAll("#status-message")).toHaveLength(1);
+    expect(footer?.querySelector("#tab-search")).not.toBeNull();
+    expect(footer?.querySelector("#shortcut-settings")).not.toBeNull();
+    expect(footer?.querySelector("#status-message")).toBeNull();
   });
 });

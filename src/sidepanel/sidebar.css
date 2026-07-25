@@ -1,4 +1,5 @@
 :root {
+  --tab-row-height: 30px;
   color-scheme: light dark;
   font-family:
     system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -62,24 +63,20 @@ input:focus-visible {
 
 .sidebar-shell {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   width: 100%;
   height: 100%;
+  min-width: 0;
   min-height: 0;
   background: Canvas;
-}
-
-.toolbar {
-  display: grid;
-  gap: 8px;
-  padding: 8px;
-  border-bottom: 1px solid ButtonBorder;
 }
 
 .shortcut-strip {
   display: flex;
   gap: 4px;
+  min-width: 0;
   min-height: 32px;
+  padding: 6px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
@@ -112,10 +109,13 @@ input:focus-visible {
   white-space: nowrap;
 }
 
-.search-row {
+.bottom-toolbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 32px;
   gap: 4px;
+  min-width: 0;
+  padding: 6px;
+  border-top: 1px solid ButtonBorder;
 }
 
 #tab-search {
@@ -129,6 +129,8 @@ input:focus-visible {
 
 .status-message {
   margin: 0;
+  min-width: 0;
+  padding: 2px 6px;
   color: GrayText;
   line-height: 1.35;
   overflow-wrap: anywhere;
@@ -139,27 +141,33 @@ input:focus-visible {
 }
 
 .tab-region {
+  position: relative;
+  min-width: 0;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
   background: Canvas;
 }
 
 .tab-list {
+  height: 100%;
   min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
 }
 
 .tab-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 32px;
+  grid-template-columns: minmax(0, 1fr) 26px;
   align-items: center;
-  min-height: 46px;
-  border-left: 3px solid transparent;
-  border-bottom: 1px solid ButtonBorder;
+  width: 100%;
+  height: var(--tab-row-height);
+  min-width: 0;
 }
 
 .tab-row[data-active="true"] {
-  border-left-color: AccentColor;
   background: ButtonFace;
+  box-shadow: inset 2px 0 AccentColor;
 }
 
 .tab-row:hover {
@@ -168,16 +176,21 @@ input:focus-visible {
 
 .tab-main {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) 24px;
-  gap: 8px;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 6px;
   align-items: center;
+  width: 100%;
+  height: var(--tab-row-height);
   min-width: 0;
-  min-height: 45px;
-  padding: 5px 8px;
+  padding: 2px 4px 2px 6px;
   border: 0;
   border-radius: 0;
   background: transparent;
   text-align: left;
+}
+
+.tab-row[data-has-pin="true"] .tab-main {
+  grid-template-columns: 12px 16px minmax(0, 1fr);
 }
 
 .tab-main:hover:not(:disabled) {
@@ -187,8 +200,8 @@ input:focus-visible {
 .tab-favicon {
   display: grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   overflow: hidden;
 }
 
@@ -212,52 +225,45 @@ input:focus-visible {
   line-height: 1;
 }
 
-.tab-copy {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.tab-title,
-.tab-domain {
+.tab-title {
   display: block;
   min-width: 0;
   overflow: hidden;
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .pin-indicator {
   display: block;
-  width: 24px;
+  width: 12px;
+  height: 12px;
   color: GrayText;
-  font-size: 11px;
-  line-height: 1;
-  text-align: center;
-  visibility: hidden;
-}
-
-.tab-row[data-pinned="true"] .pin-indicator {
-  visibility: visible;
-}
-
-.tab-title {
-  line-height: 1.25;
-}
-
-.tab-domain {
-  color: GrayText;
-  font-size: 11px;
-  line-height: 1.15;
+  background-color: currentColor;
+  -webkit-mask: url("/assets/icons/pin.svg") center / contain no-repeat;
+  mask: url("/assets/icons/pin.svg") center / contain no-repeat;
 }
 
 .tab-close {
+  width: 26px;
+  height: 26px;
+  padding: 0;
   border-color: transparent;
   background: transparent;
   font-size: 18px;
+  line-height: 1;
+  opacity: 0;
+}
+
+.tab-row:hover .tab-close,
+.tab-row[data-active="true"] .tab-close,
+.tab-row:focus-within .tab-close {
+  opacity: 1;
 }
 
 .empty-message {
+  position: absolute;
+  inset: 0;
   margin: 0;
   padding: 24px 12px;
   color: GrayText;
@@ -265,11 +271,12 @@ input:focus-visible {
 }
 
 #shortcut-dialog {
-  width: min(360px, calc(100vw - 24px));
-  max-width: 360px;
-  max-height: calc(100vh - 24px);
+  width: min(360px, calc(100vw - 8px));
+  max-width: calc(100vw - 8px);
+  max-height: calc(100vh - 8px);
   padding: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   border: 1px solid ButtonBorder;
   border-radius: 8px;
   box-shadow: none;
@@ -284,7 +291,7 @@ input:focus-visible {
 #shortcut-form {
   display: grid;
   gap: 10px;
-  max-height: calc(100vh - 26px);
+  min-width: 0;
   padding: 12px;
   overflow-y: auto;
 }
@@ -384,7 +391,7 @@ input:focus-visible {
 
 @media (max-width: 340px) {
   #shortcut-dialog {
-    width: calc(100vw - 12px);
+    width: calc(100vw - 8px);
   }
 
   #shortcut-form {
@@ -410,5 +417,25 @@ input:focus-visible {
 
   .shortcut-editor-action[data-action="delete"] {
     grid-column: 3;
+  }
+}
+
+@media (max-width: 240px) {
+  .bottom-toolbar,
+  .shortcut-strip {
+    padding-inline: 4px;
+  }
+}
+
+@media (max-width: 180px) {
+  .tab-main {
+    gap: 4px;
+    padding-left: 4px;
+  }
+}
+
+@media (pointer: coarse) {
+  .tab-close {
+    opacity: 1;
   }
 }

@@ -45,19 +45,30 @@ describe("tab renderer", () => {
     const row = list.firstElementChild as HTMLElement;
     expect(row).toMatchObject({ role: "listitem" });
     expect(row.dataset).toMatchObject({ tabId: "7", active: "true", pinned: "true" });
+    expect(row.dataset.hasPin).toBe("true");
     expect(row.getAttribute("aria-current")).toBe("page");
     expect(row.querySelector(".tab-title")?.textContent).toBe("Example page");
-    expect(row.querySelector(".tab-domain")?.textContent).toBe("example.com");
+    expect(row.querySelector(".tab-domain")).toBeNull();
     expect(row.querySelector<HTMLButtonElement>("[data-action='activate']")?.ariaLabel).toBe(
-      "切换到 Example page，已固定",
+      "Example page，已固定",
     );
     expect(row.querySelector<HTMLButtonElement>("[data-action='close']")?.ariaLabel).toBe(
       "关闭 Example page",
     );
     expect(row.querySelector("img")).toMatchObject({ loading: "lazy", alt: "", width: 16, height: 16 });
-    expect(row.querySelector(".pin-indicator")?.textContent).toBe("固定");
-    expect(row.querySelector<HTMLElement>(".pin-indicator")?.title).toBe("已固定");
-    expect(list.children[1]?.querySelector(".pin-indicator")).not.toBeNull();
+    const main = row.querySelector<HTMLElement>(".tab-main");
+    const pin = row.querySelector<HTMLElement>(".pin-indicator");
+    expect(pin?.textContent).toBe("");
+    expect(pin?.getAttribute("aria-hidden")).toBe("true");
+    expect(main?.firstElementChild).toBe(pin);
+    expect(Array.from(main?.children ?? [], (child) => child.className)).toEqual([
+      "pin-indicator",
+      "tab-favicon",
+      "tab-title",
+    ]);
+    const ordinaryRow = list.children[1] as HTMLElement;
+    expect(ordinaryRow.dataset.hasPin).toBe("false");
+    expect(ordinaryRow.querySelector(".pin-indicator")).toBeNull();
   });
 
   it("shows the empty state and clears stale rows", () => {
@@ -91,16 +102,20 @@ describe("tab renderer", () => {
     expect(list.lastElementChild).toBe(second);
     expect(list.children).toHaveLength(2);
     expect(row.dataset).toMatchObject({ active: "true", pinned: "true" });
+    expect(row.dataset.hasPin).toBe("true");
     expect(row.getAttribute("aria-current")).toBe("page");
     expect(row.querySelector(".tab-title")?.textContent).toBe("Updated");
-    expect(row.querySelector(".tab-domain")?.textContent).toBe("updated.example");
+    expect(row.querySelector(".tab-domain")).toBeNull();
+    expect(row.querySelector(".tab-main")?.firstElementChild?.className).toBe("pin-indicator");
     expect(row.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,updated");
 
     renderer.patch(tab({ active: false }));
     expect(row.hasAttribute("aria-current")).toBe(false);
     expect(row.dataset.pinned).toBe("false");
+    expect(row.dataset.hasPin).toBe("false");
+    expect(row.querySelector(".pin-indicator")).toBeNull();
     expect(row.querySelector<HTMLButtonElement>(".tab-main")?.ariaLabel).toBe(
-      "切换到 Example page",
+      "Example page",
     );
   });
 
@@ -120,7 +135,7 @@ describe("tab renderer", () => {
     expect(list.querySelector("img")).toBe(original);
     expect(original?.dataset.fallback).toBe("U");
     expect(list.querySelector<HTMLButtonElement>(".tab-main")?.ariaLabel).toBe(
-      "切换到 Updated title",
+      "Updated title",
     );
 
     renderer.patch(tab({ favIconUrl: "data:image/png;base64,second" }));
@@ -136,7 +151,7 @@ describe("tab renderer", () => {
     expect(list.querySelector("img")).toBeNull();
     expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("P");
     expect(list.querySelector(".tab-title")?.textContent).toBe("Private");
-    expect(list.querySelector(".tab-domain")?.textContent).toBe("example.com");
+    expect(list.querySelector(".tab-domain")).toBeNull();
   });
 
   it("preserves a fallback for title changes and replaces it when favicon mode changes", () => {
@@ -180,14 +195,32 @@ describe("tab renderer", () => {
     expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("A");
   });
 
-  it("treats tab titles and domains as text", () => {
+  it("treats tab titles as text and never renders model domains", () => {
     const renderer = createTabRenderer({ list, empty });
     renderer.render([tab({ title: "<img src=x onerror=alert(1)>", domain: "<script>x</script>" })]);
 
     expect(list.querySelector("script")).toBeNull();
     expect(list.querySelectorAll("img")).toHaveLength(0);
     expect(list.querySelector(".tab-title")?.textContent).toBe("<img src=x onerror=alert(1)>");
-    expect(list.querySelector(".tab-domain")?.textContent).toBe("<script>x</script>");
+    expect(list.querySelector(".tab-domain")).toBeNull();
+  });
+
+  it("adds and removes the pin without replacing an unchanged favicon", () => {
+    const renderer = createTabRenderer({ list, empty });
+    const item = tab({ favIconUrl: "data:image/png;base64,stable" });
+    renderer.render([item]);
+    const favicon = list.querySelector(".tab-favicon");
+    const image = list.querySelector("img");
+
+    renderer.patch({ ...item, pinned: true });
+    expect(list.querySelector(".pin-indicator")).toBe(list.querySelector(".tab-main")?.firstElementChild);
+    expect(list.querySelector(".tab-favicon")).toBe(favicon);
+    expect(list.querySelector("img")).toBe(image);
+
+    renderer.patch(item);
+    expect(list.querySelector(".pin-indicator")).toBeNull();
+    expect(list.querySelector(".tab-favicon")).toBe(favicon);
+    expect(list.querySelector("img")).toBe(image);
   });
 
   it("removes delegated listeners when destroyed", () => {

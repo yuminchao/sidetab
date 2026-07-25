@@ -71,23 +71,10 @@ function createTabRow(tab: TabViewModel): HTMLElement {
   favicon.className = "tab-favicon";
   favicon.setAttribute("aria-hidden", "true");
 
-  const copy = document.createElement("span");
-  copy.className = "tab-copy";
-
   const title = document.createElement("span");
   title.className = "tab-title";
 
-  const domain = document.createElement("span");
-  domain.className = "tab-domain";
-
-  copy.append(title, domain);
-
-  const pin = document.createElement("span");
-  pin.className = "pin-indicator";
-  pin.setAttribute("aria-hidden", "true");
-  pin.textContent = "固定";
-
-  main.append(favicon, copy, pin);
+  main.append(favicon, title);
 
   const close = document.createElement("button");
   close.className = "tab-close";
@@ -104,6 +91,7 @@ function updateTabRow(row: HTMLElement, tab: TabViewModel): void {
   row.dataset.tabId = String(tab.id);
   row.dataset.active = String(tab.active);
   row.dataset.pinned = String(tab.pinned);
+  row.dataset.hasPin = String(tab.pinned);
   if (tab.active) {
     row.setAttribute("aria-current", "page");
   } else {
@@ -113,21 +101,34 @@ function updateTabRow(row: HTMLElement, tab: TabViewModel): void {
   const main = row.querySelector<HTMLButtonElement>(".tab-main");
   const close = row.querySelector<HTMLButtonElement>(".tab-close");
   const title = row.querySelector<HTMLElement>(".tab-title");
-  const domain = row.querySelector<HTMLElement>(".tab-domain");
   const favicon = row.querySelector<HTMLElement>(".tab-favicon");
-  const pin = row.querySelector<HTMLElement>(".pin-indicator");
 
-  if (!main || !close || !title || !domain || !favicon || !pin) {
+  if (!main || !close || !title || !favicon) {
     return;
   }
 
-  main.setAttribute("aria-label", `切换到 ${tab.title}${tab.pinned ? "，已固定" : ""}`);
+  updatePin(main, tab.pinned);
+  main.setAttribute("aria-label", tab.pinned ? `${tab.title}，已固定` : tab.title);
   close.setAttribute("aria-label", `关闭 ${tab.title}`);
   close.title = `关闭 ${tab.title}`;
   title.textContent = tab.title;
-  domain.textContent = tab.domain;
-  pin.title = tab.pinned ? "已固定" : "";
   updateFavicon(favicon, tab);
+}
+
+function updatePin(main: HTMLElement, pinned: boolean): void {
+  const existing = main.querySelector<HTMLElement>(":scope > .pin-indicator");
+  if (!pinned) {
+    existing?.remove();
+    return;
+  }
+  if (existing) {
+    return;
+  }
+
+  const pin = document.createElement("span");
+  pin.className = "pin-indicator";
+  pin.setAttribute("aria-hidden", "true");
+  main.prepend(pin);
 }
 
 function updateFavicon(container: HTMLElement, tab: TabViewModel): void {

@@ -17,12 +17,32 @@ describe("side panel responsive CSS", () => {
     );
   });
 
-  it("reserves stable space for the pinned indicator and only reveals it for pinned rows", () => {
-    expect(css).toMatch(
-      /\.pin-indicator\s*{[^}]*width:\s*24px[^}]*visibility:\s*hidden/s,
-    );
-    expect(css).toMatch(
-      /\.tab-row\[data-pinned="true"\]\s+\.pin-indicator\s*{[^}]*visibility:\s*visible/s,
-    );
+  it("uses a fixed compact row without separators and keeps the favicon at 16px", () => {
+    expect(css).toMatch(/--tab-row-height:\s*30px/);
+    expect(css).toMatch(/\.tab-row\s*{[^}]*height:\s*var\(--tab-row-height\)/s);
+    expect(css).not.toMatch(/\.tab-row\s*{[^}]*border-bottom/s);
+    expect(css).toMatch(/\.tab-favicon\s*{[^}]*width:\s*16px[^}]*height:\s*16px/s);
+    expect(css).not.toMatch(/\.tab-domain\s*{/);
+  });
+
+  it("gives only the tab list vertical scrolling and hides horizontal overflow", () => {
+    expect(css).toMatch(/\.sidebar-shell\s*{[^}]*grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto\s+auto/s);
+    expect(css).toMatch(/\.tab-region\s*{[^}]*overflow:\s*hidden/s);
+    expect(css).toMatch(/\.tab-list\s*{[^}]*overflow-y:\s*auto[^}]*overflow-x:\s*hidden/s);
+    expect(css).toMatch(/\.status-message:empty\s*{[^}]*display:\s*none/s);
+  });
+
+  it("uses a compact bottom toolbar and reveals close controls accessibly", () => {
+    expect(css).toMatch(/\.bottom-toolbar\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+32px[^}]*padding:\s*6px/s);
+    expect(css).toMatch(/\.tab-close\s*{[^}]*width:\s*26px[^}]*height:\s*26px[^}]*opacity:\s*0/s);
+    expect(css).toMatch(/\.tab-row:(?:hover|focus-within)[^}]*\.tab-close[^}]*opacity:\s*1/s);
+    expect(css).toMatch(/@media\s*\(pointer:\s*coarse\)[^{]*{[\s\S]*?\.tab-close\s*{[^}]*opacity:\s*1/s);
+  });
+
+  it("supports 180px and 240px panels without positive minimum widths", () => {
+    expect(css).toContain("@media (max-width: 240px)");
+    expect(css).toContain("@media (max-width: 180px)");
+    expect(css).not.toMatch(/min-width:\s*(?!0(?:px|rem|em|%)?\s*[;}])(?:[1-9]|0?\.[0-9]*[1-9])/);
+    expect(css).toMatch(/#shortcut-dialog\s*{[^}]*max-width:\s*calc\(100vw\s*-\s*8px\)[^}]*overflow-y:\s*auto/s);
   });
 });

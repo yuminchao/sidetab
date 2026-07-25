@@ -8,38 +8,38 @@
   </head>
   <body>
     <main class="sidebar-shell">
-      <header class="toolbar">
-        <div
-          id="shortcut-strip"
-          class="shortcut-strip"
-          aria-label="快捷网站"
-          hidden
-        ></div>
-        <div class="search-row">
-          <input
-            id="tab-search"
-            type="search"
-            placeholder="搜索标签页"
-            aria-label="搜索标签页"
-            autocomplete="off"
-          />
-          <button
-            id="shortcut-settings"
-            class="icon-button"
-            type="button"
-            title="快捷网站设置"
-            aria-label="快捷网站设置"
-          >
-            &#9881;
-          </button>
-        </div>
-        <p id="status-message" class="status-message" role="status" aria-live="polite"></p>
-      </header>
+      <div
+        id="shortcut-strip"
+        class="shortcut-region shortcut-strip"
+        aria-label="快捷网站"
+        hidden
+      ></div>
 
       <section id="tab-region" class="tab-region" aria-label="当前窗口标签页">
         <p id="tab-empty" class="empty-message" hidden>没有匹配的标签页</p>
         <div id="tab-list" class="tab-list" role="list"></div>
       </section>
+
+      <p id="status-message" class="status-message" role="status" aria-live="polite"></p>
+
+      <footer class="bottom-toolbar">
+        <input
+          id="tab-search"
+          type="search"
+          placeholder="搜索标签页"
+          aria-label="搜索标签页"
+          autocomplete="off"
+        />
+        <button
+          id="shortcut-settings"
+          class="icon-button"
+          type="button"
+          title="快捷网站设置"
+          aria-label="快捷网站设置"
+        >
+          &#9881;
+        </button>
+      </footer>
     </main>
 
     <dialog id="shortcut-dialog" aria-labelledby="shortcut-dialog-title">
