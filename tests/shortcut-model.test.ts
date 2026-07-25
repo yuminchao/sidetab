@@ -99,21 +99,36 @@ describe("shortcut model", () => {
     });
   });
 
-  it("returns a normalized trimmed copy without changing its input", () => {
+  it("returns a normalized copy without changing its input", () => {
     const input = {
       enabled: true,
-      items: [shortcut({ id: "  example  ", name: "  Example  ", url: " example.com " })],
+      items: [shortcut({ id: " stable-id ", name: "  Example  ", url: " example.com " })],
     };
 
     const result = validateShortcutSettings(input);
 
     expect(result).toEqual({
       ok: true,
-      value: { enabled: true, items: [shortcut({ id: "example", name: "Example", url: "https://example.com/" })] },
+      value: { enabled: true, items: [shortcut({ id: " stable-id ", name: "Example", url: "https://example.com/" })] },
     });
     expect(input).toEqual({
       enabled: true,
-      items: [shortcut({ id: "  example  ", name: "  Example  ", url: " example.com " })],
+      items: [shortcut({ id: " stable-id ", name: "  Example  ", url: " example.com " })],
+    });
+  });
+
+  it("treats whitespace differences in IDs as distinct", () => {
+    expect(
+      validateShortcutSettings({
+        enabled: true,
+        items: [shortcut({ id: " stable-id ", url: "https://one.example" }), shortcut({ id: "stable-id", url: "https://two.example" })],
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        enabled: true,
+        items: [shortcut({ id: " stable-id ", url: "https://one.example/" }), shortcut({ id: "stable-id", url: "https://two.example/" })],
+      },
     });
   });
 });

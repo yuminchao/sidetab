@@ -74,7 +74,7 @@ export function validateShortcutSettings(input: unknown): ValidationResult {
         return invalidFormat;
       }
 
-      const id = item.id.trim();
+      const id = item.id;
       const name = item.name.trim();
       if (!name) {
         return { ok: false, message: "网站名称不能为空" };
