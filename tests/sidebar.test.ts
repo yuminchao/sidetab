@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDefaultShortcutSettings } from "../src/sidepanel/shortcut-model";
-import { startSidebar, type SidebarDependencies } from "../src/sidepanel/sidebar";
+import {
+  bootstrapSidebar,
+  startSidebar,
+  type SidebarDependencies,
+} from "../src/sidepanel/sidebar";
 import { createFakeChrome, deferred, fakeTab } from "./helpers/fake-chrome";
 
 function installFixture(): void {
@@ -61,6 +65,10 @@ function input(value: string): void {
   const search = element<HTMLInputElement>("tab-search");
   search.value = value;
   search.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function lifecycleTarget(): EventTarget & Pick<Window, "addEventListener" | "removeEventListener"> {
+  return new EventTarget() as EventTarget & Pick<Window, "addEventListener" | "removeEventListener">;
 }
 
 async function flush(): Promise<void> {
@@ -313,6 +321,73 @@ describe("sidebar lifecycle", () => {
     expect(element<HTMLDialogElement>("shortcut-dialog").open).toBe(false);
     expect(fake.methods.remove).not.toHaveBeenCalled();
     for (const event of Object.values(fake.events)) expect(event.listenerCount).toBe(0);
+  });
+
+  it("invalidates deferred initialization when pagehide happens before startup resolves", async () => {
+    const currentWindow = deferred<chrome.windows.Window>();
+    const storage = deferred<Record<string, unknown>>();
+    const fake = createFakeChrome();
+    fake.methods.getCurrent.mockReturnValueOnce(currentWindow.promise);
+    fake.methods.storageGet.mockReturnValueOnce(storage.promise);
+    const lifecycle = lifecycleTarget();
+
+    const started = bootstrapSidebar(fake, lifecycle);
+    expect(fake.methods.getCurrent).toHaveBeenCalledOnce();
+    expect(fake.methods.storageGet).toHaveBeenCalledOnce();
+    lifecycle.dispatchEvent(new Event("pagehide"));
+    currentWindow.resolve({ id: 10 } as chrome.windows.Window);
+    storage.resolve({});
+    await started;
+
+    expect(fake.methods.query).not.toHaveBeenCalled();
+    for (const event of Object.values(fake.events)) expect(event.listenerCount).toBe(0);
+    input("missing");
+    await new Promise((resolve) => setTimeout(resolve, 110));
+    expect(rowIds()).toEqual([]);
+  });
+
+  it("cleans deferred query listeners after an early pagehide and ignores its late result", async () => {
+    const query = deferred<chrome.tabs.Tab[]>();
+    const fake = createFakeChrome();
+    fake.methods.query.mockReturnValueOnce(query.promise);
+    const lifecycle = lifecycleTarget();
+    const started = bootstrapSidebar(fake, lifecycle);
+    await flush();
+    expect(fake.methods.query).toHaveBeenCalledWith({ windowId: 10 });
+
+    lifecycle.dispatchEvent(new Event("pagehide"));
+    query.resolve([fakeTab()]);
+    await started;
+
+    expect(rowIds()).toEqual([]);
+    for (const event of Object.values(fake.events)) expect(event.listenerCount).toBe(0);
+  });
+
+  it("keeps the normal bootstrap active until pagehide and cleans it only once", async () => {
+    const fake = createFakeChrome({ tabs: [fakeTab()] });
+    const lifecycle = lifecycleTarget();
+    await bootstrapSidebar(fake, lifecycle);
+    expect(fake.events.onCreated.listenerCount).toBe(1);
+
+    lifecycle.dispatchEvent(new Event("pagehide"));
+    lifecycle.dispatchEvent(new Event("pagehide"));
+
+    for (const event of Object.values(fake.events)) {
+      expect(event.listenerCount).toBe(0);
+      expect(event.removed).toHaveLength(1);
+    }
+  });
+
+  it("removes the early pagehide listener and handles startup rejection", async () => {
+    element("tab-list").remove();
+    const fake = createFakeChrome();
+    const lifecycle = lifecycleTarget();
+    const removeEventListener = vi.spyOn(lifecycle, "removeEventListener");
+
+    await expect(bootstrapSidebar(fake, lifecycle)).resolves.toBeUndefined();
+
+    expect(removeEventListener).toHaveBeenCalledWith("pagehide", expect.any(Function));
+    expect(element("status-message").textContent).toContain("tab-list");
   });
 
   it.each([

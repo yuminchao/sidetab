@@ -34,7 +34,14 @@ type SidebarElements = {
   shortcutSave: HTMLButtonElement;
 };
 
-export async function startSidebar(deps: SidebarDependencies): Promise<() => void> {
+export function startSidebar(deps: SidebarDependencies): Promise<() => void> {
+  return startSidebarInternal(deps);
+}
+
+async function startSidebarInternal(
+  deps: SidebarDependencies,
+  signal?: AbortSignal,
+): Promise<() => void> {
   const elements = getSidebarElements(deps.document);
   const tabStore = new TabStore();
   const tabActions = createTabActions(deps.tabs);
@@ -70,6 +77,23 @@ export async function startSidebar(deps: SidebarDependencies): Promise<() => voi
       onSave: (settings) => shortcutStore.save(settings),
     },
   );
+
+  const cleanup = (): void => {
+    if (!active) {
+      return;
+    }
+    active = false;
+    unsubscribeTabs();
+    elements.list.removeEventListener("click", onListClick);
+    elements.search.removeEventListener("input", onSearchInput);
+    if (searchTimer !== undefined) {
+      clearTimeout(searchTimer);
+      searchTimer = undefined;
+    }
+    tabRenderer.destroy();
+    shortcutRenderer.destroy();
+    signal?.removeEventListener("abort", cleanup);
+  };
 
   const renderFilteredTabs = (): void => {
     if (active) {
@@ -122,6 +146,10 @@ export async function startSidebar(deps: SidebarDependencies): Promise<() => voi
   elements.list.addEventListener("click", onListClick);
   elements.search.addEventListener("input", onSearchInput);
   shortcutRenderer.render(createDefaultShortcutSettings());
+  signal?.addEventListener("abort", cleanup, { once: true });
+  if (signal?.aborted) {
+    cleanup();
+  }
 
   const loadShortcuts = shortcutStore.load().then(
     (settings) => {
@@ -137,7 +165,7 @@ export async function startSidebar(deps: SidebarDependencies): Promise<() => voi
     },
   );
 
-  const loadTabs = loadCurrentWindowTabs(deps).then(
+  const loadTabs = loadCurrentWindowTabs(deps, () => active).then(
     ({ windowId, tabs }) => {
       if (!active) {
         return;
@@ -217,34 +245,29 @@ export async function startSidebar(deps: SidebarDependencies): Promise<() => voi
   );
 
   await Promise.all([loadShortcuts, loadTabs]);
-  deps.document.documentElement.dataset.ready = "true";
+  if (active) {
+    deps.document.documentElement.dataset.ready = "true";
+  }
 
-  return () => {
-    if (!active) {
-      return;
-    }
-    active = false;
-    unsubscribeTabs();
-    elements.list.removeEventListener("click", onListClick);
-    elements.search.removeEventListener("input", onSearchInput);
-    if (searchTimer !== undefined) {
-      clearTimeout(searchTimer);
-      searchTimer = undefined;
-    }
-    tabRenderer.destroy();
-    shortcutRenderer.destroy();
-  };
+  return cleanup;
 }
 
 async function loadCurrentWindowTabs(
   deps: SidebarDependencies,
+  isActive: () => boolean,
 ): Promise<{ windowId: number; tabs: chrome.tabs.Tab[] }> {
   const currentWindow = await deps.windows.getCurrent();
+  if (!isActive()) {
+    throw new Error("侧边栏已关闭");
+  }
   const windowId = currentWindow.id;
   if (typeof windowId !== "number" || !Number.isFinite(windowId) || !Number.isInteger(windowId)) {
     throw new Error("当前窗口缺少有效 ID");
   }
   const tabs = await deps.tabs.query({ windowId });
+  if (!isActive()) {
+    throw new Error("侧边栏已关闭");
+  }
   return { windowId, tabs };
 }
 
@@ -289,19 +312,56 @@ function findTabRow(list: HTMLElement, tabId: number): HTMLElement | undefined {
   );
 }
 
-if (typeof chrome !== "undefined" && typeof document !== "undefined") {
-  void startSidebar({
-    tabs: chrome.tabs,
-    windows: chrome.windows,
-    storage: chrome.storage.local,
-    document,
-  }).then((cleanup) => {
-    window.addEventListener("pagehide", cleanup, { once: true });
-  }).catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : "侧边栏启动失败";
+export function bootstrapSidebar(
+  deps: SidebarDependencies,
+  lifecycleTarget: Pick<Window, "addEventListener" | "removeEventListener">,
+): Promise<void> {
+  const controller = new AbortController();
+  let closed = false;
+  let cleanup: (() => void) | undefined;
+  const onPageHide = (): void => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    controller.abort();
+    cleanup?.();
+    cleanup = undefined;
+  };
+
+  lifecycleTarget.addEventListener("pagehide", onPageHide, { once: true });
+  return startSidebarInternal(deps, controller.signal).then(
+    (resolvedCleanup) => {
+      if (closed) {
+        resolvedCleanup();
+      } else {
+        cleanup = resolvedCleanup;
+      }
+    },
+    (error: unknown) => {
+      lifecycleTarget.removeEventListener("pagehide", onPageHide);
+      reportStartupError(deps.document, error);
+    },
+  );
+}
+
+function reportStartupError(document: Document, error: unknown): void {
+  const message = error instanceof Error ? error.message : "侧边栏启动失败";
+  try {
     const status = document.getElementById("status-message");
     if (status) {
       status.textContent = message;
     }
-  });
+  } catch {
+    // Startup failures must never become an unhandled rejection.
+  }
+}
+
+if (typeof chrome !== "undefined" && typeof document !== "undefined") {
+  void bootstrapSidebar({
+    tabs: chrome.tabs,
+    windows: chrome.windows,
+    storage: chrome.storage.local,
+    document,
+  }, window);
 }
