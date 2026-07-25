@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让标签页和快捷网站优先使用 Chrome `favIconUrl`，逐级回退到网站根 favicon 和首字符，同时统一标签内容对齐、放大标题字体并保持底部工具栏固定。
+**Goal:** 让标签页和快捷网站优先使用 Chrome `favIconUrl`，逐级回退到网站根 favicon 和首字符，同时统一标签内容对齐、支持 12–18px 标题字号设置并保持底部工具栏固定。
 
-**Architecture:** 新增 `favicon-model.ts` 作为纯数据模块，集中处理安全图片 URL、HTTP Origin、根 favicon 候选和同源标签映射。标签与快捷入口渲染器分别维护自己的 `<img>` 回退状态；`sidebar.ts` 在标签快照和事件完成后把内存中的 Origin 映射同步给快捷入口，不增加后台请求或持久缓存。
+**Architecture:** 新增 `favicon-model.ts` 作为纯数据模块，集中处理安全图片 URL、HTTP Origin、根 favicon 候选和同源标签映射。现有设置对象增加向后兼容的 `tabTitleFontSize`，设置渲染器通过回调只更新根节点 CSS 变量；标签与快捷入口渲染器分别维护自己的 `<img>` 回退状态，`sidebar.ts` 在标签快照和事件完成后把内存中的 Origin 映射同步给快捷入口。
 
 **Tech Stack:** TypeScript、Chrome Extensions Manifest V3、原生 DOM、CSS Grid、Vitest、jsdom、esbuild。
 
@@ -172,7 +172,142 @@ git add src/sidepanel/favicon-model.ts tests/favicon-model.test.ts
 git commit -m "feat: model favicon fallback candidates"
 ```
 
-### Task 2: 为标签渲染器加入 favIconUrl 优先回退链和固定占位列
+### Task 2: 增加可持久化的标签标题字号设置
+
+**Files:**
+- Modify: `src/sidepanel/shortcut-model.ts`
+- Modify: `src/sidepanel/shortcut-store.ts`
+- Modify: `src/sidepanel/index.html`
+- Modify: `src/sidepanel/shortcut-renderer.ts`
+- Modify: `src/sidepanel/sidebar.ts`
+- Modify: `src/sidepanel/sidebar.css`
+- Modify: `tests/shortcut-model.test.ts`
+- Modify: `tests/shortcut-store.test.ts`
+- Modify: `tests/shortcut-renderer.test.ts`
+- Modify: `tests/sidebar.test.ts`
+
+- [ ] **Step 1: 写默认值、范围验证和旧数据迁移的失败测试**
+
+扩展模型测试，要求默认设置显式包含字号，旧设置缺少字段时迁移为 14，合法范围为 12 至 18 的整数：
+
+```ts
+expect(createDefaultShortcutSettings().tabTitleFontSize).toBe(14);
+
+const legacy = validateShortcutSettings({
+  enabled: true,
+  items: [{ id: "docs", name: "Docs", url: "https://docs.example/", icon: "letter" }],
+});
+expect(legacy).toMatchObject({ ok: true, value: { tabTitleFontSize: 14 } });
+
+for (const value of [12, 14, 18]) {
+  expect(validateShortcutSettings({ enabled: false, items: [], tabTitleFontSize: value }).ok)
+    .toBe(true);
+}
+for (const value of [11, 19, 14.5, Number.NaN, "14"]) {
+  expect(validateShortcutSettings({ enabled: false, items: [], tabTitleFontSize: value }).ok)
+    .toBe(false);
+}
+```
+
+在 store 测试中断言旧对象读取后返回迁移后的 14，保存对象始终包含 `tabTitleFontSize`。
+
+- [ ] **Step 2: 运行模型和存储测试并确认字段缺失导致失败**
+
+Run: `npm test -- --run tests/shortcut-model.test.ts tests/shortcut-store.test.ts`
+
+Expected: FAIL，默认设置没有 `tabTitleFontSize`，旧对象不会生成迁移字段。
+
+- [ ] **Step 3: 最小实现设置字段与兼容验证**
+
+修改类型和默认值：
+
+```ts
+export const DEFAULT_TAB_TITLE_FONT_SIZE = 14;
+export const MIN_TAB_TITLE_FONT_SIZE = 12;
+export const MAX_TAB_TITLE_FONT_SIZE = 18;
+
+export type ShortcutSettings = {
+  enabled: boolean;
+  items: Shortcut[];
+  tabTitleFontSize: number;
+};
+```
+
+`createDefaultShortcutSettings()` 显式返回 14。`validateShortcutSettings()` 在字段为 `undefined` 时迁移为 14；字段存在时必须为有限整数且处于闭区间 12–18。返回的标准化对象始终包含该字段。更新所有测试工厂和直接构造的设置对象。
+
+- [ ] **Step 4: 写设置弹窗即时预览、取消恢复和保存的失败测试**
+
+在测试 DOM 中增加 `#tab-title-font-size` 数字输入。扩展回调为：
+
+```ts
+onFontSizePreview(size: number): void;
+```
+
+测试流程：`render()` 应用已保存的 14；打开设置后输入 18 立即调用预览 18；点击取消、触发 dialog `cancel` 或未保存 `close` 时恢复 14；重新打开输入 16 并保存后保留 16；Reset 将草稿和预览恢复为 14；无效输入不触发预览且提交显示验证错误。
+
+- [ ] **Step 5: 运行渲染器测试并确认缺少输入与回调**
+
+Run: `npm test -- --run tests/shortcut-renderer.test.ts`
+
+Expected: FAIL，渲染器元素和回调没有字号支持。
+
+- [ ] **Step 6: 实现设置弹窗与预览生命周期**
+
+在 `index.html` 中把弹窗标题改为“设置”，在快捷网站开关之前加入：
+
+```html
+<section class="appearance-settings" aria-labelledby="appearance-settings-title">
+  <h3 id="appearance-settings-title">外观</h3>
+  <label for="tab-title-font-size">标签标题字号</label>
+  <input id="tab-title-font-size" type="number" min="12" max="18" step="1" inputmode="numeric" />
+</section>
+```
+
+`ShortcutRendererElements` 增加 `fontSize`，`ShortcutRendererCallbacks` 增加 `onFontSizePreview`。打开弹窗时用当前保存值建立 draft；数字输入为 12–18 的整数时更新 draft 并调用预览。取消、`cancel` 和未保存 `close` 调用 `onFontSizePreview(current.tabTitleFontSize)`；保存成功先更新 `current`，再关闭，避免 close 恢复旧值。
+
+`copySettings()`、Reset、Submit 全部保留显式字号字段。保存失败保持弹窗和当前预览，用户取消后仍恢复已保存值。
+
+- [ ] **Step 7: 在侧边栏根节点应用 CSS 变量**
+
+`SidebarElements` 获取字号输入并传给渲染器；回调只执行：
+
+```ts
+onFontSizePreview(size) {
+  deps.document.documentElement.style.setProperty(
+    "--tab-title-font-size",
+    `${size}px`,
+  );
+},
+```
+
+CSS 提供无脚本回退并只作用于标题：
+
+```css
+:root {
+  --tab-title-font-size: 14px;
+}
+
+.tab-title {
+  font-size: var(--tab-title-font-size);
+}
+```
+
+- [ ] **Step 8: 写并验证侧边栏持久化集成测试**
+
+在 `tests/sidebar.test.ts` 断言旧存储加载后根变量为 `14px`；设置为 17 保存后 `chrome.storage.local.set` 收到 `tabTitleFontSize: 17`；重新启动侧边栏后变量仍为 `17px`。同时断言搜索框和设置弹窗的计算字号规则未引用该变量。
+
+Run: `npm test -- --run tests/shortcut-model.test.ts tests/shortcut-store.test.ts tests/shortcut-renderer.test.ts tests/sidebar.test.ts`
+
+Expected: PASS。
+
+- [ ] **Step 9: 提交字号设置功能**
+
+```powershell
+git add src/sidepanel/shortcut-model.ts src/sidepanel/shortcut-store.ts src/sidepanel/index.html src/sidepanel/shortcut-renderer.ts src/sidepanel/sidebar.ts src/sidepanel/sidebar.css tests/shortcut-model.test.ts tests/shortcut-store.test.ts tests/shortcut-renderer.test.ts tests/sidebar.test.ts
+git commit -m "feat: configure tab title font size"
+```
+
+### Task 3: 为标签渲染器加入 favIconUrl 优先回退链和固定占位列
 
 **Files:**
 - Modify: `src/sidepanel/tab-renderer.ts`
@@ -270,7 +405,7 @@ git add src/sidepanel/tab-renderer.ts tests/tab-renderer.test.ts
 git commit -m "feat: add tab favicon fallback chain"
 ```
 
-### Task 3: 让快捷入口复用同源标签 favicon 并改为无边框图标
+### Task 4: 让快捷入口复用同源标签 favicon 并改为无边框图标
 
 **Files:**
 - Modify: `src/sidepanel/shortcut-renderer.ts`
@@ -331,7 +466,7 @@ let faviconsByOrigin: ReadonlyMap<string, string> = new Map();
 ```ts
 expect(css).toMatch(/\.shortcut-button\s*{[^}]*border(?:-color)?:\s*(?:0|transparent)[^}]*background:\s*transparent/s);
 expect(css).toMatch(/\.shortcut-button\s*{[^}]*width:\s*32px[^}]*height:\s*32px/s);
-expect(css).toMatch(/\.tab-title\s*{[^}]*font-family:\s*"Microsoft YaHei",\s*"微软雅黑"[^}]*font-size:\s*14px/s);
+expect(css).toMatch(/\.tab-title\s*{[^}]*font-family:\s*"Microsoft YaHei",\s*"微软雅黑"[^}]*font-size:\s*var\(--tab-title-font-size\)/s);
 ```
 
 - [ ] **Step 5: 运行 CSS 测试并确认失败**
@@ -363,7 +498,7 @@ Expected: FAIL，快捷按钮仍继承可见边框，标签标题没有 14px 微
 
 .tab-title {
   font-family: "Microsoft YaHei", "微软雅黑", "Segoe UI", system-ui, sans-serif;
-  font-size: 14px;
+  font-size: var(--tab-title-font-size);
 }
 ```
 
@@ -380,7 +515,7 @@ git add src/sidepanel/shortcut-renderer.ts tests/shortcut-renderer.test.ts src/s
 git commit -m "feat: align tab content and render shortcut favicons"
 ```
 
-### Task 4: 将标签 favicon 映射同步给快捷入口
+### Task 5: 将标签 favicon 映射同步给快捷入口
 
 **Files:**
 - Modify: `src/sidepanel/sidebar.ts`
@@ -447,7 +582,7 @@ git add src/sidepanel/sidebar.ts tests/sidebar.test.ts
 git commit -m "feat: sync tab favicons to shortcuts"
 ```
 
-### Task 5: 更新 CSP、发布契约和隐私说明
+### Task 6: 更新 CSP、发布契约和隐私说明
 
 **Files:**
 - Modify: `manifest.json`
@@ -520,7 +655,7 @@ git add manifest.json scripts/check-dist.mjs scripts/build.mjs scripts/release-f
 git commit -m "chore: allow website favicon images in release"
 ```
 
-### Task 6: 全量验证、视觉验收和重新打包
+### Task 7: 全量验证、视觉验收和重新打包
 
 **Files:**
 - Modify only if verification reveals a scoped defect.
@@ -545,6 +680,8 @@ Expected: 类型检查通过，全部 Vitest 测试通过，构建成功，`dist
 - 固定与普通标签均为 30px，favicon 和标题列完全对齐
 - 普通标签的图钉占位不可见且不留下额外文字
 - 标题为 14px 微软雅黑优先字体，长标题单行省略
+- 设置弹窗可在 12–18px 间即时预览；取消恢复，保存后重新载入仍生效
+- 12px 与 18px 均不改变 30px 行高，不造成垂直裁切
 - 快捷入口只有图标、无可见边框，失败时为首字符
 - 搜索过滤正常，设置弹窗可打开
 - 搜索框和设置按钮始终贴住整个视口底边
@@ -570,4 +707,4 @@ git diff --check
 Get-FileHash -Algorithm SHA256 release/sidetab-lite-0.1.0.zip
 ```
 
-Expected: 工作树干净，`git diff --check` 无输出，显示最终 ZIP SHA-256。若视觉验收发现缺陷，必须先按测试驱动方式增加失败测试、最小修复、重新执行 Task 6 全部步骤并单独提交；不得把生成的 `dist/` 或 `release/` 加入 Git。
+Expected: 工作树干净，`git diff --check` 无输出，显示最终 ZIP SHA-256。若视觉验收发现缺陷，必须先按测试驱动方式增加失败测试、最小修复、重新执行 Task 7 全部步骤并单独提交；不得把生成的 `dist/` 或 `release/` 加入 Git。
