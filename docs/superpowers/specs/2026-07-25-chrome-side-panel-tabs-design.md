@@ -1,75 +1,99 @@
-# Chrome Side Panel Tabs Extension Design
+# Chrome 左侧标签栏扩展设计文档
 
-## Summary
+## 概述
 
-Build a Chrome Manifest V3 extension that provides an Edge-like left-side tab list through Chrome's official Side Panel API. The first release prioritizes performance, low permissions, store-readiness, and a narrow feature set: view, search, switch, and close tabs in the current Chrome window.
+构建一个基于 Chrome Manifest V3 的扩展，通过 Chrome 官方 Side Panel API 提供类似 Edge 的左侧标签列表。首个版本以性能、最小权限和 Chrome 应用商店上架准备为优先，只实现当前窗口标签页的查看、搜索、切换和关闭，以及一组可配置的网站快捷入口。
 
-The extension does not replace Chrome's native top tab strip, inject UI into webpages, collect browsing data, or use remote code.
+扩展不会替换 Chrome 顶部原生标签栏，不会向网页注入界面，不会收集浏览数据，也不会执行远程代码。
 
-## Goals
+## 目标
 
-- Provide a persistent side panel showing tabs from the current Chrome window.
-- Make common tab actions fast: search, switch, close, and visually identify the active or pinned tab.
-- Keep startup, memory, and runtime overhead low.
-- Use the smallest practical permission set for Chrome Web Store review.
-- Create a simple architecture that can later support richer Edge-like behavior without rewriting the extension.
+- 在常驻侧边栏中显示当前 Chrome 窗口的标签页。
+- 快速完成搜索、切换和关闭，并清楚标识当前标签页和固定标签页。
+- 在侧边栏顶部提供可配置、可整体关闭的网站图标快捷入口。
+- 默认提供 OpenAI、Google 和 GitHub 三个快捷网站。
+- 保持较低的启动耗时、内存占用和运行时开销。
+- 使用满足 Chrome 应用商店审核要求的最小权限集。
+- 保持架构简单，为后续扩展更多 Edge 风格功能留出空间。
 
-## Non-goals for the MVP
+## MVP 不包含的功能
 
-- Replacing or hiding Chrome's native top tab strip.
-- Injecting a floating sidebar into every webpage.
-- Tab suspension, freezing, or memory management.
-- Cloud sync, accounts, telemetry, analytics, or server communication.
-- Session restore, workspaces, or cross-device state.
-- Complex tab grouping, tree tabs, or automatic domain clustering.
-- A React, Vue, or heavy UI framework implementation.
+- 替换或隐藏 Chrome 顶部原生标签栏。
+- 向每个网页注入悬浮侧边栏。
+- 标签页休眠、冻结或内存管理。
+- 云同步、账号、遥测、分析或服务器通信。
+- 会话恢复、工作区或跨设备状态。
+- 复杂标签分组、树状标签或自动按域名聚类。
+- 自动抓取网站图标或请求第三方 favicon 服务。
+- 使用 React、Vue 或其他重型 UI 框架。
 
-## Product behavior
+## 产品行为
 
-The user opens the extension's side panel from the extension icon or Chrome's side panel controls. The panel shows a compact vertical list of tabs in the current window.
+用户通过扩展图标或 Chrome 的侧边栏控件打开扩展。快捷网站功能默认关闭；关闭时，面板从上到下仅包含搜索框和当前窗口标签列表。用户开启快捷网站后，快捷网站区显示在搜索框上方。
 
-Each tab row includes:
+### 快捷网站区
 
-- Favicon or a fallback marker.
-- Page title, with ellipsis for overflow.
-- Domain or shortened URL.
-- Active state indicator.
-- Pinned state indicator when applicable.
-- Close button.
+- 以紧凑的单行图标展示快捷网站，空间不足时允许横向滚动，不挤压标签列表。
+- 提供快捷网站总开关，默认关闭。
+- 总开关关闭时不渲染快捷网站区，也不为该区域保留布局空间。
+- 默认包含 OpenAI、Google 和 GitHub。
+- 点击图标后，在当前窗口新建并激活对应标签页。
+- 提供一个设置入口，用于新增、编辑、删除和调整快捷网站顺序。
+- 支持恢复默认配置。
+- 每个快捷网站包含名称、URL 和图标标识。
+- 默认网站使用随扩展打包的本地图标；自定义网站优先使用用户选择的内置图标或文字首字母占位，MVP 不访问远程 favicon 服务。
+- 开关状态和网站配置保存在 `chrome.storage.local`，只存储快捷网站设置，不存储浏览历史或标签页快照。
+- MVP 最多保存 12 个快捷网站，避免工具区无限增长。
 
-Supported MVP interactions:
+### 标签列表
 
-- Click a tab row to activate that tab.
-- Click the close button to close a tab.
-- Type in the search input to filter tabs by title, URL, or domain.
-- See tab updates reflected when tabs are created, removed, activated, moved, or updated.
-- Use basic keyboard navigation from the search field if implementation cost stays low.
+每个标签行包含：
 
-## Recommended implementation approach
+- favicon 或回退标识。
+- 页面标题，超出宽度时显示省略号。
+- 域名或缩短后的 URL。
+- 当前激活状态标识。
+- 固定状态标识。
+- 关闭按钮。
 
-Use:
+MVP 支持以下操作：
 
-- Manifest V3.
-- Chrome Side Panel API.
-- Vanilla TypeScript.
-- Native DOM rendering.
-- Plain CSS.
-- A small build pipeline only if needed for TypeScript bundling.
+- 点击标签行激活该标签页。
+- 点击关闭按钮关闭标签页。
+- 在搜索框中按标题、URL 或域名筛选标签页。
+- 标签页创建、删除、激活、移动或内容更新时，侧边栏同步更新。
+- 搜索框保留浏览器默认键盘可用性；更完整的键盘导航延后到 v1.1。
 
-Avoid:
+## 推荐实现方案
 
-- Content scripts.
-- Host permissions such as `<all_urls>`.
-- Remote JavaScript.
-- Long-running polling.
-- Large component frameworks in the MVP.
+采用：
 
-This keeps the extension small, predictable, and easy to explain during Chrome Web Store review.
+- Manifest V3。
+- Chrome Side Panel API。
+- 原生 TypeScript。
+- 原生 DOM 渲染。
+- 普通 CSS。
+- 仅在 TypeScript 构建确有需要时使用轻量构建流程。
 
-## Extension structure
+避免：
+
+- Content Scripts。
+- `<all_urls>` 等主机权限。
+- 远程 JavaScript 或远程图标请求。
+- 长时间轮询。
+- 大型组件框架。
+
+这套方案体积小、行为可预测，也便于在 Chrome 应用商店审核时解释权限和数据使用方式。
+
+## 扩展结构
 
 ```text
 manifest.json
+assets/
+  shortcuts/
+    openai.png
+    google.png
+    github.png
 src/
   background/
     service-worker.ts
@@ -80,72 +104,101 @@ src/
     tab-store.ts
     tab-renderer.ts
     tab-actions.ts
+    shortcut-store.ts
+    shortcut-renderer.ts
+    shortcut-actions.ts
 ```
 
 ### `manifest.json`
 
-Declares the MV3 extension, side panel entry, service worker, action icon, and minimal permissions.
+声明 MV3 扩展、侧边栏入口、Service Worker、扩展操作图标和最小权限。
 
-Initial permissions:
+初始权限：
 
-- `sidePanel`: display the side panel UI.
-- `tabs`: read and manage browser tabs.
+- `sidePanel`：显示侧边栏界面。
+- `tabs`：读取和管理浏览器标签页。
+- `storage`：在本地保存用户配置的快捷网站。
 
-Avoid `storage` until there is a real persisted setting. Avoid host permissions in the MVP.
+MVP 不申请任何主机权限。
 
 ### `src/background/service-worker.ts`
 
-Responsibilities:
+职责：
 
-- Configure the extension action to open the side panel.
-- Keep background work minimal.
-- Avoid storing tab snapshots in the service worker.
+- 配置点击扩展图标时打开侧边栏。
+- 保持后台工作量最小。
+- 不保存标签页快照。
 
-The service worker should not be the source of truth for tab state because MV3 service workers are event-driven and may stop between events.
+MV3 Service Worker 由事件驱动，并可能在事件之间停止运行，因此不能作为标签页状态的数据源。
 
 ### `src/sidepanel/sidebar.ts`
 
-Responsibilities:
+职责：
 
-- Initialize side panel UI.
-- Query tabs for the current window when the panel loads.
-- Wire Chrome tab events to the tab store.
-- Wire UI events such as search input and clicks.
-- Coordinate rendering without owning all low-level DOM details.
+- 初始化侧边栏界面。
+- 面板加载时查询当前窗口标签页。
+- 连接 Chrome 标签事件与标签状态仓库。
+- 加载快捷网站配置。
+- 连接搜索、点击和快捷网站设置等界面事件。
+- 协调渲染，但不承担底层 DOM 细节。
 
 ### `src/sidepanel/tab-store.ts`
 
-Responsibilities:
+职责：
 
-- Maintain tab state in memory while the side panel is open.
-- Use a `Map<number, TabViewModel>` keyed by tab ID.
-- Track current active tab ID and current search query.
-- Expose simple methods for initialize, add, update, remove, move, activate, and filter.
+- 在侧边栏打开期间维护内存中的标签页状态。
+- 使用以标签页 ID 为键的 `Map<number, TabViewModel>`。
+- 记录当前激活标签页 ID 和搜索条件。
+- 提供初始化、新增、更新、删除、移动、激活和筛选方法。
 
-The store is intentionally in-memory. Rebuild it from `chrome.tabs.query` whenever the side panel opens.
+标签状态只保存在内存中。每次打开侧边栏时，都通过 `chrome.tabs.query` 重建。
 
 ### `src/sidepanel/tab-renderer.ts`
 
-Responsibilities:
+职责：
 
-- Render the tab list.
-- Update individual tab rows when possible.
-- Avoid full-list redraws for small tab updates.
-- Use `DocumentFragment` for initial render and large filtered render.
+- 渲染标签列表。
+- 尽可能只更新受影响的标签行。
+- 小范围变化不重绘整个列表。
+- 首次渲染和较大筛选结果使用 `DocumentFragment`。
 
-For the MVP, a full redraw after search is acceptable if it stays fast for at least 100 tabs. Incremental row updates should be used for common tab events such as title, favicon, active state, and close.
+MVP 在搜索时允许全量重绘，但必须保证至少 100 个标签页时仍保持流畅。标题、favicon、激活状态等常见变化使用增量更新。
 
 ### `src/sidepanel/tab-actions.ts`
 
-Responsibilities:
+职责：
 
-- Wrap Chrome tab operations:
-  - `chrome.tabs.update(tabId, { active: true })`
-  - `chrome.tabs.remove(tabId)`
-  - optional future `chrome.tabs.move`
-- Normalize errors from closed or unavailable tabs.
+- 封装 Chrome 标签操作，包括 `chrome.tabs.update`、`chrome.tabs.remove` 和 `chrome.tabs.create`。
+- 统一处理标签页已关闭或不可用等错误。
 
-## Data model
+### `src/sidepanel/shortcut-store.ts`
+
+职责：
+
+- 从 `chrome.storage.local` 读取和保存快捷网站配置。
+- 首次运行时返回关闭状态，以及默认的 OpenAI、Google 和 GitHub 配置。
+- 保存和读取快捷网站总开关状态。
+- 校验名称、URL、数量和顺序。
+- 支持恢复默认配置。
+
+### `src/sidepanel/shortcut-renderer.ts`
+
+职责：
+
+- 渲染快捷网站图标和设置入口。
+- 使用事件委托处理点击。
+- 图标加载失败时显示名称首字母占位。
+- 控制设置界面的打开、保存、取消和错误提示状态。
+
+### `src/sidepanel/shortcut-actions.ts`
+
+职责：
+
+- 校验 URL，仅接受 `http:` 和 `https:` 地址。
+- 点击快捷网站时调用 `chrome.tabs.create({ url, active: true })`。
+- 拒绝 `javascript:`、`data:`、`file:` 等不适合作为快捷入口的协议。
+
+## 数据模型
 
 ```ts
 type TabViewModel = {
@@ -159,23 +212,37 @@ type TabViewModel = {
   active: boolean;
   pinned: boolean;
 };
+
+type Shortcut = {
+  id: string;
+  name: string;
+  url: string;
+  icon: "openai" | "google" | "github" | "letter";
+};
+
+type ShortcutSettings = {
+  enabled: boolean;
+  items: Shortcut[];
+};
 ```
 
-Only fields required for rendering and MVP actions should be stored.
+只存储渲染和 MVP 操作所必需的字段。快捷网站 ID 在创建时生成，并在排序和编辑时保持稳定。
 
-## Data flow
+## 数据流
 
-1. Side panel loads.
-2. `sidebar.ts` calls `chrome.windows.getCurrent()` and `chrome.tabs.query({ windowId })`.
-3. `tab-store.ts` creates an in-memory tab map.
-4. `tab-renderer.ts` renders the current list.
-5. Chrome tab events update the store.
-6. Renderer patches affected rows or redraws the filtered list.
-7. User actions call `tab-actions.ts`, then Chrome tab events reconcile final state.
+1. 侧边栏加载。
+2. `sidebar.ts` 调用 `chrome.windows.getCurrent()` 和 `chrome.tabs.query({ windowId })`。
+3. `tab-store.ts` 创建内存标签映射。
+4. `shortcut-store.ts` 从本地存储加载快捷网站设置；无配置时使用关闭状态和默认网站列表。
+5. 标签列表完成首次渲染；仅当 `enabled` 为 `true` 时渲染快捷网站区。
+6. Chrome 标签事件更新标签状态仓库。
+7. 渲染器局部更新受影响的标签行，或重绘筛选后的列表。
+8. 用户的标签操作调用 `tab-actions.ts`，再由 Chrome 事件校准最终状态。
+9. 用户切换总开关或保存快捷网站设置后，先校验数据，再写入本地存储并按开关状态显示或移除快捷网站区。
 
-## Event handling
+## 标签事件处理
 
-Listen while the side panel page is open:
+侧边栏打开期间监听：
 
 - `chrome.tabs.onCreated`
 - `chrome.tabs.onRemoved`
@@ -185,100 +252,115 @@ Listen while the side panel page is open:
 - `chrome.tabs.onAttached`
 - `chrome.tabs.onDetached`
 
-Each event should ignore tabs outside the panel's current window unless cross-window support is intentionally added later.
+除非后续明确增加跨窗口支持，否则所有事件都忽略不属于当前窗口的标签页。
 
-## Performance requirements
+## 性能要求
 
-Target behavior:
+目标：
 
-- Side panel becomes interactive in under 100 ms after its HTML loads on a typical modern machine.
-- Smooth list interaction with 100 tabs.
-- No content script overhead on webpages.
-- No polling loops.
-- No network requests.
-- No framework hydration cost.
+- HTML 加载后，在常见现代设备上 100 毫秒内可交互。
+- 100 个标签页时列表滚动、搜索和切换保持流畅。
+- 快捷网站区初始化不产生网络请求。
+- 不在网页上运行 Content Script。
+- 不使用轮询。
+- 不产生框架 hydration 开销。
 
-Implementation rules:
+实现规则：
 
-- Initialize only when the side panel page opens.
-- Keep service worker work minimal.
-- Use event-driven tab updates.
-- Debounce search input by roughly 80-120 ms.
-- Normalize strings for search once per tab update rather than on every keystroke if needed.
-- Use event delegation for tab row clicks instead of one listener per button where practical.
-- Avoid storing large tab history or snapshots.
+- 仅在侧边栏打开时初始化。
+- Service Worker 只承担最小配置职责。
+- 标签页变化完全由事件驱动。
+- 搜索输入使用约 80 至 120 毫秒防抖。
+- 必要时在标签更新时预先生成搜索用规范化字符串，避免每次按键重复处理。
+- 标签行和快捷图标使用事件委托，避免为每个元素绑定独立监听器。
+- 不保存大型标签历史或快照。
+- 快捷网站配置最多 12 项，渲染成本保持恒定且可预测。
 
-## Privacy and Chrome Web Store readiness
+## 隐私与 Chrome 应用商店准备
 
-The MVP should make these claims true:
+MVP 必须满足以下声明：
 
-- The extension does not collect user data.
-- The extension does not transmit browsing history, tab titles, or URLs.
-- The extension does not use analytics.
-- The extension does not execute remotely hosted code.
-- The extension only requests permissions required for side panel tab management.
+- 扩展不收集用户数据。
+- 扩展不传输浏览历史、标签标题、URL 或快捷网站配置。
+- 扩展不使用分析工具。
+- 扩展不执行远程托管代码。
+- 扩展仅申请侧边栏标签管理和本地设置所需权限。
 
-The Chrome Web Store listing should explain:
+应用商店说明应明确：
 
-- `tabs` permission is used to show and manage the user's current-window tab list.
-- `sidePanel` permission is used to display the extension UI in Chrome's side panel.
+- `tabs` 权限用于显示和管理用户当前窗口的标签列表，以及打开用户主动点击的快捷网站。
+- `sidePanel` 权限用于在 Chrome 侧边栏中显示扩展界面。
+- `storage` 权限仅用于在用户设备本地保存快捷网站设置。
 
-If later versions add sync, analytics, cloud backup, or host permissions, the privacy policy and permission explanation must be revisited before release.
+如果后续版本加入同步、分析、云备份或主机权限，发布前必须重新评估隐私政策和权限说明。
 
-## Error handling
+## 错误处理
 
-Expected errors:
+预期错误：
 
-- A tab is closed before an action completes.
-- A tab moves to another window.
-- A favicon URL fails to load.
-- A Chrome tab event arrives out of order.
-- The side panel is opened in a context where no normal window is available.
+- 操作完成前标签页已关闭。
+- 标签页被移动到另一个窗口。
+- favicon 或快捷图标加载失败。
+- Chrome 标签事件到达顺序异常。
+- 当前环境中不存在普通浏览器窗口。
+- 用户输入空名称、无效 URL、重复快捷项或超过 12 项。
+- 本地设置读取或写入失败。
 
-Handling:
+处理方式：
 
-- Ignore stale tab events safely.
-- Remove missing tabs from the store.
-- Use fallback favicon visuals.
-- Show a compact empty state when there are no tabs or no search results.
-- Log development-only warnings, but avoid noisy production console output.
+- 安全忽略过期的标签事件。
+- 从仓库移除已不存在的标签页。
+- 图标失败时使用稳定的文字占位。
+- 没有标签页或没有搜索结果时显示紧凑空状态。
+- 设置校验失败时保留用户输入并就地显示简短错误信息。
+- 本地存储失败时不覆盖当前内存配置，并提示保存失败。
+- 开发环境可记录警告，生产版本避免产生大量控制台输出。
 
-## Testing strategy
+## 测试策略
 
-Manual verification for MVP:
+MVP 手动验证：
 
-- Load unpacked extension in Chrome.
-- Open side panel through the extension action.
-- Verify current-window tabs render.
-- Open, close, move, pin, and activate tabs.
-- Search by title, domain, and URL.
-- Test with 1 tab, 20 tabs, and 100+ tabs.
-- Confirm no UI is injected into webpages.
-- Confirm no network requests are made by the extension.
+- 在 Chrome 中加载未打包扩展。
+- 通过扩展图标打开侧边栏。
+- 确认当前窗口标签页正确渲染。
+- 打开、关闭、移动、固定和激活标签页。
+- 按标题、域名和 URL 搜索。
+- 分别测试 1、20 和 100 个以上标签页。
+- 确认开启快捷网站功能后显示 OpenAI、Google 和 GitHub。
+- 确认首次安装时快捷网站功能默认关闭，快捷网站区不占布局空间。
+- 确认开启后显示 OpenAI、Google 和 GitHub，关闭后立即隐藏。
+- 确认重新打开侧边栏后仍保持用户设置的开关状态。
+- 确认点击快捷图标会在当前窗口新建并激活标签页。
+- 测试新增、编辑、删除、排序和恢复默认快捷网站。
+- 测试无效协议、重复配置、数量上限和存储失败。
+- 确认没有向网页注入界面。
+- 确认扩展不发出网络请求。
 
-Automated or semi-automated checks:
+自动化或半自动检查：
 
-- TypeScript compile.
-- Lint or static check if tooling is added.
-- Small unit tests for URL/domain normalization and tab filtering if a test runner is added.
+- TypeScript 编译。
+- 如果加入相应工具，执行 lint 或静态检查。
+- 为 URL 校验、域名规范化、标签筛选和快捷配置校验编写小型单元测试。
 
-## Future extension path
+## 后续演进
 
-After the MVP is stable:
+- v1.1：完整键盘导航、拖动调整标签顺序、快捷网站拖动排序。
+- v1.2：最近关闭的标签页和多窗口感知。
+- v1.3：Chrome 标签组支持。
+- v1.4：重复标签检测和域名分组。
+- v2：工作区、会话保存与恢复、可选同步。
 
-- v1.1: keyboard shortcuts, settings page, drag-to-reorder.
-- v1.2: recent closed tabs and multi-window awareness.
-- v1.3: Chrome tab group support.
-- v1.4: duplicate tab detection and domain grouping.
-- v2: workspaces, session save/restore, optional sync.
+每项新功能都应遵循 MVP 原则：只有当用户价值足够明确时，才增加权限或持久后台工作。
 
-Each new feature should preserve the MVP rule: do not add permissions or persistent background work unless the user-facing value clearly justifies it.
+## 实现默认值
 
-## Implementation defaults
+- 暂定产品名：`SideTab Lite`。
+- 默认快捷网站：OpenAI（`https://chatgpt.com/`）、Google（`https://www.google.com/`）和 GitHub（`https://github.com/`）。
+- 快捷网站总开关默认关闭；关闭时不渲染快捷网站区。
+- 快捷网站点击行为：在当前窗口新建并激活标签页。
+- 快捷网站最多 12 个，配置保存在 `chrome.storage.local`。
+- 除浏览器默认焦点行为和搜索框可用性外，完整键盘导航延后到 v1.1。
+- 使用 TypeScript 和最小构建步骤。
+- MVP 采用中性色、紧凑布局和本地静态资源，不使用远程品牌素材。
 
-- Working product name: `SideTab Lite`.
-- Keyboard navigation is deferred to v1.1 except for the browser's default focus behavior and search input usability.
-- Use TypeScript with a minimal build step.
-- Keep branding plain for the MVP: neutral colors, compact layout, and no custom remote assets.
-
-These defaults can change later, but they should be treated as the baseline for the first implementation plan.
+这些默认值作为首个实现计划的基线，后续可以通过独立设计变更进行调整。
