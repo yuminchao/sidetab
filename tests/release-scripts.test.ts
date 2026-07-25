@@ -1,5 +1,6 @@
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { unzipSync } from "fflate";
@@ -66,6 +67,7 @@ async function createReleaseFixture(): Promise<{ root: string; dist: string; rel
     manifest_version: 3,
     name: "SideTab Lite Test",
     version: "0.1.0",
+    description: "Release validation fixture",
     minimum_chrome_version: "114",
     permissions: ["sidePanel", "tabs", "storage"],
     content_security_policy: {
@@ -165,10 +167,46 @@ describe("dist validation", () => {
   });
 
   it.each([
+    ["optional_host_permissions", ["https://example.com/*"]],
+    ["externally_connectable", { matches: ["https://example.com/*"] }],
+    ["web_accessible_resources", []],
+  ])("rejects an unreviewed manifest top-level key: %s", async (key, value) => {
+    const fixture = await createReleaseFixture();
+    const manifestPath = join(fixture.dist, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest[key] = value;
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    const { checkDist } = await loadCheckDist();
+
+    await expect(checkDist(fixture.dist)).rejects.toThrow(/manifest|key|unexpected|exact/i);
+  });
+
+  it("rejects a manifest missing the required description key", async () => {
+    const fixture = await createReleaseFixture();
+    const manifestPath = join(fixture.dist, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    delete manifest.description;
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    const { checkDist } = await loadCheckDist();
+
+    await expect(checkDist(fixture.dist)).rejects.toThrow(/manifest|key|missing|exact/i);
+  });
+
+  it.each([
     ['<img src="https://example.com/tracker.png">', "remote image"],
     ['<iframe src="./sidebar.js"></iframe>', "iframe"],
     ["<script>alert(1)</script>", "inline script"],
     ['<main onclick="alert(1)"></main>', "event attribute"],
+    ['<style>@import "https://example.com/theme.css";</style>', "style element import"],
+    [
+      '<style>.x { background: url("https://example.com/image.png"); }</style>',
+      "style element remote URL",
+    ],
+    ['<main style="background: url(./missing.png)"></main>', "style attribute URL"],
+    [
+      '<meta http-equiv=" ReFrEsH " content="0; url=https://example.com/">',
+      "meta refresh",
+    ],
   ])("rejects unsafe HTML: %s", async (unsafeHtml) => {
     const fixture = await createReleaseFixture();
     await overwrite(
@@ -178,7 +216,9 @@ describe("dist validation", () => {
     );
     const { checkDist } = await loadCheckDist();
 
-    await expect(checkDist(fixture.dist)).rejects.toThrow(/html|script|iframe|event|reference/i);
+    await expect(checkDist(fixture.dist)).rejects.toThrow(
+      /html|css|script|iframe|event|reference|import|refresh/i,
+    );
   });
 
   it.each([
@@ -199,8 +239,14 @@ describe("dist validation", () => {
     ["new WebSocket(url);", "WebSocket"],
     ["new XMLHttpRequest();", "XMLHttpRequest"],
     ["new EventSource(url);", "EventSource"],
+    ["navigator.sendBeacon(url, data);", "sendBeacon"],
+    ["const { sendBeacon } = navigator; sendBeacon(url);", "destructured sendBeacon"],
+    ["const beacon = navigator.sendBeacon; beacon(url);", "aliased member sendBeacon"],
     ["eval(code);", "eval"],
     ["new Function(code);", "Function"],
+    ['import "./missing.js";', "static import"],
+    ['export { value } from "./missing.js";', "named re-export"],
+    ['export * from "./missing.js";', "export all"],
   ])("rejects unsafe JavaScript AST usage: %s", async (unsafeJavaScript) => {
     const fixture = await createReleaseFixture();
     await overwrite(fixture.dist, "sidepanel/sidebar.js", unsafeJavaScript);
@@ -259,6 +305,21 @@ describe("release packaging", () => {
       createHash("sha256").update(second).digest("hex"),
     );
     expect(Object.keys(unzipSync(first)).sort()).toEqual(expectedFiles);
+  });
+
+  it("creates the same ZIP in UTC, Shanghai, and Los Angeles", async () => {
+    const helper = resolve(import.meta.dirname, "helpers/package-release.mjs");
+    const hashes: Record<string, string> = {};
+
+    for (const timeZone of ["UTC", "Asia/Shanghai", "America/Los_Angeles"]) {
+      const fixture = await createReleaseFixture();
+      hashes[timeZone] = execFileSync(process.execPath, [helper, fixture.root], {
+        encoding: "utf8",
+        env: { ...process.env, TZ: timeZone },
+      }).trim();
+    }
+
+    expect(new Set(Object.values(hashes)).size, JSON.stringify(hashes)).toBe(1);
   });
 
   it("overwrites only the target ZIP and preserves other release files", async () => {

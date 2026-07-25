@@ -4,9 +4,8 @@ import { pathToFileURL } from "node:url";
 import { parse as parseJavaScript } from "acorn";
 import { simple as walkJavaScript } from "acorn-walk";
 import { parse as parseHtml } from "parse5";
-import postcss from "postcss";
-import valueParser from "postcss-value-parser";
 import sharp from "sharp";
+import { validateCss } from "./release-css.mjs";
 import {
   EXPECTED_FILES,
   assertExactReleaseFiles,
@@ -14,6 +13,19 @@ import {
 } from "./release-files.mjs";
 
 const expectedFileSet = new Set(EXPECTED_FILES);
+const expectedManifestKeys = [
+  "action",
+  "background",
+  "content_security_policy",
+  "description",
+  "icons",
+  "manifest_version",
+  "minimum_chrome_version",
+  "name",
+  "permissions",
+  "side_panel",
+  "version",
+].sort();
 const forbiddenJavaScriptApis = new Set([
   "eval",
   "Function",
@@ -21,6 +33,7 @@ const forbiddenJavaScriptApis = new Set([
   "XMLHttpRequest",
   "WebSocket",
   "EventSource",
+  "sendBeacon",
 ]);
 const forbiddenHtmlElements = new Set(["iframe", "object", "embed"]);
 const htmlUrlAttributes = new Set([
@@ -78,7 +91,14 @@ async function validateHtml(distDirectory, htmlPath, source) {
       for (const attribute of node.attrs ?? []) {
         const name = attribute.name.toLowerCase();
         assert(!name.startsWith("on"), `inline event attribute ${name} is forbidden in ${htmlPath}`);
-        if (name === "srcset") {
+        if (name === "style") {
+          await validateCss(attribute.value, {
+            declarationList: true,
+            fromFile: `${htmlPath} style attribute`,
+            resolveReference: (reference) =>
+              assertExpectedReference(distDirectory, htmlPath, reference),
+          });
+        } else if (name === "srcset") {
           for (const candidate of attribute.value.split(",")) {
             const reference = candidate.trim().split(/\s+/, 1)[0];
             await assertExpectedReference(distDirectory, htmlPath, reference);
@@ -96,6 +116,21 @@ async function validateHtml(distDirectory, htmlPath, source) {
           .map((child) => child.value ?? "")
           .join("");
         assert(inlineContent.trim() === "", `inline script content is forbidden in ${htmlPath}`);
+      } else if (tagName === "style") {
+        const styleContent = (node.childNodes ?? [])
+          .filter((child) => child.nodeName === "#text")
+          .map((child) => child.value ?? "")
+          .join("");
+        await validateCss(styleContent, {
+          fromFile: `${htmlPath} style element`,
+          resolveReference: (reference) =>
+            assertExpectedReference(distDirectory, htmlPath, reference),
+        });
+      } else if (
+        tagName === "meta" &&
+        getAttribute(node, "http-equiv")?.trim().toLowerCase() === "refresh"
+      ) {
+        throw new Error(`meta refresh is forbidden in ${htmlPath}`);
       }
     }
 
@@ -108,28 +143,6 @@ async function validateHtml(distDirectory, htmlPath, source) {
   }
 
   await visit(document);
-}
-
-async function validateCss(distDirectory, cssPath, source) {
-  const root = postcss.parse(source, { from: cssPath });
-  root.walkAtRules((rule) => {
-    assert(rule.name.toLowerCase() !== "import", `CSS @import is forbidden in ${cssPath}`);
-  });
-
-  const values = [];
-  root.walkDecls((declaration) => values.push(declaration.value));
-  root.walkAtRules((rule) => values.push(rule.params));
-  for (const value of values) {
-    const references = [];
-    valueParser(value).walk((node) => {
-      if (node.type === "function" && node.value.toLowerCase() === "url") {
-        references.push(valueParser.stringify(node.nodes).trim().replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, "$1$2"));
-      }
-    });
-    for (const reference of references) {
-      await assertExpectedReference(distDirectory, cssPath, reference);
-    }
-  }
 }
 
 function getCalleeName(node) {
@@ -168,6 +181,22 @@ function validateJavaScript(javaScriptPath, source) {
     ImportExpression() {
       throw new Error(`dynamic import is forbidden in ${javaScriptPath}`);
     },
+    ImportDeclaration() {
+      throw new Error(`static import is forbidden in ${javaScriptPath}`);
+    },
+    ExportAllDeclaration() {
+      throw new Error(`export source is forbidden in ${javaScriptPath}`);
+    },
+    ExportNamedDeclaration(node) {
+      assert(!node.source, `export source is forbidden in ${javaScriptPath}`);
+    },
+    MemberExpression(node) {
+      const name = getCalleeName(node);
+      assert(
+        !forbiddenJavaScriptApis.has(name),
+        `forbidden JavaScript API ${name} in ${javaScriptPath}`,
+      );
+    },
     NewExpression: rejectApi,
   });
 }
@@ -178,6 +207,10 @@ export async function checkDist(distDirectory) {
 
   const manifestPath = safeReleasePath(absoluteDist, "manifest.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  assert(
+    JSON.stringify(Object.keys(manifest).sort()) === JSON.stringify(expectedManifestKeys),
+    "manifest top-level keys must exactly match the reviewed allowlist",
+  );
   assert(manifest.manifest_version === 3, "manifest_version must be 3");
   assert(JSON.stringify(manifest.permissions) === JSON.stringify(["sidePanel", "tabs", "storage"]), "permissions must be exactly sidePanel, tabs, storage");
   assert(!Object.hasOwn(manifest, "host_permissions"), "host_permissions must not be present");
@@ -200,7 +233,11 @@ export async function checkDist(distDirectory) {
     if (path.endsWith(".html")) {
       await validateHtml(absoluteDist, path, await readFile(absolutePath, "utf8"));
     } else if (path.endsWith(".css")) {
-      await validateCss(absoluteDist, path, await readFile(absolutePath, "utf8"));
+      await validateCss(await readFile(absolutePath, "utf8"), {
+        fromFile: path,
+        resolveReference: (reference) =>
+          assertExpectedReference(absoluteDist, path, reference),
+      });
     } else if (path.endsWith(".js")) {
       validateJavaScript(path, await readFile(absolutePath, "utf8"));
     }

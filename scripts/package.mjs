@@ -8,7 +8,7 @@ import {
   safeReleasePath,
 } from "./release-files.mjs";
 
-const fixedMtime = new Date(Date.UTC(2000, 0, 1, 0, 0, 0));
+const fixedMtime = new Date(2000, 0, 1, 0, 0, 0);
 
 export async function packageDist(projectRoot) {
   const root = resolve(projectRoot);
