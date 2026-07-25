@@ -19,10 +19,11 @@
 
 ## 隐私、安全与权限
 
-- [ ] DevTools Network 确认扩展页面没有主动网络请求。
-- [ ] HTTP/HTTPS favicon 显示文字 fallback，不触发图片请求。
+- [ ] DevTools Network 确认扩展代码未调用 favicon API、`fetch` 或根据站点地址拼接 `/favicon.ico` 等根路径。
+- [ ] 标签页图标直接使用 Chrome 提供的 `favIconUrl`；`data:image/` 和 HTTPS 图标可显示，HTTP、`javascript:`、`file:` 地址使用文字 fallback。
+- [ ] 记录并核对 HTTPS favicon 的图片加载：浏览器可能使用已有缓存，也可能向 Chrome 提供的图片地址发起请求。
 - [ ] 权限精确为 `sidePanel`、`tabs`、`storage`，无 host permission 和 content script。
-- [ ] 商店隐私声明明确：不收集、不传输、不出售用户数据、不使用远程代码。
+- [ ] 商店隐私声明明确：扩展不收集、不出售或向开发者传输用户数据，不使用远程代码；浏览器渲染 HTTPS favicon 时可能产生图片请求。
 - [ ] 权限理由分别说明：侧边栏展示、当前窗口标签管理、本地保存快捷入口设置。
 
 ## 兼容与视觉

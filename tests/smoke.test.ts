@@ -24,7 +24,7 @@ describe("extension manifest", () => {
     expect(parseCsp(manifest.content_security_policy.extension_pages)).toEqual({
       "connect-src": ["'none'"],
       "frame-src": ["'none'"],
-      "img-src": ["'self'", "data:"].sort(),
+      "img-src": ["'self'", "data:", "https:"].sort(),
       "object-src": ["'self'"],
       "script-src": ["'self'"],
       "style-src": ["'self'"],

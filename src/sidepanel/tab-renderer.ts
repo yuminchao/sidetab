@@ -132,7 +132,7 @@ function updatePin(main: HTMLElement, pinned: boolean): void {
 }
 
 function updateFavicon(container: HTMLElement, tab: TabViewModel): void {
-  const url = getLocalFaviconUrl(tab.favIconUrl);
+  const url = getAllowedFaviconUrl(tab.favIconUrl);
   const mode = url ? "image" : "fallback";
   const fallbackText = getFallbackText(tab.title);
   const sourceChanged = container.dataset.mode !== mode || container.dataset.url !== url;
@@ -158,7 +158,7 @@ function updateFavicon(container: HTMLElement, tab: TabViewModel): void {
 
 function createFavicon(tab: TabViewModel): HTMLElement {
   const fallback = getFallbackText(tab.title);
-  const faviconUrl = getLocalFaviconUrl(tab.favIconUrl);
+  const faviconUrl = getAllowedFaviconUrl(tab.favIconUrl);
   if (!faviconUrl) {
     return createFaviconFallback(fallback);
   }
@@ -174,8 +174,20 @@ function createFavicon(tab: TabViewModel): HTMLElement {
   return image;
 }
 
-function getLocalFaviconUrl(url: string | undefined): string {
-  return url && /^data:image\//i.test(url) ? url : "";
+function getAllowedFaviconUrl(url: string | undefined): string {
+  return url && isAllowedFaviconUrl(url) ? url : "";
+}
+
+function isAllowedFaviconUrl(raw: string): boolean {
+  if (/^data:image\//i.test(raw)) {
+    return true;
+  }
+
+  try {
+    return new URL(raw).protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function createFaviconFallback(text: string): HTMLElement {

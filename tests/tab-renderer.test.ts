@@ -143,15 +143,29 @@ describe("tab renderer", () => {
     expect(list.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,second");
   });
 
-  it("uses a text fallback instead of requesting an HTTP favicon", () => {
+  it("renders a Chrome-provided HTTPS favicon without rewriting its URL", () => {
+    const renderer = createTabRenderer({ list, empty });
+    const faviconUrl = "https://cdn.example.com/icons/page.png?size=16#chrome";
+
+    renderer.render([tab({ title: "Private", favIconUrl: faviconUrl })]);
+
+    expect(list.querySelector("img")?.getAttribute("src")).toBe(faviconUrl);
+    expect(list.querySelector(".tab-favicon-fallback")).toBeNull();
+    expect(list.querySelector(".tab-title")?.textContent).toBe("Private");
+    expect(list.querySelector(".tab-domain")).toBeNull();
+  });
+
+  it.each([
+    "http://example.com/icon.png",
+    "javascript:alert(1)",
+    "file:///tmp/icon.png",
+  ])("uses a text fallback for a disallowed favicon URL: %s", (favIconUrl) => {
     const renderer = createTabRenderer({ list, empty });
 
-    renderer.render([tab({ title: "Private", favIconUrl: "https://example.com/icon.png" })]);
+    renderer.render([tab({ title: "Private", favIconUrl })]);
 
     expect(list.querySelector("img")).toBeNull();
     expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("P");
-    expect(list.querySelector(".tab-title")?.textContent).toBe("Private");
-    expect(list.querySelector(".tab-domain")).toBeNull();
   });
 
   it("preserves a fallback for title changes and replaces it when favicon mode changes", () => {

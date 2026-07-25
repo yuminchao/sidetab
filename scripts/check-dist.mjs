@@ -29,7 +29,7 @@ const expectedManifestKeys = [
 const expectedCspDirectives = new Map([
   ["connect-src", ["'none'"]],
   ["frame-src", ["'none'"]],
-  ["img-src", ["'self'", "data:"].sort()],
+  ["img-src", ["'self'", "data:", "https:"].sort()],
   ["object-src", ["'self'"]],
   ["script-src", ["'self'"]],
   ["style-src", ["'self'"]],
@@ -83,9 +83,10 @@ export function validateExtensionCsp(value) {
     assert(!directives.has(name), `duplicate extension CSP directive: ${name}`);
     assert(sources.length > 0, `extension CSP directive has no sources: ${name}`);
     for (const source of sources) {
+      const isAllowedHttpsImageSource = name === "img-src" && source === "https:";
       assert(
         !source.includes("*") &&
-          !/^https?:/i.test(source) &&
+          (!/^https?:/i.test(source) || isAllowedHttpsImageSource) &&
           source !== "'unsafe-inline'" &&
           source !== "'unsafe-eval'",
         `forbidden extension CSP source: ${source}`,

@@ -75,7 +75,7 @@ async function createReleaseFixture(): Promise<{ root: string; dist: string; rel
     permissions: ["sidePanel", "tabs", "storage"],
     content_security_policy: {
       extension_pages:
-        "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data:; style-src 'self'; frame-src 'none'",
+        "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data: https:; style-src 'self'; frame-src 'none'",
     },
     background: {
       service_worker: "background/service-worker.js",
@@ -166,30 +166,34 @@ describe("extension CSP validation", () => {
 
     expect(() =>
       validateExtensionCsp(
-        "frame-src 'none'; style-src 'self'; img-src data: 'self'; connect-src 'none'; object-src 'self'; script-src 'self'",
+        "frame-src 'none'; style-src 'self'; img-src https: data: 'self'; connect-src 'none'; object-src 'self'; script-src 'self'",
       ),
     ).not.toThrow();
   });
 
   it.each([
     [
-      "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data:; style-src 'self'",
+      "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data:; style-src 'self'; frame-src 'none'",
+      "old policy missing HTTPS images",
+    ],
+    [
+      "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data: https:; style-src 'self'",
       "missing frame-src",
     ],
     [
-      "script-src 'self'; object-src 'self'; connect-src https:; img-src 'self' data:; style-src 'self'; frame-src 'none'",
+      "script-src 'self'; object-src 'self'; connect-src https:; img-src 'self' data: https:; style-src 'self'; frame-src 'none'",
       "remote connect-src",
     ],
     [
-      "script-src 'self'; object-src 'self'; connect-src 'none'; img-src * data:; style-src 'self'; frame-src 'none'",
+      "script-src 'self'; object-src 'self'; connect-src 'none'; img-src * data: https:; style-src 'self'; frame-src 'none'",
       "wildcard img-src",
     ],
     [
-      "script-src 'self' 'unsafe-inline'; object-src 'self'; connect-src 'none'; img-src 'self' data:; style-src 'self'; frame-src 'none'",
+      "script-src 'self' 'unsafe-inline'; object-src 'self'; connect-src 'none'; img-src 'self' data: https:; style-src 'self'; frame-src 'none'",
       "unsafe-inline",
     ],
     [
-      "script-src 'self' 'unsafe-eval'; object-src 'self'; connect-src 'none'; img-src 'self' data:; style-src 'self'; frame-src 'none'",
+      "script-src 'self' 'unsafe-eval'; object-src 'self'; connect-src 'none'; img-src 'self' data: https:; style-src 'self'; frame-src 'none'",
       "unsafe-eval",
     ],
   ])("rejects an unsafe or incomplete extension CSP: %s", async (value) => {
