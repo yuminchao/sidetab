@@ -1,0 +1,20 @@
+{
+  "name": "sidetab-lite",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "npm run typecheck && npm test -- --run && npm run build && node scripts/check-dist.mjs",
+    "test": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.0",
+    "esbuild": "^0.25.0",
+    "jsdom": "^26.0.0",
+    "sharp": "^0.34.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}
