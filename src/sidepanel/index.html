@@ -7,6 +7,65 @@
     <link rel="stylesheet" href="./sidebar.css" />
   </head>
   <body>
+    <main class="sidebar-shell">
+      <header class="toolbar">
+        <div
+          id="shortcut-strip"
+          class="shortcut-strip"
+          aria-label="快捷网站"
+          hidden
+        ></div>
+        <div class="search-row">
+          <input
+            id="tab-search"
+            type="search"
+            placeholder="搜索标签页"
+            aria-label="搜索标签页"
+            autocomplete="off"
+          />
+          <button
+            id="shortcut-settings"
+            class="icon-button"
+            type="button"
+            title="快捷网站设置"
+            aria-label="快捷网站设置"
+          >
+            &#9881;
+          </button>
+        </div>
+        <p id="status-message" class="status-message" role="status" aria-live="polite"></p>
+      </header>
+
+      <section id="tab-region" class="tab-region" aria-label="当前窗口标签页">
+        <p id="tab-empty" class="empty-message" hidden>没有匹配的标签页</p>
+        <div id="tab-list" class="tab-list" role="list"></div>
+      </section>
+    </main>
+
+    <dialog id="shortcut-dialog" aria-labelledby="shortcut-dialog-title">
+      <form id="shortcut-form" method="dialog" novalidate>
+        <header class="dialog-header">
+          <h2 id="shortcut-dialog-title">快捷网站</h2>
+          <label class="toggle-label" for="shortcut-enabled">
+            <input id="shortcut-enabled" type="checkbox" />
+            <span>启用快捷入口</span>
+          </label>
+        </header>
+
+        <div id="shortcut-editor-list" class="editor-list"></div>
+        <p id="shortcut-error" class="shortcut-error" role="alert"></p>
+
+        <div class="dialog-actions dialog-actions-secondary">
+          <button id="shortcut-add" type="button">添加网站</button>
+          <button id="shortcut-reset" type="button">恢复默认</button>
+        </div>
+        <div class="dialog-actions dialog-actions-primary">
+          <button id="shortcut-cancel" type="button" data-action="cancel">取消</button>
+          <button id="shortcut-save" class="primary-button" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
     <script type="module" src="./sidebar.js"></script>
   </body>
 </html>

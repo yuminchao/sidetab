@@ -1,11 +1,400 @@
 :root {
   color-scheme: light dark;
+  font-family:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  letter-spacing: 0;
+  background: Canvas;
+  color: CanvasText;
 }
 
 * {
   box-sizing: border-box;
+  letter-spacing: 0;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
 }
 
 body {
   margin: 0;
+  overflow: hidden;
+  background: Canvas;
+  color: CanvasText;
+}
+
+button,
+input {
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  border: 1px solid ButtonBorder;
+  border-radius: 6px;
+  background: ButtonFace;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: Field;
+}
+
+button:disabled,
+input:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid AccentColor;
+  outline-offset: 1px;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.sidebar-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: Canvas;
+}
+
+.toolbar {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid ButtonBorder;
+}
+
+.shortcut-strip {
+  display: flex;
+  gap: 4px;
+  min-height: 32px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.shortcut-button,
+.icon-button,
+.tab-close {
+  display: inline-grid;
+  flex: 0 0 32px;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  line-height: 1;
+}
+
+.shortcut-button img {
+  display: block;
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+.shortcut-letter {
+  overflow: hidden;
+  max-width: 24px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  gap: 4px;
+}
+
+#tab-search {
+  width: 100%;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid ButtonBorder;
+  border-radius: 6px;
+  background: Field;
+}
+
+.status-message {
+  margin: 0;
+  color: GrayText;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.status-message:empty {
+  display: none;
+}
+
+.tab-region {
+  min-height: 0;
+  overflow-y: auto;
+  background: Canvas;
+}
+
+.tab-list {
+  min-width: 0;
+}
+
+.tab-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  align-items: center;
+  min-height: 46px;
+  border-left: 3px solid transparent;
+  border-bottom: 1px solid ButtonBorder;
+}
+
+.tab-row[data-active="true"] {
+  border-left-color: AccentColor;
+  background: ButtonFace;
+}
+
+.tab-row:hover {
+  background: ButtonFace;
+}
+
+.tab-main {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  min-height: 45px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.tab-main:hover:not(:disabled) {
+  background: transparent;
+}
+
+.tab-favicon {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  overflow: hidden;
+}
+
+.tab-favicon-image {
+  display: block;
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+.tab-favicon-fallback {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  overflow: hidden;
+  border: 1px solid ButtonBorder;
+  border-radius: 3px;
+  color: GrayText;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.tab-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tab-title,
+.tab-domain {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-title {
+  line-height: 1.25;
+}
+
+.tab-domain {
+  color: GrayText;
+  font-size: 11px;
+  line-height: 1.15;
+}
+
+.tab-close {
+  border-color: transparent;
+  background: transparent;
+  font-size: 18px;
+}
+
+.empty-message {
+  margin: 0;
+  padding: 24px 12px;
+  color: GrayText;
+  text-align: center;
+}
+
+#shortcut-dialog {
+  width: min(360px, calc(100vw - 24px));
+  max-width: 360px;
+  max-height: calc(100vh - 24px);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid ButtonBorder;
+  border-radius: 8px;
+  box-shadow: none;
+  background: Canvas;
+  color: CanvasText;
+}
+
+#shortcut-dialog::backdrop {
+  background: rgb(0 0 0 / 28%);
+}
+
+#shortcut-form {
+  display: grid;
+  gap: 10px;
+  max-height: calc(100vh - 26px);
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.dialog-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dialog-header h2 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.toggle-label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.toggle-label input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: AccentColor;
+}
+
+.editor-list {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  max-height: min(46vh, 360px);
+  overflow-y: auto;
+}
+
+.shortcut-editor-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) repeat(3, 32px);
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+}
+
+.shortcut-editor-row input {
+  width: 100%;
+  height: 32px;
+  padding: 0 7px;
+  border: 1px solid ButtonBorder;
+  border-radius: 5px;
+  background: Field;
+}
+
+.shortcut-editor-action {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  line-height: 1;
+}
+
+.shortcut-error {
+  margin: 0;
+  color: MarkText;
+  background: Mark;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.shortcut-error:empty {
+  display: none;
+}
+
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dialog-actions button {
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.dialog-actions-primary {
+  justify-content: flex-end;
+}
+
+.primary-button {
+  border-color: AccentColor;
+}
+
+@media (max-width: 240px) {
+  #shortcut-dialog {
+    width: calc(100vw - 12px);
+  }
+
+  #shortcut-form {
+    padding: 8px;
+  }
+
+  .shortcut-editor-row {
+    grid-template-columns: repeat(3, 32px) minmax(0, 1fr);
+  }
+
+  .shortcut-name,
+  .shortcut-url {
+    grid-column: 1 / -1;
+  }
+
+  .shortcut-editor-action[data-action="move-up"] {
+    grid-column: 1;
+  }
+
+  .shortcut-editor-action[data-action="move-down"] {
+    grid-column: 2;
+  }
+
+  .shortcut-editor-action[data-action="delete"] {
+    grid-column: 3;
+  }
 }
