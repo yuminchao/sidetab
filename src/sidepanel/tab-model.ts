@@ -23,7 +23,7 @@ export function toTabViewModel(tab: chrome.tabs.Tab): TabViewModel {
     index: tab.index,
     title,
     url,
-    domain: getDomain(url),
+    domain: getTabDomain(url),
     active: tab.active,
     pinned: tab.pinned,
   };
@@ -35,7 +35,7 @@ export function toTabViewModel(tab: chrome.tabs.Tab): TabViewModel {
   return model;
 }
 
-function getDomain(url: string): string {
+export function getTabDomain(url: string): string {
   try {
     const parsed = new URL(url);
     if (parsed.protocol === "chrome:") {

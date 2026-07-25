@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toTabViewModel } from "../src/sidepanel/tab-model";
+import { getTabDomain, toTabViewModel } from "../src/sidepanel/tab-model";
 
 function tab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
   return {
@@ -15,6 +15,12 @@ function tab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
 }
 
 describe("tab model", () => {
+  it("derives domains with the same pure helper used by tab updates", () => {
+    expect(getTabDomain("https://example.com/path")).toBe("example.com");
+    expect(getTabDomain("chrome://newtab/")).toBe("chrome");
+    expect(getTabDomain("not a valid URL")).toBe("not a valid URL");
+  });
+
   it("maps a tab with its URL hostname and trimmed title", () => {
     expect(toTabViewModel(tab())).toEqual({
       id: 7,

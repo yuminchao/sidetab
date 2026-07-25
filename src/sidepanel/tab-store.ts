@@ -1,4 +1,4 @@
-import { toTabViewModel, type TabViewModel } from "./tab-model";
+import { getTabDomain, toTabViewModel, type TabViewModel } from "./tab-model";
 
 export class TabStore {
   private readonly tabs = new Map<number, TabViewModel>();
@@ -40,9 +40,43 @@ export class TabStore {
       return undefined;
     }
 
-    const updated: TabViewModel = { ...existing, ...patch, id };
+    const updated: TabViewModel = { ...existing };
+    if (typeof patch.windowId === "number" && Number.isFinite(patch.windowId) && Number.isInteger(patch.windowId)) {
+      updated.windowId = patch.windowId;
+    }
+    if (typeof patch.title === "string") {
+      updated.title = patch.title.trim() || "新标签页";
+    }
+    const url = patch.url;
+    const urlChanged = typeof url === "string";
+    if (urlChanged) {
+      updated.url = url;
+      updated.domain = getTabDomain(url);
+    } else if (typeof patch.domain === "string") {
+      updated.domain = patch.domain;
+    }
+    if (typeof patch.active === "boolean") {
+      updated.active = patch.active;
+    }
+    if (typeof patch.pinned === "boolean") {
+      updated.pinned = patch.pinned;
+    }
+    if (Object.hasOwn(patch, "favIconUrl")) {
+      if (typeof patch.favIconUrl === "string") {
+        updated.favIconUrl = patch.favIconUrl;
+      } else if (patch.favIconUrl === undefined) {
+        delete updated.favIconUrl;
+      }
+    }
+
     this.tabs.set(id, updated);
-    return copyTab(updated);
+    if (updated.active) {
+      this.activate(id);
+    }
+    if (typeof patch.index === "number" && Number.isFinite(patch.index) && Number.isInteger(patch.index) && patch.index >= 0) {
+      this.move(id, patch.index);
+    }
+    return copyTab(this.tabs.get(id)!);
   }
 
   replace(tab: chrome.tabs.Tab): TabViewModel | undefined {
@@ -50,7 +84,18 @@ export class TabStore {
   }
 
   remove(id: number): boolean {
-    return this.tabs.delete(id);
+    const tab = this.tabs.get(id);
+    if (!tab) {
+      return false;
+    }
+
+    this.tabs.delete(id);
+    for (const [tabId, current] of this.tabs) {
+      if (current.index > tab.index) {
+        this.tabs.set(tabId, { ...current, index: current.index - 1 });
+      }
+    }
+    return true;
   }
 
   activate(id: number): void {
@@ -89,8 +134,19 @@ export class TabStore {
   private put(tab: chrome.tabs.Tab): TabViewModel | undefined {
     try {
       const model = toTabViewModel(tab);
-      this.tabs.set(model.id, model);
-      return copyTab(model);
+      const existing = this.tabs.get(model.id);
+      if (existing && existing.index === model.index) {
+        this.tabs.set(model.id, model);
+      } else {
+        if (existing) {
+          this.remove(model.id);
+        }
+        this.insert(model);
+      }
+      if (model.active) {
+        this.activate(model.id);
+      }
+      return copyTab(this.tabs.get(model.id)!);
     } catch {
       return undefined;
     }
@@ -98,6 +154,15 @@ export class TabStore {
 
   private sortedTabs(): TabViewModel[] {
     return [...this.tabs.values()].sort((left, right) => left.index - right.index || left.id - right.id);
+  }
+
+  private insert(tab: TabViewModel): void {
+    for (const [id, current] of this.tabs) {
+      if (current.index >= tab.index) {
+        this.tabs.set(id, { ...current, index: current.index + 1 });
+      }
+    }
+    this.tabs.set(tab.id, tab);
   }
 }
 

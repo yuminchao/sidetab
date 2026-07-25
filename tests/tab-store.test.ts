@@ -75,6 +75,45 @@ describe("TabStore", () => {
     expect(store.list()).toMatchObject([{ id: 1, title: "Replaced" }]);
   });
 
+  it("inserts a new tab in the middle and closes the gap after removing it", () => {
+    const store = new TabStore();
+    store.initialize([tab({ id: 1, index: 0 }), tab({ id: 2, index: 1 })]);
+    store.add(tab({ id: 3, index: 1 }));
+
+    expect(store.list().map((item) => [item.id, item.index])).toEqual([[1, 0], [3, 1], [2, 2]]);
+    expect(store.remove(3)).toBe(true);
+    expect(store.list().map((item) => [item.id, item.index])).toEqual([[1, 0], [2, 1]]);
+  });
+
+  it("treats an added existing ID as a replace without shifting other tabs", () => {
+    const store = new TabStore();
+    store.initialize([tab({ id: 1, index: 0 }), tab({ id: 2, index: 1 })]);
+    store.add(tab({ id: 2, index: 1, title: "Replacement" }));
+
+    expect(store.list().map((item) => [item.id, item.index, item.title])).toEqual([
+      [1, 0, "First tab"],
+      [2, 1, "Replacement"],
+    ]);
+  });
+
+  it("keeps active state unique across out-of-order add and replace events", () => {
+    const store = new TabStore();
+    store.initialize([tab({ id: 1, index: 0, active: true }), tab({ id: 2, index: 1, active: false })]);
+    store.add(tab({ id: 3, index: 0, active: true }));
+    store.replace(tab({ id: 2, index: 2, active: true }));
+
+    expect(store.list().map((item) => [item.id, item.active])).toEqual([[3, false], [1, false], [2, true]]);
+  });
+
+  it("repositions an existing replacement and inserts a missing replacement", () => {
+    const store = new TabStore();
+    store.initialize([tab({ id: 1, index: 0 }), tab({ id: 2, index: 1 }), tab({ id: 3, index: 2 })]);
+    store.replace(tab({ id: 3, index: 0 }));
+    store.replace(tab({ id: 4, index: 1 }));
+
+    expect(store.list().map((item) => [item.id, item.index])).toEqual([[3, 0], [4, 1], [1, 2], [2, 3]]);
+  });
+
   it("updates a tab without allowing its ID to change and removes exactly once", () => {
     const store = new TabStore();
     store.add(tab({ id: 1 }));
@@ -82,6 +121,44 @@ describe("TabStore", () => {
     expect(store.update(1, { id: 99, title: "Updated" })).toMatchObject({ id: 1, title: "Updated" });
     expect(store.remove(1)).toBe(true);
     expect(store.remove(1)).toBe(false);
+  });
+
+  it("only accepts valid update fields, derives domain from URL, and safely removes a favicon", () => {
+    const store = new TabStore();
+    store.initialize([tab({ id: 1, favIconUrl: "https://one.example/icon", title: "Original" }), tab({ id: 2, index: 1 })]);
+    const invalid = {
+      id: 99,
+      windowId: "wrong",
+      index: -1,
+      title: undefined,
+      url: undefined,
+      domain: 12,
+      active: "yes",
+      pinned: 0,
+    } as unknown as Partial<import("../src/sidepanel/tab-model").TabViewModel>;
+    store.update(1, invalid);
+    store.update(1, { title: "  ", url: "https://updated.example/path", domain: "override", favIconUrl: undefined });
+
+    expect(store.list()[0]).toMatchObject({
+      id: 1,
+      windowId: 10,
+      title: "新标签页",
+      url: "https://updated.example/path",
+      domain: "updated.example",
+      active: false,
+      pinned: false,
+    });
+    expect(store.list()[0]).not.toHaveProperty("favIconUrl");
+    expect(store.filter("updated.example").map((item) => item.id)).toEqual([1]);
+  });
+
+  it("uses move semantics for a valid updated index and rejects invalid index values", () => {
+    const store = new TabStore();
+    store.initialize([tab({ id: 1, index: 0 }), tab({ id: 2, index: 1 }), tab({ id: 3, index: 2 })]);
+    store.update(1, { index: 2 });
+    store.update(3, { index: Number.NaN });
+
+    expect(store.list().map((item) => [item.id, item.index])).toEqual([[2, 0], [3, 1], [1, 2]]);
   });
 
   it("activates only the selected tab and ignores a missing target", () => {
