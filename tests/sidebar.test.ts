@@ -67,6 +67,24 @@ function input(value: string): void {
   search.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+function shortcutImage(id = "docs"): HTMLImageElement | null {
+  return element("shortcut-strip").querySelector<HTMLImageElement>(
+    `.shortcut-button[data-shortcut-id="${id}"] img`,
+  );
+}
+
+function enabledShortcuts(
+  items = [{ id: "docs", name: "Docs", url: "https://docs.example/", icon: "letter" }],
+): Record<string, unknown> {
+  return {
+    shortcutSettings: {
+      enabled: true,
+      items,
+      tabTitleFontSize: 14,
+    },
+  };
+}
+
 async function flush(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
@@ -101,6 +119,172 @@ describe("sidebar lifecycle", () => {
     expect(element("shortcut-strip").hidden).toBe(true);
     expect(element("shortcut-strip").childElementCount).toBe(0);
     expect(document.documentElement.style.getPropertyValue("--tab-title-font-size")).toBe("14px");
+    cleanup();
+  });
+
+  it.each(["tabs-first", "shortcuts-first"] as const)(
+    "uses the initial tab favicon when %s initialization wins the race",
+    async (order) => {
+      const query = deferred<chrome.tabs.Tab[]>();
+      const storage = deferred<Record<string, unknown>>();
+      const fake = createFakeChrome();
+      fake.methods.query.mockReturnValueOnce(query.promise);
+      fake.methods.storageGet.mockReturnValueOnce(storage.promise);
+      const started = startSidebar(fake);
+      await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledOnce());
+
+      const tabs = [
+        fakeTab({
+          id: 7,
+          active: true,
+          url: "https://docs.example/guide",
+          favIconUrl: "data:image/png;base64,docs-initial",
+        }),
+      ];
+      if (order === "tabs-first") {
+        query.resolve(tabs);
+        await flush();
+        storage.resolve(enabledShortcuts());
+      } else {
+        storage.resolve(enabledShortcuts());
+        await flush();
+        query.resolve(tabs);
+      }
+
+      const cleanup = await started;
+      expect(shortcutImage()?.getAttribute("src")).toBe(
+        "data:image/png;base64,docs-initial",
+      );
+      cleanup();
+    },
+  );
+
+  it("resyncs shortcut favicons from the complete tab store after live mutations", async () => {
+    vi.useFakeTimers();
+    const fake = createFakeChrome({
+      stored: enabledShortcuts(),
+      tabs: [
+        fakeTab({
+          id: 1,
+          index: 0,
+          active: true,
+          title: "Hidden source",
+          url: "https://docs.example/one",
+          favIconUrl: "data:image/png;base64,one",
+        }),
+        fakeTab({
+          id: 2,
+          index: 1,
+          url: "https://docs.example/two",
+          favIconUrl: "data:image/png;base64,two",
+        }),
+      ],
+    });
+    const cleanup = await startSidebar(fake);
+
+    fake.events.onUpdated.emit(
+      1,
+      { favIconUrl: "data:image/png;base64,one-updated" },
+      fakeTab({
+        id: 1,
+        index: 0,
+        active: true,
+        title: "Hidden source",
+        url: "https://docs.example/one",
+        favIconUrl: "data:image/png;base64,one-updated",
+      }),
+    );
+    expect(shortcutImage()?.getAttribute("src")).toBe(
+      "data:image/png;base64,one-updated",
+    );
+
+    fake.events.onActivated.emit({ tabId: 2, windowId: 10 });
+    expect(shortcutImage()?.getAttribute("src")).toBe("data:image/png;base64,two");
+
+    input("does-not-match");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(rowIds()).toEqual([]);
+    expect(shortcutImage()?.getAttribute("src")).toBe("data:image/png;base64,two");
+
+    fake.events.onDetached.emit(2, { oldWindowId: 10, oldPosition: 1 });
+    expect(shortcutImage()?.getAttribute("src")).toBe(
+      "data:image/png;base64,one-updated",
+    );
+    fake.events.onRemoved.emit(1, { windowId: 10, isWindowClosing: false });
+    expect(shortcutImage()?.getAttribute("src")).toBe("https://docs.example/favicon.ico");
+
+    cleanup();
+  });
+
+  it("keeps disabled shortcuts empty and stops favicon syncing after cleanup", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({
+          url: "https://docs.example/page",
+          favIconUrl: "data:image/png;base64,hidden",
+        }),
+      ],
+    });
+    const cleanup = await startSidebar(fake);
+    const strip = element("shortcut-strip");
+    const replaceChildren = vi.spyOn(strip, "replaceChildren");
+
+    expect(strip.hidden).toBe(true);
+    expect(shortcutImage()).toBeNull();
+    cleanup();
+    fake.events.onUpdated.emit(
+      1,
+      {},
+      fakeTab({
+        url: "https://docs.example/page",
+        favIconUrl: "data:image/png;base64,late",
+      }),
+    );
+    expect(replaceChildren).not.toHaveBeenCalled();
+  });
+
+  it("drains buffered created and attached tabs before one final favicon sync", async () => {
+    const query = deferred<chrome.tabs.Tab[]>();
+    const attached = deferred<chrome.tabs.Tab>();
+    const fake = createFakeChrome({
+      stored: enabledShortcuts([
+        { id: "docs", name: "Docs", url: "https://docs.example/", icon: "letter" },
+        { id: "wiki", name: "Wiki", url: "https://wiki.example/", icon: "letter" },
+      ]),
+    });
+    fake.methods.query.mockReturnValueOnce(query.promise);
+    fake.methods.get.mockReturnValueOnce(attached.promise);
+    const started = startSidebar(fake);
+    await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledOnce());
+
+    fake.events.onCreated.emit(
+      fakeTab({
+        id: 3,
+        index: 1,
+        url: "https://docs.example/new",
+        favIconUrl: "data:image/png;base64,created",
+      }),
+    );
+    fake.events.onAttached.emit(4, { newWindowId: 10, newPosition: 2 });
+    query.resolve([]);
+    await flush();
+    attached.resolve(
+      fakeTab({
+        id: 4,
+        index: 2,
+        url: "https://wiki.example/attached",
+        favIconUrl: "data:image/png;base64,attached",
+      }),
+    );
+
+    const cleanup = await started;
+    expect(rowIds()).toEqual([3, 4]);
+    expect(shortcutImage("docs")?.getAttribute("src")).toBe(
+      "data:image/png;base64,created",
+    );
+    expect(shortcutImage("wiki")?.getAttribute("src")).toBe(
+      "data:image/png;base64,attached",
+    );
     cleanup();
   });
 

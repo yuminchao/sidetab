@@ -2,6 +2,7 @@ import { createDefaultShortcutSettings } from "./shortcut-model";
 import { createShortcutActions } from "./shortcut-actions";
 import { createShortcutRenderer } from "./shortcut-renderer";
 import { createShortcutStore, type StorageArea } from "./shortcut-store";
+import { createOriginFaviconMap } from "./favicon-model";
 import { createTabActions } from "./tab-actions";
 import { subscribeToTabEvents } from "./tab-events";
 import { createTabRenderer } from "./tab-renderer";
@@ -130,6 +131,12 @@ async function startSidebarInternal(
     },
   );
 
+  const syncShortcutFavicons = (): void => {
+    if (active) {
+      shortcutRenderer.setFaviconsByOrigin(createOriginFaviconMap(tabStore.list()));
+    }
+  };
+
   const cleanup = (): void => {
     if (!active) {
       return;
@@ -229,6 +236,7 @@ async function startSidebarInternal(
       return;
     }
     mutate();
+    syncShortcutFavicons();
     renderLive();
   };
 
@@ -462,6 +470,7 @@ async function startSidebarInternal(
         apply();
       }
       bufferingTabEvents = false;
+      syncShortcutFavicons();
       renderFilteredTabs();
     } catch {
       setStatus("tabs", "无法读取当前窗口的标签页");
