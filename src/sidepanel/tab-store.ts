@@ -113,7 +113,7 @@ export class TabStore {
       return;
     }
 
-    const tabs = this.sortedTabs();
+    const tabs = this.tabsInChromeOrder();
     const currentIndex = tabs.findIndex((tab) => tab.id === id);
     if (currentIndex < 0) {
       return;
@@ -153,6 +153,10 @@ export class TabStore {
   }
 
   private sortedTabs(): TabViewModel[] {
+    return [...this.tabs.values()].sort(compareTabs);
+  }
+
+  private tabsInChromeOrder(): TabViewModel[] {
     return [...this.tabs.values()].sort((left, right) => left.index - right.index || left.id - right.id);
   }
 
@@ -168,4 +172,11 @@ export class TabStore {
 
 function copyTab(tab: TabViewModel): TabViewModel {
   return { ...tab };
+}
+
+function compareTabs(left: TabViewModel, right: TabViewModel): number {
+  if (left.pinned !== right.pinned) {
+    return left.pinned ? -1 : 1;
+  }
+  return left.index - right.index || left.id - right.id;
 }

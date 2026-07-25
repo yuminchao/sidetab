@@ -15,6 +15,20 @@ function tab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
 }
 
 describe("TabStore", () => {
+  it("lists pinned tabs first while preserving each group's Chrome index order", () => {
+    const store = new TabStore();
+    store.initialize([
+      tab({ id: 1, index: 0, title: "Matches" }),
+      tab({ id: 2, index: 3, pinned: true, title: "Matches" }),
+      tab({ id: 3, index: 1, pinned: true, title: "Matches" }),
+      tab({ id: 4, index: 2, title: "Matches" }),
+    ]);
+
+    expect(store.list().map((item) => item.id)).toEqual([3, 2, 1, 4]);
+    expect(store.filter(" ").map((item) => item.id)).toEqual([3, 2, 1, 4]);
+    expect(store.filter("matches").map((item) => item.id)).toEqual([3, 2, 1, 4]);
+  });
+
   it("initializes a sorted snapshot, ignores bad tabs, replaces old state, and lets later duplicate IDs win", () => {
     const store = new TabStore();
     store.add(tab({ id: 99 }));
@@ -183,6 +197,32 @@ describe("TabStore", () => {
 
     expect(store.list().map((item) => item.id)).toEqual(ids);
     expect(store.list().map((item) => item.index)).toEqual([0, 1, 2]);
+  });
+
+  it("moves pinned and unpinned tabs by Chrome index without changing pinned-first display order", () => {
+    const store = new TabStore();
+    store.initialize([
+      tab({ id: 1, index: 0 }),
+      tab({ id: 2, index: 1, pinned: true }),
+      tab({ id: 3, index: 2 }),
+      tab({ id: 4, index: 3, pinned: true }),
+    ]);
+
+    store.move(3, 0);
+    expect(store.list().map((item) => [item.id, item.index])).toEqual([
+      [2, 2],
+      [4, 3],
+      [3, 0],
+      [1, 1],
+    ]);
+
+    store.move(4, 1);
+    expect(store.list().map((item) => [item.id, item.index])).toEqual([
+      [4, 1],
+      [2, 3],
+      [3, 0],
+      [1, 2],
+    ]);
   });
 
   it("ignores moves for a missing target or non-finite integer index", () => {
