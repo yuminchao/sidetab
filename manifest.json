@@ -9,7 +9,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Open SideTab Lite",
+    "default_title": "打开 SideTab Lite",
     "default_icon": {
       "16": "assets/icons/icon-16.png",
       "32": "assets/icons/icon-32.png"
