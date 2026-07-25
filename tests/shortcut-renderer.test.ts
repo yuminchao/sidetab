@@ -371,6 +371,56 @@ describe("shortcut renderer", () => {
     );
   });
 
+  it.each([
+    {
+      name: "moves the middle item to the first position",
+      items: [
+        shortcut({ id: "a", name: "A", url: "https://a.example/" }),
+        shortcut({ id: "b", name: "B", url: "https://b.example/" }),
+        shortcut({ id: "c", name: "C", url: "https://c.example/" }),
+      ],
+      sourceIndex: 1,
+      action: "move-up",
+      expectedAction: "move-down",
+    },
+    {
+      name: "moves the middle item to the last position",
+      items: [
+        shortcut({ id: "a", name: "A", url: "https://a.example/" }),
+        shortcut({ id: "b", name: "B", url: "https://b.example/" }),
+        shortcut({ id: "c", name: "C", url: "https://c.example/" }),
+      ],
+      sourceIndex: 1,
+      action: "move-down",
+      expectedAction: "move-up",
+    },
+    {
+      name: "keeps focus operable when sorting two items",
+      items: [
+        shortcut({ id: "a", name: "A", url: "https://a.example/" }),
+        shortcut({ id: "b", name: "B", url: "https://b.example/" }),
+      ],
+      sourceIndex: 1,
+      action: "move-up",
+      expectedAction: "move-down",
+    },
+  ])("$name", ({ items, sourceIndex, action, expectedAction }) => {
+    const renderer = createShortcutRenderer(elements, { onOpen, onSave });
+    renderer.openSettings(settings({ items }));
+    const movedId = items[sourceIndex]?.id;
+
+    click(elements.editor.children[sourceIndex]?.querySelector(`[data-action='${action}']`) ?? null);
+
+    const movedRow = Array.from(elements.editor.children).find(
+      (row) => row instanceof HTMLElement && row.dataset.shortcutId === movedId,
+    );
+    const focused = document.activeElement;
+    expect(movedRow?.contains(focused)).toBe(true);
+    expect(focused).toBe(movedRow?.querySelector(`[data-action='${expectedAction}']`));
+    expect(focused).toBeInstanceOf(HTMLButtonElement);
+    expect((focused as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("resets the unsaved draft to the complete disabled defaults", () => {
     const renderer = createShortcutRenderer(elements, { onOpen, onSave });
     renderer.openSettings(settings());

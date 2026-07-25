@@ -104,6 +104,50 @@ describe("tab renderer", () => {
     );
   });
 
+  it("preserves an image favicon until its URL changes", () => {
+    const renderer = createTabRenderer({ list, empty });
+    renderer.render([tab({ favIconUrl: "https://example.com/icon.png" })]);
+    const original = list.querySelector("img");
+
+    renderer.patch(
+      tab({
+        title: "Updated title",
+        active: true,
+        favIconUrl: "https://example.com/icon.png",
+      }),
+    );
+
+    expect(list.querySelector("img")).toBe(original);
+    expect(original?.dataset.fallback).toBe("U");
+    expect(list.querySelector<HTMLButtonElement>(".tab-main")?.ariaLabel).toBe(
+      "切换到 Updated title",
+    );
+
+    renderer.patch(tab({ favIconUrl: "https://example.com/new-icon.png" }));
+    expect(list.querySelector("img")).not.toBe(original);
+    expect(list.querySelector("img")?.getAttribute("src")).toBe(
+      "https://example.com/new-icon.png",
+    );
+  });
+
+  it("preserves a fallback for title changes and replaces it when favicon mode changes", () => {
+    const renderer = createTabRenderer({ list, empty });
+    renderer.render([tab({ title: "Alpha" })]);
+    const originalFallback = list.querySelector(".tab-favicon-fallback");
+
+    renderer.patch(tab({ title: "Beta", active: true }));
+    expect(list.querySelector(".tab-favicon-fallback")).toBe(originalFallback);
+    expect(originalFallback?.textContent).toBe("B");
+
+    renderer.patch(tab({ title: "Beta", favIconUrl: "data:image/png;base64,abc" }));
+    expect(list.querySelector(".tab-favicon-fallback")).toBeNull();
+    expect(list.querySelector("img")).not.toBeNull();
+
+    renderer.patch(tab({ title: "Gamma" }));
+    expect(list.querySelector("img")).toBeNull();
+    expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("G");
+  });
+
   it("removes arbitrary IDs safely and reveals the empty state after the final row", () => {
     const renderer = createTabRenderer({ list, empty });
     renderer.render([tab({ id: -20 })]);

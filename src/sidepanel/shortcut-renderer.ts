@@ -465,7 +465,26 @@ function focusEditorAction(editor: HTMLElement, itemId: string, action: string):
   const row = Array.from(editor.children).find(
     (child) => child instanceof HTMLElement && child.dataset.shortcutId === itemId,
   );
-  row?.querySelector<HTMLButtonElement>(`button[data-action="${action}"]`)?.focus();
+  if (!row) {
+    return;
+  }
+
+  const preferred = row.querySelector<HTMLButtonElement>(`button[data-action="${action}"]`);
+  if (preferred && !preferred.disabled) {
+    preferred.focus();
+    return;
+  }
+
+  const alternateAction = action === "move-up" ? "move-down" : "move-up";
+  const alternate = row.querySelector<HTMLButtonElement>(
+    `button[data-action="${alternateAction}"]`,
+  );
+  if (alternate && !alternate.disabled) {
+    alternate.focus();
+    return;
+  }
+
+  row.querySelector<HTMLInputElement>(".shortcut-name")?.focus();
 }
 
 function getFirstCharacter(value: string): string {

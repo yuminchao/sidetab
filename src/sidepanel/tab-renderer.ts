@@ -127,7 +127,32 @@ function updateTabRow(row: HTMLElement, tab: TabViewModel): void {
   title.textContent = tab.title;
   domain.textContent = tab.domain;
   pin.title = tab.pinned ? "已固定" : "";
-  favicon.replaceChildren(createFavicon(tab));
+  updateFavicon(favicon, tab);
+}
+
+function updateFavicon(container: HTMLElement, tab: TabViewModel): void {
+  const mode = tab.favIconUrl ? "image" : "fallback";
+  const url = tab.favIconUrl ?? "";
+  const fallbackText = getFallbackText(tab.title);
+  const sourceChanged = container.dataset.mode !== mode || container.dataset.url !== url;
+
+  if (sourceChanged) {
+    container.replaceChildren(createFavicon(tab));
+    container.dataset.mode = mode;
+    container.dataset.url = url;
+    return;
+  }
+
+  const image = container.querySelector<HTMLImageElement>(".tab-favicon-image");
+  if (image) {
+    image.dataset.fallback = fallbackText;
+    return;
+  }
+
+  const fallback = container.querySelector<HTMLElement>(".tab-favicon-fallback");
+  if (fallback) {
+    fallback.textContent = fallbackText || "·";
+  }
 }
 
 function createFavicon(tab: TabViewModel): HTMLElement {
