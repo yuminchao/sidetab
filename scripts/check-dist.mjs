@@ -1,106 +1,37 @@
-import { access, readdir, readFile, stat } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import { JSDOM } from "jsdom";
+import { readFile, stat } from "node:fs/promises";
+import { posix, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { parse as parseJavaScript } from "acorn";
+import { simple as walkJavaScript } from "acorn-walk";
+import { parse as parseHtml } from "parse5";
+import postcss from "postcss";
+import valueParser from "postcss-value-parser";
 import sharp from "sharp";
+import {
+  EXPECTED_FILES,
+  assertExactReleaseFiles,
+  safeReleasePath,
+} from "./release-files.mjs";
 
-const root = resolve(import.meta.dirname, "..");
-const dist = resolve(root, "dist");
-const requiredFiles = [
-  "manifest.json",
-  "background/service-worker.js",
-  "sidepanel/index.html",
-  "sidepanel/sidebar.css",
-  "sidepanel/sidebar.js",
-  "assets/icons/icon-16.png",
-  "assets/icons/icon-32.png",
-  "assets/icons/icon-48.png",
-  "assets/icons/icon-128.png",
-  "assets/shortcuts/openai.png",
-  "assets/shortcuts/google.png",
-  "assets/shortcuts/github.png",
-];
-
-function assert(condition, message) {
-  if (!condition) {
-    throw new Error(message);
-  }
-}
-
-async function listFiles(directory, prefix = "") {
-  const entries = await readdir(directory, { withFileTypes: true });
-  const files = [];
-  for (const entry of entries) {
-    const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) {
-      files.push(...(await listFiles(resolve(directory, entry.name), relativePath)));
-    } else if (entry.isFile()) {
-      files.push(relativePath);
-    }
-  }
-  return files;
-}
-
-function resolveLocalReference(fromFile, reference) {
-  assert(reference && !/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(reference), `remote reference in ${fromFile}: ${reference}`);
-  const cleanReference = reference.split(/[?#]/, 1)[0];
-  const target = resolve(dist, dirname(fromFile), cleanReference);
-  const targetRelative = relative(dist, target);
-  assert(!isAbsolute(targetRelative) && targetRelative !== ".." && !targetRelative.startsWith(`..${sep}`), `reference escapes dist in ${fromFile}: ${reference}`);
-  return targetRelative.split(sep).join("/");
-}
-
-const manifest = JSON.parse(await readFile(resolve(dist, "manifest.json"), "utf8"));
-assert(manifest.manifest_version === 3, "manifest_version must be 3");
-assert(JSON.stringify(manifest.permissions) === JSON.stringify(["sidePanel", "tabs", "storage"]), "permissions must be exactly sidePanel, tabs, storage");
-assert(!Object.hasOwn(manifest, "host_permissions"), "host_permissions must not be present");
-assert(!Object.hasOwn(manifest, "content_scripts"), "content_scripts must not be present");
-assert(manifest.minimum_chrome_version === "114", "minimum_chrome_version must be 114");
-assert(manifest.content_security_policy?.extension_pages === "script-src 'self'; object-src 'self'", "extension page CSP must allow self only");
-
-for (const path of requiredFiles) {
-  await access(resolve(dist, path));
-}
-
-const manifestPaths = [
-  manifest.background?.service_worker,
-  manifest.side_panel?.default_path,
-  ...Object.values(manifest.icons ?? {}),
-  ...Object.values(manifest.action?.default_icon ?? {}),
-];
-for (const path of manifestPaths) {
-  assert(typeof path === "string" && path.length > 0, "manifest contains an invalid file reference");
-  await access(resolve(dist, path));
-}
-
-const files = await listFiles(dist);
-for (const htmlPath of files.filter((path) => path.endsWith(".html"))) {
-  const html = await readFile(resolve(dist, htmlPath), "utf8");
-  const document = new JSDOM(html).window.document;
-  for (const script of document.querySelectorAll("script")) {
-    assert(script.type === "module", `script must be a module in ${htmlPath}`);
-    assert(script.src.length > 0, `inline script is forbidden in ${htmlPath}`);
-    assert(script.textContent?.trim() === "", `inline script content is forbidden in ${htmlPath}`);
-    await access(resolve(dist, resolveLocalReference(htmlPath, script.getAttribute("src"))));
-  }
-  for (const link of document.querySelectorAll("link[href]")) {
-    await access(resolve(dist, resolveLocalReference(htmlPath, link.getAttribute("href"))));
-  }
-}
-
-const forbiddenJavaScript = [
-  [/\beval\s*\(/, "eval"],
-  [/\bnew\s+Function\s*\(/, "new Function"],
-  [/\bfetch\s*\(\s*["'`]\s*https?:/i, "remote fetch"],
-  [/\bimport\s*\(\s*["'`]\s*https?:/i, "remote dynamic import"],
-  [/\bnew\s+WebSocket\s*\(\s*["'`]\s*(?:wss?|https?):/i, "remote WebSocket"],
-];
-for (const javascriptPath of files.filter((path) => path.endsWith(".js"))) {
-  const source = await readFile(resolve(dist, javascriptPath), "utf8");
-  for (const [pattern, description] of forbiddenJavaScript) {
-    assert(!pattern.test(source), `${description} is forbidden in ${javascriptPath}`);
-  }
-}
-
+const expectedFileSet = new Set(EXPECTED_FILES);
+const forbiddenJavaScriptApis = new Set([
+  "eval",
+  "Function",
+  "fetch",
+  "XMLHttpRequest",
+  "WebSocket",
+  "EventSource",
+]);
+const forbiddenHtmlElements = new Set(["iframe", "object", "embed"]);
+const htmlUrlAttributes = new Set([
+  "action",
+  "data",
+  "formaction",
+  "href",
+  "poster",
+  "src",
+  "xlink:href",
+]);
 const pngSizes = new Map([
   ["assets/icons/icon-16.png", 16],
   ["assets/icons/icon-32.png", 32],
@@ -110,15 +41,191 @@ const pngSizes = new Map([
   ["assets/shortcuts/google.png", 32],
   ["assets/shortcuts/github.png", 32],
 ]);
-for (const [path, expectedSize] of pngSizes) {
-  const metadata = await sharp(resolve(dist, path)).metadata();
-  assert(metadata.format === "png", `${path} must be PNG`);
-  assert(metadata.width === expectedSize && metadata.height === expectedSize, `${path} must be ${expectedSize}x${expectedSize}`);
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
 }
 
-let totalBytes = 0;
-for (const path of files) {
-  totalBytes += (await stat(resolve(dist, path))).size;
+async function assertExpectedReference(distDirectory, fromFile, rawReference) {
+  assert(typeof rawReference === "string" && rawReference.length > 0, `empty reference in ${fromFile}`);
+  assert(!rawReference.includes("\\"), `invalid reference in ${fromFile}: ${rawReference}`);
+  assert(!/^(?:[a-z][a-z\d+.-]*:|\/)/i.test(rawReference), `remote or absolute reference in ${fromFile}: ${rawReference}`);
+  const withoutSuffix = rawReference.split(/[?#]/, 1)[0];
+  const stripped = withoutSuffix.startsWith("./") ? withoutSuffix.slice(2) : withoutSuffix;
+  assert(stripped.length > 0, `empty reference in ${fromFile}`);
+  assert(!stripped.split("/").some((segment) => segment === "" || segment === "." || segment === ".."), `invalid reference in ${fromFile}: ${rawReference}`);
+  const releasePath = posix.join(posix.dirname(fromFile), stripped);
+  const absolutePath = safeReleasePath(distDirectory, releasePath);
+  assert(expectedFileSet.has(releasePath), `reference is not an expected release file in ${fromFile}: ${releasePath}`);
+  const metadata = await stat(absolutePath);
+  assert(metadata.isFile(), `reference is not a file in ${fromFile}: ${releasePath}`);
+  return releasePath;
 }
-assert(totalBytes <= 300_000, `dist exceeds 300000 bytes: ${totalBytes}`);
-console.log(`dist check passed: ${totalBytes} bytes`);
+
+function getAttribute(node, name) {
+  return node.attrs?.find((attribute) => attribute.name.toLowerCase() === name)?.value;
+}
+
+async function validateHtml(distDirectory, htmlPath, source) {
+  const document = parseHtml(source);
+
+  async function visit(node) {
+    const tagName = node.tagName?.toLowerCase();
+    if (tagName) {
+      assert(!forbiddenHtmlElements.has(tagName), `forbidden HTML element <${tagName}> in ${htmlPath}`);
+      for (const attribute of node.attrs ?? []) {
+        const name = attribute.name.toLowerCase();
+        assert(!name.startsWith("on"), `inline event attribute ${name} is forbidden in ${htmlPath}`);
+        if (name === "srcset") {
+          for (const candidate of attribute.value.split(",")) {
+            const reference = candidate.trim().split(/\s+/, 1)[0];
+            await assertExpectedReference(distDirectory, htmlPath, reference);
+          }
+        } else if (htmlUrlAttributes.has(name)) {
+          await assertExpectedReference(distDirectory, htmlPath, attribute.value);
+        }
+      }
+
+      if (tagName === "script") {
+        assert(getAttribute(node, "type") === "module", `script must be a module in ${htmlPath}`);
+        assert(getAttribute(node, "src"), `inline script is forbidden in ${htmlPath}`);
+        const inlineContent = (node.childNodes ?? [])
+          .filter((child) => child.nodeName === "#text")
+          .map((child) => child.value ?? "")
+          .join("");
+        assert(inlineContent.trim() === "", `inline script content is forbidden in ${htmlPath}`);
+      }
+    }
+
+    for (const child of node.childNodes ?? []) {
+      await visit(child);
+    }
+    if (node.content) {
+      await visit(node.content);
+    }
+  }
+
+  await visit(document);
+}
+
+async function validateCss(distDirectory, cssPath, source) {
+  const root = postcss.parse(source, { from: cssPath });
+  root.walkAtRules((rule) => {
+    assert(rule.name.toLowerCase() !== "import", `CSS @import is forbidden in ${cssPath}`);
+  });
+
+  const values = [];
+  root.walkDecls((declaration) => values.push(declaration.value));
+  root.walkAtRules((rule) => values.push(rule.params));
+  for (const value of values) {
+    const references = [];
+    valueParser(value).walk((node) => {
+      if (node.type === "function" && node.value.toLowerCase() === "url") {
+        references.push(valueParser.stringify(node.nodes).trim().replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, "$1$2"));
+      }
+    });
+    for (const reference of references) {
+      await assertExpectedReference(distDirectory, cssPath, reference);
+    }
+  }
+}
+
+function getCalleeName(node) {
+  if (node?.type === "Identifier") {
+    return node.name;
+  }
+  if (node?.type === "MemberExpression") {
+    if (!node.computed && node.property?.type === "Identifier") {
+      return node.property.name;
+    }
+    if (node.computed && node.property?.type === "Literal") {
+      return node.property.value;
+    }
+  }
+  return undefined;
+}
+
+function validateJavaScript(javaScriptPath, source) {
+  const ast = parseJavaScript(source, {
+    allowHashBang: true,
+    ecmaVersion: "latest",
+    sourceType: "module",
+  });
+  const rejectApi = (node) => {
+    const name = getCalleeName(node.callee);
+    assert(!forbiddenJavaScriptApis.has(name), `forbidden JavaScript API ${name} in ${javaScriptPath}`);
+  };
+  walkJavaScript(ast, {
+    CallExpression: rejectApi,
+    Identifier(node) {
+      assert(
+        !forbiddenJavaScriptApis.has(node.name),
+        `forbidden JavaScript API ${node.name} in ${javaScriptPath}`,
+      );
+    },
+    ImportExpression() {
+      throw new Error(`dynamic import is forbidden in ${javaScriptPath}`);
+    },
+    NewExpression: rejectApi,
+  });
+}
+
+export async function checkDist(distDirectory) {
+  const absoluteDist = resolve(distDirectory);
+  const files = await assertExactReleaseFiles(absoluteDist);
+
+  const manifestPath = safeReleasePath(absoluteDist, "manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  assert(manifest.manifest_version === 3, "manifest_version must be 3");
+  assert(JSON.stringify(manifest.permissions) === JSON.stringify(["sidePanel", "tabs", "storage"]), "permissions must be exactly sidePanel, tabs, storage");
+  assert(!Object.hasOwn(manifest, "host_permissions"), "host_permissions must not be present");
+  assert(!Object.hasOwn(manifest, "content_scripts"), "content_scripts must not be present");
+  assert(manifest.minimum_chrome_version === "114", "minimum_chrome_version must be 114");
+  assert(manifest.content_security_policy?.extension_pages === "script-src 'self'; object-src 'self'", "extension page CSP must allow self only");
+
+  const manifestPaths = [
+    manifest.background?.service_worker,
+    manifest.side_panel?.default_path,
+    ...Object.values(manifest.icons ?? {}),
+    ...Object.values(manifest.action?.default_icon ?? {}),
+  ];
+  for (const path of manifestPaths) {
+    await assertExpectedReference(absoluteDist, "manifest.json", path);
+  }
+
+  for (const path of files) {
+    const absolutePath = safeReleasePath(absoluteDist, path);
+    if (path.endsWith(".html")) {
+      await validateHtml(absoluteDist, path, await readFile(absolutePath, "utf8"));
+    } else if (path.endsWith(".css")) {
+      await validateCss(absoluteDist, path, await readFile(absolutePath, "utf8"));
+    } else if (path.endsWith(".js")) {
+      validateJavaScript(path, await readFile(absolutePath, "utf8"));
+    }
+  }
+
+  for (const [path, expectedSize] of pngSizes) {
+    const metadata = await sharp(safeReleasePath(absoluteDist, path)).metadata();
+    assert(metadata.format === "png", `${path} must be PNG`);
+    assert(metadata.width === expectedSize && metadata.height === expectedSize, `${path} must be ${expectedSize}x${expectedSize}`);
+  }
+
+  let totalBytes = 0;
+  for (const path of files) {
+    totalBytes += (await stat(safeReleasePath(absoluteDist, path))).size;
+  }
+  assert(totalBytes <= 300_000, `dist exceeds 300000 bytes: ${totalBytes}`);
+  return { totalBytes };
+}
+
+function isMain(moduleUrl) {
+  return Boolean(process.argv[1]) && pathToFileURL(resolve(process.argv[1])).href === moduleUrl;
+}
+
+if (isMain(import.meta.url)) {
+  const root = resolve(import.meta.dirname, "..");
+  const result = await checkDist(resolve(root, "dist"));
+  console.log(`dist check passed: ${result.totalBytes} bytes`);
+}

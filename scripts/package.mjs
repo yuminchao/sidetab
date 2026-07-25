@@ -1,73 +1,58 @@
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { strFromU8, unzipSync, zipSync } from "fflate";
+import {
+  EXPECTED_FILES,
+  assertExactReleaseFiles,
+  safeReleasePath,
+} from "./release-files.mjs";
 
-const root = resolve(import.meta.dirname, "..");
-const dist = resolve(root, "dist");
-const release = resolve(root, "release");
-const requiredFiles = [
-  "manifest.json",
-  "background/service-worker.js",
-  "sidepanel/index.html",
-  "sidepanel/sidebar.css",
-  "sidepanel/sidebar.js",
-  "assets/icons/icon-16.png",
-  "assets/icons/icon-32.png",
-  "assets/icons/icon-48.png",
-  "assets/icons/icon-128.png",
-  "assets/shortcuts/openai.png",
-  "assets/shortcuts/google.png",
-  "assets/shortcuts/github.png",
-];
+const fixedMtime = new Date(Date.UTC(2000, 0, 1, 0, 0, 0));
 
-async function listFiles(directory, prefix = "") {
-  const entries = await readdir(directory, { withFileTypes: true });
-  const files = [];
-  for (const entry of entries) {
-    const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) {
-      files.push(...(await listFiles(resolve(directory, entry.name), relativePath)));
-    } else if (entry.isFile()) {
-      files.push(relativePath);
-    }
+export async function packageDist(projectRoot) {
+  const root = resolve(projectRoot);
+  const dist = resolve(root, "dist");
+  const release = resolve(root, "release");
+  const files = await assertExactReleaseFiles(dist);
+  const zipEntries = {};
+  const fileContents = new Map();
+
+  for (const path of files) {
+    const contents = new Uint8Array(await readFile(safeReleasePath(dist, path)));
+    fileContents.set(path, contents);
+    zipEntries[path] = [contents, { level: 9, mtime: fixedMtime }];
   }
-  return files;
-}
 
-const files = await listFiles(dist);
-const zipEntries = {};
-for (const path of files) {
-  zipEntries[path] = new Uint8Array(await readFile(resolve(dist, path)));
-}
-
-const manifest = JSON.parse(await readFile(resolve(dist, "manifest.json"), "utf8"));
-if (typeof manifest.version !== "string" || !/^\d+\.\d+\.\d+$/.test(manifest.version)) {
-  throw new Error("dist manifest has an invalid version");
-}
-
-const archive = zipSync(zipEntries, { level: 9 });
-await rm(release, { recursive: true, force: true });
-await mkdir(release, { recursive: true });
-const archivePath = resolve(release, `sidetab-lite-${manifest.version}.zip`);
-await writeFile(archivePath, archive);
-
-const unpacked = unzipSync(archive);
-if (!Object.hasOwn(unpacked, "manifest.json")) {
-  throw new Error("manifest.json must be at the ZIP root");
-}
-for (const path of requiredFiles) {
-  if (!Object.hasOwn(unpacked, path)) {
-    throw new Error(`ZIP is missing ${path}`);
+  const manifest = JSON.parse(strFromU8(fileContents.get("manifest.json")));
+  if (typeof manifest.version !== "string" || !/^\d+\.\d+\.\d+$/.test(manifest.version)) {
+    throw new Error("dist manifest has an invalid version");
   }
-}
-for (const path of Object.keys(unpacked)) {
-  if (/^(?:dist|node_modules|src|tests|docs)\//.test(path) || path.endsWith(".map")) {
-    throw new Error(`ZIP contains forbidden entry: ${path}`);
+
+  const archive = zipSync(zipEntries, { level: 9 });
+  await mkdir(release, { recursive: true });
+  const archivePath = safeReleasePath(release, `sidetab-lite-${manifest.version}.zip`);
+  await writeFile(archivePath, archive);
+
+  const unpacked = unzipSync(archive);
+  const unpackedFiles = Object.keys(unpacked).sort();
+  if (JSON.stringify(unpackedFiles) !== JSON.stringify(EXPECTED_FILES)) {
+    throw new Error("ZIP entries do not match the expected release files");
   }
-}
-const packagedManifest = JSON.parse(strFromU8(unpacked["manifest.json"]));
-if (packagedManifest.version !== manifest.version) {
-  throw new Error("ZIP manifest version does not match dist");
+  const packagedManifest = JSON.parse(strFromU8(unpacked["manifest.json"]));
+  if (packagedManifest.version !== manifest.version) {
+    throw new Error("ZIP manifest version does not match dist");
+  }
+
+  return { archivePath, bytes: archive.byteLength };
 }
 
-console.log(`package created: ${archivePath} (${archive.byteLength} bytes)`);
+function isMain(moduleUrl) {
+  return Boolean(process.argv[1]) && pathToFileURL(resolve(process.argv[1])).href === moduleUrl;
+}
+
+if (isMain(import.meta.url)) {
+  const root = resolve(import.meta.dirname, "..");
+  const result = await packageDist(root);
+  console.log(`package created: ${result.archivePath} (${result.bytes} bytes)`);
+}

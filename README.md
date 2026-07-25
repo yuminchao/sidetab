@@ -14,13 +14,15 @@ SideTab Lite 是一个 Chrome 侧边栏标签页管理扩展。它支持搜索�
 
 ## 开发与打包
 
+需要 Node.js 20.11 或更高版本。项目直接锁定 Vite 6.4.3，其 Node 引擎范围覆盖 Node 20.11；请使用仓库中的 `package-lock.json` 安装一致的依赖版本。
+
 ```powershell
 npm install
 npm test -- --run
 npm run package
 ```
 
-`npm run package` 会依次执行类型检查、测试、构建和发布检查，再生成并自验 ZIP。`npm run generate:icons` 可从仓库内的确定性 SVG 定义重新生成全部本地图标。
+`npm run package` 会依次执行类型检查、测试、构建和发布检查，再按固定文件顺序与时间戳生成并自验 ZIP。重复打包会稳定覆盖目标 ZIP，但不会删除 `release/` 中的其他文件。`npm run generate:icons` 可从仓库内的确定性 SVG 定义重新生成全部本地图标。
 
 ## 隐私与权限
 
