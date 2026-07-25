@@ -184,7 +184,7 @@ input:focus-visible {
 
 .tab-main {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-columns: 12px 16px minmax(0, 1fr);
   gap: 6px;
   align-items: center;
   width: 100%;
@@ -195,10 +195,6 @@ input:focus-visible {
   border-radius: 0;
   background: transparent;
   text-align: left;
-}
-
-.tab-row[data-has-pin="true"] .tab-main {
-  grid-template-columns: 12px 16px minmax(0, 1fr);
 }
 
 .tab-main:hover:not(:disabled) {
@@ -251,6 +247,10 @@ input:focus-visible {
   background-color: currentColor;
   -webkit-mask: url("../assets/icons/pin.svg") center / contain no-repeat;
   mask: url("../assets/icons/pin.svg") center / contain no-repeat;
+}
+
+.pin-indicator[data-visible="false"] {
+  visibility: hidden;
 }
 
 .tab-close {

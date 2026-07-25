@@ -27,6 +27,21 @@ describe("side panel responsive CSS", () => {
     expect(css).not.toContain('url("/assets/icons/pin.svg")');
   });
 
+  it("reserves the pin column for every tab and hides ordinary pins without removing them", () => {
+    expect(css).toMatch(
+      /\.tab-main\s*{[^}]*grid-template-columns:\s*12px\s+16px\s+minmax\(0,\s*1fr\)/s,
+    );
+    expect(css).toMatch(
+      /\.pin-indicator\[data-visible=["']false["']\]\s*{[^}]*visibility:\s*hidden/s,
+    );
+    expect(css).not.toMatch(
+      /\.tab-row\[data-has-pin=["']true["']\]\s+\.tab-main\s*{[^}]*grid-template-columns/s,
+    );
+    expect(css).not.toMatch(
+      /\.pin-indicator\[data-visible=["']false["']\]\s*{[^}]*display:\s*none/s,
+    );
+  });
+
   it("gives only the tab list vertical scrolling and hides horizontal overflow", () => {
     expect(css).toMatch(/\.sidebar-shell\s*{[^}]*grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto\s+auto/s);
     expect(css).toMatch(/\.shortcut-region\s*{[^}]*grid-row:\s*1/s);
