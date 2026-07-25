@@ -23,6 +23,8 @@ describe("side panel responsive CSS", () => {
     expect(css).not.toMatch(/\.tab-row\s*{[^}]*border-bottom/s);
     expect(css).toMatch(/\.tab-favicon\s*{[^}]*width:\s*16px[^}]*height:\s*16px/s);
     expect(css).not.toMatch(/\.tab-domain\s*{/);
+    expect(css.match(/url\("\.\.\/assets\/icons\/pin\.svg"\)/g)).toHaveLength(2);
+    expect(css).not.toContain('url("/assets/icons/pin.svg")');
   });
 
   it("gives only the tab list vertical scrolling and hides horizontal overflow", () => {
@@ -36,7 +38,9 @@ describe("side panel responsive CSS", () => {
     expect(css).toMatch(/\.bottom-toolbar\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+32px[^}]*padding:\s*6px/s);
     expect(css).toMatch(/\.tab-close\s*{[^}]*width:\s*26px[^}]*height:\s*26px[^}]*opacity:\s*0/s);
     expect(css).toMatch(/\.tab-row:(?:hover|focus-within)[^}]*\.tab-close[^}]*opacity:\s*1/s);
-    expect(css).toMatch(/@media\s*\(pointer:\s*coarse\)[^{]*{[\s\S]*?\.tab-close\s*{[^}]*opacity:\s*1/s);
+    expect(css).toMatch(
+      /@media\s*\(pointer:\s*coarse\)\s*,\s*\(any-pointer:\s*coarse\)\s*{[\s\S]*?\.tab-close\s*{[^}]*opacity:\s*1/s,
+    );
   });
 
   it("supports 180px and 240px panels without positive minimum widths", () => {

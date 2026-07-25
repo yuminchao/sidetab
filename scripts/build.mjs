@@ -32,6 +32,7 @@ try {
 
 await cp(resolve(root, "src/sidepanel/sidebar.css"), resolve(dist, "sidepanel/sidebar.css"));
 await cp(resolve(root, "src/sidepanel/index.html"), resolve(dist, "sidepanel/index.html"));
+await cp(resolve(root, "THIRD_PARTY_NOTICES.md"), resolve(dist, "THIRD_PARTY_NOTICES.md"));
 
 const manifest = JSON.parse(await readFile(resolve(root, "manifest.json"), "utf8"));
 await writeFile(resolve(dist, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);

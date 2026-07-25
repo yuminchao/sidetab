@@ -114,8 +114,14 @@ async function assertExpectedReference(distDirectory, fromFile, rawReference) {
   const withoutSuffix = rawReference.split(/[?#]/, 1)[0];
   const stripped = withoutSuffix.startsWith("./") ? withoutSuffix.slice(2) : withoutSuffix;
   assert(stripped.length > 0, `empty reference in ${fromFile}`);
-  assert(!stripped.split("/").some((segment) => segment === "" || segment === "." || segment === ".."), `invalid reference in ${fromFile}: ${rawReference}`);
-  const releasePath = posix.join(posix.dirname(fromFile), stripped);
+  assert(!stripped.split("/").some((segment) => segment === "" || segment === "."), `invalid reference in ${fromFile}: ${rawReference}`);
+  const releasePath = posix.normalize(posix.join(posix.dirname(fromFile), stripped));
+  assert(
+    releasePath !== ".." &&
+      !releasePath.startsWith("../") &&
+      !posix.isAbsolute(releasePath),
+    `reference escapes dist in ${fromFile}: ${rawReference}`,
+  );
   const absolutePath = safeReleasePath(distDirectory, releasePath);
   assert(expectedFileSet.has(releasePath), `reference is not an expected release file in ${fromFile}: ${releasePath}`);
   const metadata = await stat(absolutePath);

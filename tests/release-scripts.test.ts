@@ -3,14 +3,16 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { unzipSync } from "fflate";
+import { strFromU8, unzipSync } from "fflate";
 import { afterEach, describe, expect, it } from "vitest";
 
 const expectedFiles = [
+  "THIRD_PARTY_NOTICES.md",
   "assets/icons/icon-128.png",
   "assets/icons/icon-16.png",
   "assets/icons/icon-32.png",
   "assets/icons/icon-48.png",
+  "assets/icons/pin.svg",
   "assets/shortcuts/github.png",
   "assets/shortcuts/google.png",
   "assets/shortcuts/openai.png",
@@ -101,6 +103,10 @@ async function createReleaseFixture(): Promise<{ root: string; dist: string; rel
     await mkdir(dirname(target), { recursive: true });
     if (path.endsWith(".png")) {
       await copyFile(resolve(import.meta.dirname, "..", path), target);
+    } else if (path === "assets/icons/pin.svg") {
+      await writeFile(target, '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0" /></svg>');
+    } else if (path === "THIRD_PARTY_NOTICES.md") {
+      await writeFile(target, "Lucide is distributed under the ISC License.\n");
     } else if (path === "manifest.json") {
       await writeFile(target, JSON.stringify(manifest));
     } else if (path === "sidepanel/index.html") {
@@ -126,6 +132,7 @@ describe("release file contract", () => {
     const { EXPECTED_FILES } = await loadReleaseFiles();
 
     expect(EXPECTED_FILES).toEqual(expectedFiles);
+    expect(EXPECTED_FILES).toHaveLength(14);
     expect(EXPECTED_FILES).toEqual([...EXPECTED_FILES].sort());
   });
 
@@ -193,6 +200,32 @@ describe("extension CSP validation", () => {
 });
 
 describe("dist validation", () => {
+  it("accepts a packaged CSS reference that normalizes inside dist", async () => {
+    const fixture = await createReleaseFixture();
+    await overwrite(
+      fixture.dist,
+      "sidepanel/sidebar.css",
+      '.pin { mask: url("../assets/icons/pin.svg"); }',
+    );
+    const { checkDist } = await loadCheckDist();
+
+    await expect(checkDist(fixture.dist)).resolves.toMatchObject({
+      totalBytes: expect.any(Number),
+    });
+  });
+
+  it("builds the real dist with all fourteen reviewed files and validates it", async () => {
+    execFileSync(process.execPath, ["scripts/build.mjs"], { cwd: resolve(".") });
+    const { checkDist } = await loadCheckDist();
+
+    await expect(checkDist(resolve("dist"))).resolves.toMatchObject({
+      totalBytes: expect.any(Number),
+    });
+    await expect(readFile(resolve("dist/THIRD_PARTY_NOTICES.md"), "utf8")).resolves.toContain(
+      "ISC License",
+    );
+  });
+
   it("rejects a manifest path that escapes dist even when the outside file exists", async () => {
     const fixture = await createReleaseFixture();
     const manifestPath = join(fixture.dist, "manifest.json");
@@ -265,6 +298,7 @@ describe("dist validation", () => {
   it.each([
     ['@import "https://example.com/theme.css";', "CSS import"],
     ['.x { background: url("https://example.com/image.png"); }', "remote CSS URL"],
+    ['.x { background: url("../../outside.svg"); }', "escaping CSS URL"],
   ])("rejects unsafe CSS: %s", async (unsafeCss) => {
     const fixture = await createReleaseFixture();
     await overwrite(fixture.dist, "sidepanel/sidebar.css", unsafeCss);
@@ -349,6 +383,8 @@ describe("release packaging", () => {
       createHash("sha256").update(second).digest("hex"),
     );
     expect(Object.keys(unzipSync(first)).sort()).toEqual(expectedFiles);
+    const packaged = unzipSync(first);
+    expect(strFromU8(packaged["THIRD_PARTY_NOTICES.md"]!)).toContain("ISC License");
   });
 
   it("creates the same ZIP in UTC, Shanghai, and Los Angeles", async () => {

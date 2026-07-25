@@ -3,6 +3,7 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 
 export const EXPECTED_FILES = Object.freeze(
   [
+    "THIRD_PARTY_NOTICES.md",
     "manifest.json",
     "background/service-worker.js",
     "sidepanel/index.html",
@@ -12,6 +13,7 @@ export const EXPECTED_FILES = Object.freeze(
     "assets/icons/icon-32.png",
     "assets/icons/icon-48.png",
     "assets/icons/icon-128.png",
+    "assets/icons/pin.svg",
     "assets/shortcuts/openai.png",
     "assets/shortcuts/google.png",
     "assets/shortcuts/github.png",

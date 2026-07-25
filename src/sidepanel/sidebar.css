@@ -240,8 +240,8 @@ input:focus-visible {
   height: 12px;
   color: GrayText;
   background-color: currentColor;
-  -webkit-mask: url("/assets/icons/pin.svg") center / contain no-repeat;
-  mask: url("/assets/icons/pin.svg") center / contain no-repeat;
+  -webkit-mask: url("../assets/icons/pin.svg") center / contain no-repeat;
+  mask: url("../assets/icons/pin.svg") center / contain no-repeat;
 }
 
 .tab-close {
@@ -434,7 +434,7 @@ input:focus-visible {
   }
 }
 
-@media (pointer: coarse) {
+@media (pointer: coarse), (any-pointer: coarse) {
   .tab-close {
     opacity: 1;
   }
