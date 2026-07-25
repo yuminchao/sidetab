@@ -131,8 +131,8 @@ function updateTabRow(row: HTMLElement, tab: TabViewModel): void {
 }
 
 function updateFavicon(container: HTMLElement, tab: TabViewModel): void {
-  const mode = tab.favIconUrl ? "image" : "fallback";
-  const url = tab.favIconUrl ?? "";
+  const url = getLocalFaviconUrl(tab.favIconUrl);
+  const mode = url ? "image" : "fallback";
   const fallbackText = getFallbackText(tab.title);
   const sourceChanged = container.dataset.mode !== mode || container.dataset.url !== url;
 
@@ -157,19 +157,24 @@ function updateFavicon(container: HTMLElement, tab: TabViewModel): void {
 
 function createFavicon(tab: TabViewModel): HTMLElement {
   const fallback = getFallbackText(tab.title);
-  if (!tab.favIconUrl) {
+  const faviconUrl = getLocalFaviconUrl(tab.favIconUrl);
+  if (!faviconUrl) {
     return createFaviconFallback(fallback);
   }
 
   const image = document.createElement("img");
   image.className = "tab-favicon-image";
-  image.src = tab.favIconUrl;
+  image.src = faviconUrl;
   image.loading = "lazy";
   image.width = 16;
   image.height = 16;
   image.alt = "";
   image.dataset.fallback = fallback;
   return image;
+}
+
+function getLocalFaviconUrl(url: string | undefined): string {
+  return url && /^data:image\//i.test(url) ? url : "";
 }
 
 function createFaviconFallback(text: string): HTMLElement {

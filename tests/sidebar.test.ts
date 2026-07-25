@@ -446,7 +446,7 @@ describe("sidebar lifecycle", () => {
     vi.useFakeTimers();
     const attached = deferred<chrome.tabs.Tab>();
     const fake = createFakeChrome({
-      tabs: [fakeTab({ id: 1, favIconUrl: "https://example.com/broken.png" })],
+      tabs: [fakeTab({ id: 1, favIconUrl: "data:image/png;base64,broken" })],
     });
     fake.methods.get.mockReturnValueOnce(attached.promise);
     const cleanup = await startSidebar(fake);

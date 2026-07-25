@@ -2,8 +2,12 @@
   "manifest_version": 3,
   "name": "SideTab Lite",
   "version": "0.1.0",
+  "minimum_chrome_version": "114",
   "description": "A fast side panel for managing tabs in the current Chrome window.",
   "permissions": ["sidePanel", "tabs", "storage"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
   "background": {
     "service_worker": "background/service-worker.js",
     "type": "module"

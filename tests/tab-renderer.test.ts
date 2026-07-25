@@ -82,7 +82,7 @@ describe("tab renderer", () => {
         domain: "updated.example",
         active: true,
         pinned: true,
-        favIconUrl: "https://updated.example/icon.png",
+        favIconUrl: "data:image/png;base64,updated",
       }),
     );
     renderer.patch(tab({ id: 999, title: "Missing" }));
@@ -94,7 +94,7 @@ describe("tab renderer", () => {
     expect(row.getAttribute("aria-current")).toBe("page");
     expect(row.querySelector(".tab-title")?.textContent).toBe("Updated");
     expect(row.querySelector(".tab-domain")?.textContent).toBe("updated.example");
-    expect(row.querySelector("img")?.getAttribute("src")).toBe("https://updated.example/icon.png");
+    expect(row.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,updated");
 
     renderer.patch(tab({ active: false }));
     expect(row.hasAttribute("aria-current")).toBe(false);
@@ -106,14 +106,14 @@ describe("tab renderer", () => {
 
   it("preserves an image favicon until its URL changes", () => {
     const renderer = createTabRenderer({ list, empty });
-    renderer.render([tab({ favIconUrl: "https://example.com/icon.png" })]);
+    renderer.render([tab({ favIconUrl: "data:image/png;base64,first" })]);
     const original = list.querySelector("img");
 
     renderer.patch(
       tab({
         title: "Updated title",
         active: true,
-        favIconUrl: "https://example.com/icon.png",
+        favIconUrl: "data:image/png;base64,first",
       }),
     );
 
@@ -123,11 +123,20 @@ describe("tab renderer", () => {
       "切换到 Updated title",
     );
 
-    renderer.patch(tab({ favIconUrl: "https://example.com/new-icon.png" }));
+    renderer.patch(tab({ favIconUrl: "data:image/png;base64,second" }));
     expect(list.querySelector("img")).not.toBe(original);
-    expect(list.querySelector("img")?.getAttribute("src")).toBe(
-      "https://example.com/new-icon.png",
-    );
+    expect(list.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,second");
+  });
+
+  it("uses a text fallback instead of requesting an HTTP favicon", () => {
+    const renderer = createTabRenderer({ list, empty });
+
+    renderer.render([tab({ title: "Private", favIconUrl: "https://example.com/icon.png" })]);
+
+    expect(list.querySelector("img")).toBeNull();
+    expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("P");
+    expect(list.querySelector(".tab-title")?.textContent).toBe("Private");
+    expect(list.querySelector(".tab-domain")?.textContent).toBe("example.com");
   });
 
   it("preserves a fallback for title changes and replaces it when favicon mode changes", () => {
@@ -162,7 +171,7 @@ describe("tab renderer", () => {
 
   it("replaces a failed favicon through one delegated error handler", () => {
     const renderer = createTabRenderer({ list, empty });
-    renderer.render([tab({ title: "Alpha", favIconUrl: "https://example.com/broken.png" })]);
+    renderer.render([tab({ title: "Alpha", favIconUrl: "data:image/png;base64,broken" })]);
     const image = list.querySelector("img");
 
     image?.dispatchEvent(new Event("error"));
@@ -183,7 +192,7 @@ describe("tab renderer", () => {
 
   it("removes delegated listeners when destroyed", () => {
     const renderer = createTabRenderer({ list, empty });
-    renderer.render([tab({ favIconUrl: "https://example.com/broken.png" })]);
+    renderer.render([tab({ favIconUrl: "data:image/png;base64,broken" })]);
     const image = list.querySelector("img");
 
     renderer.destroy();
