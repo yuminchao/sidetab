@@ -1,7 +1,4 @@
-export type TabsActionApi = {
-  update(tabId: number, updateProperties: chrome.tabs.UpdateProperties): Promise<chrome.tabs.Tab>;
-  remove(tabId: number): Promise<void>;
-};
+export type TabsActionApi = Pick<typeof chrome.tabs, "update" | "remove">;
 
 export function createTabActions(api: TabsActionApi) {
   return {

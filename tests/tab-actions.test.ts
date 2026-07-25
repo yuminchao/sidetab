@@ -4,6 +4,20 @@ import { createTabActions } from "../src/sidepanel/tab-actions";
 
 const tab = { id: 7, windowId: 3, index: 0 } as chrome.tabs.Tab;
 
+type Assert<Condition extends true> = Condition;
+type ChromeTabsSupportsTabActions = Assert<
+  typeof chrome.tabs extends Parameters<typeof createTabActions>[0] ? true : false
+>;
+type ChromeTabsSupportsShortcutActions = Assert<
+  typeof chrome.tabs extends Parameters<typeof createShortcutActions>[0] ? true : false
+>;
+
+const compileTimeCompatibility: [ChromeTabsSupportsTabActions, ChromeTabsSupportsShortcutActions] = [
+  true,
+  true,
+];
+void compileTimeCompatibility;
+
 describe("tab actions", () => {
   it("activates exactly the requested tab", async () => {
     const update = vi.fn().mockResolvedValue(tab);

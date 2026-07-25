@@ -46,6 +46,16 @@ async function flushAttached(): Promise<void> {
   await Promise.resolve();
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("tab event subscription", () => {
   it("registers one stable listener for each supported event", () => {
     const { api, events, handlers } = setup();
@@ -172,5 +182,33 @@ describe("tab event subscription", () => {
     for (const handler of Object.values(handlers)) {
       expect(handler).not.toHaveBeenCalled();
     }
+  });
+
+  it("invalidates an in-flight attached tab when unsubscribed", async () => {
+    const request = deferred<chrome.tabs.Tab>();
+    const get = vi.fn(() => request.promise);
+    const { api, events, handlers } = setup(get);
+    const unsubscribe = subscribeToTabEvents(api, 10, handlers);
+
+    events.onAttached.emit(11, { newWindowId: 10, newPosition: 1 });
+    expect(get).toHaveBeenCalledWith(11);
+    unsubscribe();
+    request.resolve(tab({ id: 11, windowId: 10 }));
+    await flushAttached();
+
+    expect(handlers.attached).not.toHaveBeenCalled();
+  });
+
+  it("safely ignores an in-flight attached rejection after unsubscribe", async () => {
+    const request = deferred<chrome.tabs.Tab>();
+    const { api, events, handlers } = setup(() => request.promise);
+    const unsubscribe = subscribeToTabEvents(api, 10, handlers);
+
+    events.onAttached.emit(11, { newWindowId: 10, newPosition: 1 });
+    unsubscribe();
+    request.reject(new Error("gone"));
+    await flushAttached();
+
+    expect(handlers.attached).not.toHaveBeenCalled();
   });
 });

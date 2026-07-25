@@ -1,8 +1,6 @@
 import { normalizeShortcutUrl } from "./shortcut-model";
 
-export type ShortcutTabsApi = {
-  create(createProperties: chrome.tabs.CreateProperties): Promise<chrome.tabs.Tab>;
-};
+export type ShortcutTabsApi = Pick<typeof chrome.tabs, "create">;
 
 export function createShortcutActions(api: ShortcutTabsApi) {
   return {

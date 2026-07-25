@@ -13,6 +13,8 @@ export function subscribeToTabEvents(
   currentWindowId: number,
   handlers: TabEventHandlers,
 ): () => void {
+  let active = true;
+
   const onCreated = (tab: chrome.tabs.Tab): void => {
     if (tab.windowId === currentWindowId) {
       handlers.created(tab);
@@ -57,7 +59,7 @@ export function subscribeToTabEvents(
   async function forwardAttachedTab(tabId: number): Promise<void> {
     try {
       const tab = await tabsApi.get(tabId);
-      if (tab.windowId === currentWindowId) {
+      if (active && tab.windowId === currentWindowId) {
         handlers.attached(tab);
       }
     } catch {
@@ -74,6 +76,10 @@ export function subscribeToTabEvents(
   tabsApi.onDetached.addListener(onDetached);
 
   return () => {
+    if (!active) {
+      return;
+    }
+    active = false;
     tabsApi.onCreated.removeListener(onCreated);
     tabsApi.onRemoved.removeListener(onRemoved);
     tabsApi.onUpdated.removeListener(onUpdated);
