@@ -7,5 +7,8 @@ describe("extension manifest", () => {
     expect(manifest.permissions).toEqual(["sidePanel", "tabs", "storage"]);
     expect(manifest).not.toHaveProperty("host_permissions");
     expect(manifest).not.toHaveProperty("content_scripts");
+    expect(manifest.background.service_worker).toBe("background/service-worker.js");
+    expect(manifest.background.type).toBe("module");
+    expect(manifest.side_panel.default_path).toBe("sidepanel/index.html");
   });
 });
