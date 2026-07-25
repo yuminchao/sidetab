@@ -37,6 +37,10 @@ describe("shortcut model", () => {
     expect(normalizeShortcutUrl(" example.com ")).toBe("https://example.com/");
   });
 
+  it("normalizes a hostname with a port without a scheme", () => {
+    expect(normalizeShortcutUrl("example.com:8080")).toBe("https://example.com:8080/");
+  });
+
   it("preserves an HTTPS URL path while normalizing", () => {
     expect(normalizeShortcutUrl("https://example.com/docs/getting-started")).toBe(
       "https://example.com/docs/getting-started",
@@ -94,6 +98,81 @@ describe("shortcut model", () => {
   it("returns a format error without throwing for malformed persisted data", () => {
     expect(() => validateShortcutSettings({ enabled: true })).not.toThrow();
     expect(validateShortcutSettings({ enabled: true })).toEqual({
+      ok: false,
+      message: "快捷网站设置格式无效",
+    });
+  });
+
+  it("creates a fresh format error for each invalid input", () => {
+    const first = validateShortcutSettings(null);
+    if (!first.ok) {
+      first.message = "changed";
+    }
+
+    expect(validateShortcutSettings(null)).toEqual({
+      ok: false,
+      message: "快捷网站设置格式无效",
+    });
+  });
+
+  it("captures enabled once when its getter changes", () => {
+    let reads = 0;
+    const input = {
+      get enabled() {
+        return reads++ === 0;
+      },
+      items: [shortcut()],
+    };
+
+    expect(validateShortcutSettings(input)).toEqual({
+      ok: true,
+      value: { enabled: true, items: [shortcut({ url: "https://example.com/" })] },
+    });
+  });
+
+  it("captures an icon once when its getter changes", () => {
+    let reads = 0;
+    const item = {
+      id: "example",
+      name: "Example",
+      url: "https://example.com",
+      get icon() {
+        return reads++ === 0 ? "letter" : "star";
+      },
+    };
+
+    expect(validateShortcutSettings({ enabled: true, items: [item] })).toEqual({
+      ok: true,
+      value: { enabled: true, items: [shortcut({ url: "https://example.com/" })] },
+    });
+  });
+
+  it("uses the checked array length when a Proxy exposes a later thirteenth item", () => {
+    const source = Array.from({ length: 13 }, (_, index) => shortcut({ id: `site-${index}`, url: `https://site-${index}.example` }));
+    let lengthReads = 0;
+    const items = new Proxy(source, {
+      get(target, property, receiver) {
+        if (property === "length") {
+          return lengthReads++ === 0 ? 12 : 13;
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    const result = validateShortcutSettings({ enabled: true, items });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.items).toHaveLength(12);
+    }
+  });
+
+  it("returns a format error for a revoked Proxy", () => {
+    const { proxy, revoke } = Proxy.revocable({ enabled: true, items: [] }, {});
+    revoke();
+
+    expect(() => validateShortcutSettings(proxy)).not.toThrow();
+    expect(validateShortcutSettings(proxy)).toEqual({
       ok: false,
       message: "快捷网站设置格式无效",
     });

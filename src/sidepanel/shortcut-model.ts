@@ -23,7 +23,6 @@ const defaultShortcuts: readonly Shortcut[] = [
 ];
 
 const supportedIcons = new Set<ShortcutIcon>(["openai", "google", "github", "letter"]);
-const invalidFormat: ValidationResult = { ok: false, message: "快捷网站设置格式无效" };
 
 export function createDefaultShortcutSettings(): ShortcutSettings {
   return {
@@ -34,7 +33,8 @@ export function createDefaultShortcutSettings(): ShortcutSettings {
 
 export function normalizeShortcutUrl(raw: string): string {
   const trimmed = raw.trim();
-  const candidate = /^[a-z][a-z\d+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  const scheme = /^([a-z][a-z\d+.-]*):/i.exec(trimmed)?.[1];
+  const candidate = scheme && !scheme.includes(".") ? trimmed : `https://${trimmed}`;
 
   try {
     const url = new URL(candidate);
@@ -52,10 +52,18 @@ export function normalizeShortcutUrl(raw: string): string {
 
 export function validateShortcutSettings(input: unknown): ValidationResult {
   try {
-    if (!isRecord(input) || typeof input.enabled !== "boolean" || !Array.isArray(input.items)) {
-      return invalidFormat;
+    if (!isRecord(input)) {
+      return invalidFormat();
     }
-    if (input.items.length > 12) {
+
+    const enabled = input.enabled;
+    const rawItems = input.items;
+    if (typeof enabled !== "boolean" || !Array.isArray(rawItems)) {
+      return invalidFormat();
+    }
+
+    const length = rawItems.length;
+    if (length > 12) {
       return { ok: false, message: "最多只能添加 12 个快捷网站" };
     }
 
@@ -63,19 +71,26 @@ export function validateShortcutSettings(input: unknown): ValidationResult {
     const urls = new Set<string>();
     const items: Shortcut[] = [];
 
-    for (const item of input.items) {
-      if (
-        !isRecord(item) ||
-        typeof item.id !== "string" ||
-        typeof item.name !== "string" ||
-        typeof item.url !== "string" ||
-        !isShortcutIcon(item.icon)
-      ) {
-        return invalidFormat;
+    for (let index = 0; index < length; index += 1) {
+      const item = rawItems[index];
+      if (!isRecord(item)) {
+        return invalidFormat();
       }
 
       const id = item.id;
-      const name = item.name.trim();
+      const rawName = item.name;
+      const rawUrl = item.url;
+      const icon = item.icon;
+      if (
+        typeof id !== "string" ||
+        typeof rawName !== "string" ||
+        typeof rawUrl !== "string" ||
+        !isShortcutIcon(icon)
+      ) {
+        return invalidFormat();
+      }
+
+      const name = rawName.trim();
       if (!name) {
         return { ok: false, message: "网站名称不能为空" };
       }
@@ -85,7 +100,7 @@ export function validateShortcutSettings(input: unknown): ValidationResult {
 
       let url: string;
       try {
-        url = normalizeShortcutUrl(item.url);
+        url = normalizeShortcutUrl(rawUrl);
       } catch {
         return { ok: false, message: "仅支持 HTTP 或 HTTPS 地址" };
       }
@@ -95,13 +110,17 @@ export function validateShortcutSettings(input: unknown): ValidationResult {
 
       ids.add(id);
       urls.add(url);
-      items.push({ id, name, url, icon: item.icon });
+      items.push({ id, name, url, icon });
     }
 
-    return { ok: true, value: { enabled: input.enabled, items } };
+    return { ok: true, value: { enabled, items } };
   } catch {
-    return invalidFormat;
+    return invalidFormat();
   }
+}
+
+function invalidFormat(): ValidationResult {
+  return { ok: false, message: "快捷网站设置格式无效" };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
