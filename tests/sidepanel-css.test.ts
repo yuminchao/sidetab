@@ -29,6 +29,10 @@ describe("side panel responsive CSS", () => {
 
   it("gives only the tab list vertical scrolling and hides horizontal overflow", () => {
     expect(css).toMatch(/\.sidebar-shell\s*{[^}]*grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto\s+auto/s);
+    expect(css).toMatch(/\.shortcut-region\s*{[^}]*grid-row:\s*1/s);
+    expect(css).toMatch(/\.tab-region\s*{[^}]*grid-row:\s*2/s);
+    expect(css).toMatch(/\.status-message\s*{[^}]*grid-row:\s*3/s);
+    expect(css).toMatch(/\.bottom-toolbar\s*{[^}]*grid-row:\s*4/s);
     expect(css).toMatch(/\.tab-region\s*{[^}]*overflow:\s*hidden/s);
     expect(css).toMatch(/\.tab-list\s*{[^}]*overflow-y:\s*auto[^}]*overflow-x:\s*hidden/s);
     expect(css).toMatch(/\.status-message:empty\s*{[^}]*display:\s*none/s);
