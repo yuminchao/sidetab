@@ -1,13 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDefaultShortcutSettings } from "../src/sidepanel/shortcut-model";
-import {
-  bootstrapSidebar,
-  startSidebar,
-  type SidebarDependencies,
-} from "../src/sidepanel/sidebar";
+import { startSidebar, type SidebarDependencies } from "../src/sidepanel/sidebar";
 import { createFakeChrome, deferred, fakeTab } from "./helpers/fake-chrome";
 
 function installFixture(): void {
+  delete document.documentElement.dataset.ready;
   document.body.innerHTML = `
     <div id="shortcut-strip" hidden></div>
     <input id="tab-search" />
@@ -67,10 +64,6 @@ function input(value: string): void {
   search.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-function lifecycleTarget(): EventTarget & Pick<Window, "addEventListener" | "removeEventListener"> {
-  return new EventTarget() as EventTarget & Pick<Window, "addEventListener" | "removeEventListener">;
-}
-
 async function flush(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
@@ -82,8 +75,10 @@ describe("sidebar lifecycle", () => {
   });
 
   afterEach(() => {
+    window.dispatchEvent(new Event("pagehide"));
     vi.useRealTimers();
-    Reflect.deleteProperty(globalThis, "chrome");
+    vi.unstubAllGlobals();
+    vi.resetModules();
   });
 
   it("loads the current window and shortcuts with exact arguments and renders initial state", async () => {
@@ -323,71 +318,97 @@ describe("sidebar lifecycle", () => {
     for (const event of Object.values(fake.events)) expect(event.listenerCount).toBe(0);
   });
 
-  it("invalidates deferred initialization when pagehide happens before startup resolves", async () => {
+  it("auto entry invalidates deferred initialization when pagehide happens before startup resolves", async () => {
     const currentWindow = deferred<chrome.windows.Window>();
     const storage = deferred<Record<string, unknown>>();
     const fake = createFakeChrome();
     fake.methods.getCurrent.mockReturnValueOnce(currentWindow.promise);
     fake.methods.storageGet.mockReturnValueOnce(storage.promise);
-    const lifecycle = lifecycleTarget();
+    vi.stubGlobal("chrome", {
+      tabs: fake.tabs,
+      windows: fake.windows,
+      storage: { local: fake.storage },
+    });
+    vi.resetModules();
 
-    const started = bootstrapSidebar(fake, lifecycle);
+    const sidebarModule = await import("../src/sidepanel/sidebar");
+    expect(sidebarModule).not.toHaveProperty("bootstrapSidebar");
     expect(fake.methods.getCurrent).toHaveBeenCalledOnce();
     expect(fake.methods.storageGet).toHaveBeenCalledOnce();
-    lifecycle.dispatchEvent(new Event("pagehide"));
+    window.dispatchEvent(new Event("pagehide"));
     currentWindow.resolve({ id: 10 } as chrome.windows.Window);
     storage.resolve({});
-    await started;
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(fake.methods.query).not.toHaveBeenCalled();
     for (const event of Object.values(fake.events)) expect(event.listenerCount).toBe(0);
-    input("missing");
-    await new Promise((resolve) => setTimeout(resolve, 110));
     expect(rowIds()).toEqual([]);
+    expect(document.documentElement.dataset.ready).toBeUndefined();
   });
 
-  it("cleans deferred query listeners after an early pagehide and ignores its late result", async () => {
+  it("auto entry cleans deferred query listeners after an early pagehide and ignores its late result", async () => {
     const query = deferred<chrome.tabs.Tab[]>();
     const fake = createFakeChrome();
     fake.methods.query.mockReturnValueOnce(query.promise);
-    const lifecycle = lifecycleTarget();
-    const started = bootstrapSidebar(fake, lifecycle);
-    await flush();
-    expect(fake.methods.query).toHaveBeenCalledWith({ windowId: 10 });
+    vi.stubGlobal("chrome", {
+      tabs: fake.tabs,
+      windows: fake.windows,
+      storage: { local: fake.storage },
+    });
+    vi.resetModules();
+    await import("../src/sidepanel/sidebar");
+    await vi.waitFor(() =>
+      expect(fake.methods.query).toHaveBeenCalledWith({ windowId: 10 }),
+    );
 
-    lifecycle.dispatchEvent(new Event("pagehide"));
+    window.dispatchEvent(new Event("pagehide"));
     query.resolve([fakeTab()]);
-    await started;
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(rowIds()).toEqual([]);
     for (const event of Object.values(fake.events)) expect(event.listenerCount).toBe(0);
+    expect(document.documentElement.dataset.ready).toBeUndefined();
   });
 
-  it("keeps the normal bootstrap active until pagehide and cleans it only once", async () => {
+  it("auto entry stays active until pagehide and cleans up only once", async () => {
     const fake = createFakeChrome({ tabs: [fakeTab()] });
-    const lifecycle = lifecycleTarget();
-    await bootstrapSidebar(fake, lifecycle);
-    expect(fake.events.onCreated.listenerCount).toBe(1);
+    const abort = vi.spyOn(AbortController.prototype, "abort");
+    vi.stubGlobal("chrome", {
+      tabs: fake.tabs,
+      windows: fake.windows,
+      storage: { local: fake.storage },
+    });
+    vi.resetModules();
+    await import("../src/sidepanel/sidebar");
+    await vi.waitFor(() => expect(fake.events.onCreated.listenerCount).toBe(1));
 
-    lifecycle.dispatchEvent(new Event("pagehide"));
-    lifecycle.dispatchEvent(new Event("pagehide"));
+    window.dispatchEvent(new Event("pagehide"));
+    window.dispatchEvent(new Event("pagehide"));
 
+    expect(abort).not.toHaveBeenCalled();
     for (const event of Object.values(fake.events)) {
       expect(event.listenerCount).toBe(0);
       expect(event.removed).toHaveLength(1);
     }
   });
 
-  it("removes the early pagehide listener and handles startup rejection", async () => {
+  it("auto entry removes pagehide and handles startup rejection", async () => {
     element("tab-list").remove();
     const fake = createFakeChrome();
-    const lifecycle = lifecycleTarget();
-    const removeEventListener = vi.spyOn(lifecycle, "removeEventListener");
+    const removeEventListener = vi.spyOn(window, "removeEventListener");
+    vi.stubGlobal("chrome", {
+      tabs: fake.tabs,
+      windows: fake.windows,
+      storage: { local: fake.storage },
+    });
+    vi.resetModules();
 
-    await expect(bootstrapSidebar(fake, lifecycle)).resolves.toBeUndefined();
+    await import("../src/sidepanel/sidebar");
+    await vi.waitFor(() =>
+      expect(element("status-message").textContent).toContain("tab-list"),
+    );
 
     expect(removeEventListener).toHaveBeenCalledWith("pagehide", expect.any(Function));
-    expect(element("status-message").textContent).toContain("tab-list");
   });
 
   it.each([

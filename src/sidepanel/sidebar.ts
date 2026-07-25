@@ -312,7 +312,7 @@ function findTabRow(list: HTMLElement, tabId: number): HTMLElement | undefined {
   );
 }
 
-export function bootstrapSidebar(
+function bootstrapSidebar(
   deps: SidebarDependencies,
   lifecycleTarget: Pick<Window, "addEventListener" | "removeEventListener">,
 ): Promise<void> {
@@ -324,9 +324,12 @@ export function bootstrapSidebar(
       return;
     }
     closed = true;
-    controller.abort();
-    cleanup?.();
-    cleanup = undefined;
+    if (cleanup) {
+      cleanup();
+      cleanup = undefined;
+    } else {
+      controller.abort();
+    }
   };
 
   lifecycleTarget.addEventListener("pagehide", onPageHide, { once: true });
