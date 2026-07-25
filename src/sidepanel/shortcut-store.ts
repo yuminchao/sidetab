@@ -14,17 +14,18 @@ const shortcutSettingsKey = "shortcutSettings";
 export function createShortcutStore(area: StorageArea) {
   return {
     async load(): Promise<ShortcutSettings> {
-      let stored: Record<string, unknown>;
+      let persisted: unknown;
       try {
-        stored = await area.get(shortcutSettingsKey);
+        const stored = await area.get(shortcutSettingsKey);
         if (!Object.hasOwn(stored, shortcutSettingsKey)) {
           return createDefaultShortcutSettings();
         }
+        persisted = stored[shortcutSettingsKey];
       } catch {
         throw new Error("无法读取快捷网站设置");
       }
 
-      const validation = validateShortcutSettings(stored[shortcutSettingsKey]);
+      const validation = validateShortcutSettings(persisted);
       return validation.ok ? copySettings(validation.value) : createDefaultShortcutSettings();
     },
 
@@ -34,13 +35,13 @@ export function createShortcutStore(area: StorageArea) {
         throw new Error(validation.message);
       }
 
-      const written = copySettings(validation.value);
+      const normalized = copySettings(validation.value);
       try {
-        await area.set({ [shortcutSettingsKey]: written });
+        await area.set({ [shortcutSettingsKey]: copySettings(normalized) });
       } catch {
         throw new Error("无法保存快捷网站设置");
       }
-      return copySettings(written);
+      return copySettings(normalized);
     },
 
     async reset(): Promise<ShortcutSettings> {

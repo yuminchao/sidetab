@@ -49,6 +49,17 @@ describe("shortcut store", () => {
     await expect(createShortcutStore(area).load()).rejects.toThrow("无法读取快捷网站设置");
   });
 
+  it("maps persisted setting getter failures to the domain error", async () => {
+    const stored = Object.defineProperty({}, storedKey, {
+      get() {
+        throw new Error("getter exploded");
+      },
+    });
+    const area = createArea({ get: vi.fn().mockResolvedValue(stored) });
+
+    await expect(createShortcutStore(area).load()).rejects.toThrow("无法读取快捷网站设置");
+  });
+
   it("writes exactly the normalized settings and returns them", async () => {
     const area = createArea();
     const settings = {
@@ -82,6 +93,28 @@ describe("shortcut store", () => {
     const area = createArea({ set: vi.fn().mockRejectedValue(new Error("storage unavailable")) });
 
     await expect(createShortcutStore(area).save(createDefaultShortcutSettings())).rejects.toThrow("无法保存快捷网站设置");
+  });
+
+  it("returns a private normalized snapshot when storage mutates the save payload", async () => {
+    const settings = {
+      enabled: true,
+      items: [{ id: "example", name: "  Example  ", url: " example.com ", icon: "letter" as const }],
+    };
+    const area = createArea({
+      set: vi.fn().mockImplementation(async (items) => {
+        const payload = items[storedKey] as typeof settings;
+        payload.items[0]!.name = "Mutated by storage";
+      }),
+    });
+
+    await expect(createShortcutStore(area).save(settings)).resolves.toEqual({
+      enabled: true,
+      items: [{ id: "example", name: "Example", url: "https://example.com/", icon: "letter" }],
+    });
+    expect(settings).toEqual({
+      enabled: true,
+      items: [{ id: "example", name: "  Example  ", url: " example.com ", icon: "letter" }],
+    });
   });
 
   it("writes and returns fresh default settings when reset", async () => {
