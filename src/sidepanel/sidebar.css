@@ -168,7 +168,7 @@ input:focus-visible {
 
 .tab-main {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
+  grid-template-columns: 20px minmax(0, 1fr) 24px;
   gap: 8px;
   align-items: center;
   min-width: 0;
@@ -225,6 +225,20 @@ input:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.pin-indicator {
+  display: block;
+  width: 24px;
+  color: GrayText;
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+  visibility: hidden;
+}
+
+.tab-row[data-pinned="true"] .pin-indicator {
+  visibility: visible;
 }
 
 .tab-title {
@@ -368,7 +382,7 @@ input:focus-visible {
   border-color: AccentColor;
 }
 
-@media (max-width: 240px) {
+@media (max-width: 340px) {
   #shortcut-dialog {
     width: calc(100vw - 12px);
   }

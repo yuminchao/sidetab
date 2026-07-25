@@ -55,7 +55,10 @@ function createFixture(): ShortcutRendererElements & {
   document.body.append(strip, settingsButton, dialog);
 
   dialog.showModal = vi.fn(() => dialog.setAttribute("open", ""));
-  dialog.close = vi.fn(() => dialog.removeAttribute("open"));
+  dialog.close = vi.fn(() => {
+    dialog.removeAttribute("open");
+    dialog.dispatchEvent(new Event("close"));
+  });
 
   return { strip, dialog, form, enabled, editor, error, add, reset, settingsButton, cancel, save };
 }
@@ -106,6 +109,43 @@ describe("shortcut renderer", () => {
 
     expect(onOpen).toHaveBeenCalledOnce();
     expect(onOpen).toHaveBeenCalledWith("https://example.com/");
+  });
+
+  it("reports rejected shortcut opens without an unhandled rejection", async () => {
+    const onOpenError = vi.fn();
+    onOpen.mockRejectedValueOnce(new Error("Open failed"));
+    const renderer = createShortcutRenderer(elements, { onOpen, onSave, onOpenError });
+    renderer.render(settings());
+
+    click(elements.strip.querySelector(".shortcut-button"));
+
+    await vi.waitFor(() => expect(onOpenError).toHaveBeenCalledWith("Open failed"));
+  });
+
+  it("replaces a failed default icon through one delegated error handler", () => {
+    const renderer = createShortcutRenderer(elements, { onOpen, onSave });
+    renderer.render({ ...createDefaultShortcutSettings(), enabled: true });
+    const image = elements.strip.querySelector("img");
+
+    image?.dispatchEvent(new Event("error"));
+
+    const firstButton = elements.strip.querySelector(".shortcut-button");
+    expect(firstButton?.querySelector("img")).toBeNull();
+    expect(firstButton?.querySelector(".shortcut-letter")?.textContent).toBe("O");
+
+    renderer.render({ ...createDefaultShortcutSettings(), enabled: true });
+    const imageAfterRender = elements.strip.querySelector("img");
+    renderer.destroy();
+    imageAfterRender?.dispatchEvent(new Event("error"));
+    expect(elements.strip.querySelector("img")).toBe(imageAfterRender);
+  });
+
+  it("keeps an emoji intact when deriving a letter icon", () => {
+    const renderer = createShortcutRenderer(elements, { onOpen, onSave });
+
+    renderer.render(settings({ items: [shortcut({ name: "😀 Site" })] }));
+
+    expect(elements.strip.querySelector(".shortcut-letter")?.textContent).toBe("😀");
   });
 
   it("opens settings from the gear with an isolated current-settings draft", () => {
@@ -201,6 +241,67 @@ describe("shortcut renderer", () => {
       "Draft name",
     );
     expect(elements.dialog.close).not.toHaveBeenCalled();
+    expect(elements.cancel.disabled).toBe(false);
+  });
+
+  it("disables form actions and blocks cancel or repeat submit while saving", async () => {
+    let resolveSave: ((value: ShortcutSettings) => void) | undefined;
+    onSave.mockImplementationOnce(
+      () =>
+        new Promise<ShortcutSettings>((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    const renderer = createShortcutRenderer(elements, { onOpen, onSave });
+    renderer.openSettings(settings());
+
+    submit(elements.form);
+    expect(
+      Array.from(elements.form.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button")).every(
+        (control) => control.disabled,
+      ),
+    ).toBe(true);
+    click(elements.cancel);
+    submit(elements.form);
+
+    expect(elements.dialog.close).not.toHaveBeenCalled();
+    expect(onSave).toHaveBeenCalledOnce();
+
+    resolveSave?.(settings());
+    await vi.waitFor(() => expect(elements.dialog.close).toHaveBeenCalledOnce());
+  });
+
+  it("ignores an old save after close and reopen while allowing the new session to save", async () => {
+    let resolveOldSave: ((value: ShortcutSettings) => void) | undefined;
+    onSave
+      .mockImplementationOnce(
+        () =>
+          new Promise<ShortcutSettings>((resolve) => {
+            resolveOldSave = resolve;
+          }),
+      )
+      .mockImplementationOnce(async (value: ShortcutSettings) => value);
+    const renderer = createShortcutRenderer(elements, { onOpen, onSave });
+    renderer.openSettings(settings({ items: [shortcut({ name: "Old draft" })] }));
+    submit(elements.form);
+
+    elements.dialog.close();
+    renderer.openSettings(settings({ items: [shortcut({ name: "New draft" })] }));
+    resolveOldSave?.(settings({ items: [shortcut({ name: "Old result" })] }));
+    await Promise.resolve();
+
+    expect(elements.dialog.close).toHaveBeenCalledOnce();
+    expect(elements.dialog.open).toBe(true);
+    expect(elements.editor.querySelector<HTMLInputElement>(".shortcut-name")?.value).toBe(
+      "New draft",
+    );
+
+    submit(elements.form);
+    await vi.waitFor(() => expect(elements.dialog.close).toHaveBeenCalledTimes(2));
+    expect(elements.strip.querySelector(".shortcut-button")?.getAttribute("title")).toBe(
+      "New draft",
+    );
+    expect(onSave).toHaveBeenCalledTimes(2);
   });
 
   it("adds rows up to twelve and reports the thirteenth attempt in place", () => {
@@ -246,6 +347,28 @@ describe("shortcut renderer", () => {
       "B",
       "A",
     ]);
+  });
+
+  it("disables impossible moves and restores focus to the moved item's same action", () => {
+    const items = [
+      shortcut({ id: "a", name: "A", url: "https://a.example/" }),
+      shortcut({ id: "b", name: "B", url: "https://b.example/" }),
+      shortcut({ id: "c", name: "C", url: "https://c.example/" }),
+      shortcut({ id: "d", name: "D", url: "https://d.example/" }),
+    ];
+    const renderer = createShortcutRenderer(elements, { onOpen, onSave });
+    renderer.openSettings(settings({ items }));
+
+    expect(elements.editor.children[0]?.querySelector<HTMLButtonElement>("[data-action='move-up']")?.disabled).toBe(true);
+    expect(elements.editor.children[3]?.querySelector<HTMLButtonElement>("[data-action='move-down']")?.disabled).toBe(true);
+    click(elements.editor.children[2]?.querySelector("[data-action='move-up']") ?? null);
+
+    const movedRow = Array.from(elements.editor.children).find(
+      (row) => row instanceof HTMLElement && row.dataset.shortcutId === "c",
+    );
+    expect(document.activeElement).toBe(
+      movedRow?.querySelector("[data-action='move-up']"),
+    );
   });
 
   it("resets the unsaved draft to the complete disabled defaults", () => {

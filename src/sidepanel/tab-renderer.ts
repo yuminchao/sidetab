@@ -81,7 +81,13 @@ function createTabRow(tab: TabViewModel): HTMLElement {
   domain.className = "tab-domain";
 
   copy.append(title, domain);
-  main.append(favicon, copy);
+
+  const pin = document.createElement("span");
+  pin.className = "pin-indicator";
+  pin.setAttribute("aria-hidden", "true");
+  pin.textContent = "固定";
+
+  main.append(favicon, copy, pin);
 
   const close = document.createElement("button");
   close.className = "tab-close";
@@ -109,16 +115,18 @@ function updateTabRow(row: HTMLElement, tab: TabViewModel): void {
   const title = row.querySelector<HTMLElement>(".tab-title");
   const domain = row.querySelector<HTMLElement>(".tab-domain");
   const favicon = row.querySelector<HTMLElement>(".tab-favicon");
+  const pin = row.querySelector<HTMLElement>(".pin-indicator");
 
-  if (!main || !close || !title || !domain || !favicon) {
+  if (!main || !close || !title || !domain || !favicon || !pin) {
     return;
   }
 
-  main.setAttribute("aria-label", `切换到 ${tab.title}`);
+  main.setAttribute("aria-label", `切换到 ${tab.title}${tab.pinned ? "，已固定" : ""}`);
   close.setAttribute("aria-label", `关闭 ${tab.title}`);
   close.title = `关闭 ${tab.title}`;
   title.textContent = tab.title;
   domain.textContent = tab.domain;
+  pin.title = tab.pinned ? "已固定" : "";
   favicon.replaceChildren(createFavicon(tab));
 }
 
@@ -147,7 +155,7 @@ function createFaviconFallback(text: string): HTMLElement {
 }
 
 function getFallbackText(title: string): string {
-  return title.trim().charAt(0).toLocaleUpperCase();
+  return Array.from(title.trim())[0]?.toLocaleUpperCase() ?? "";
 }
 
 function findTabRow(list: HTMLElement, id: number): HTMLElement | undefined {

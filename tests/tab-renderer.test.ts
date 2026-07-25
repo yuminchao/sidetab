@@ -49,12 +49,15 @@ describe("tab renderer", () => {
     expect(row.querySelector(".tab-title")?.textContent).toBe("Example page");
     expect(row.querySelector(".tab-domain")?.textContent).toBe("example.com");
     expect(row.querySelector<HTMLButtonElement>("[data-action='activate']")?.ariaLabel).toBe(
-      "切换到 Example page",
+      "切换到 Example page，已固定",
     );
     expect(row.querySelector<HTMLButtonElement>("[data-action='close']")?.ariaLabel).toBe(
       "关闭 Example page",
     );
     expect(row.querySelector("img")).toMatchObject({ loading: "lazy", alt: "", width: 16, height: 16 });
+    expect(row.querySelector(".pin-indicator")?.textContent).toBe("固定");
+    expect(row.querySelector<HTMLElement>(".pin-indicator")?.title).toBe("已固定");
+    expect(list.children[1]?.querySelector(".pin-indicator")).not.toBeNull();
   });
 
   it("shows the empty state and clears stale rows", () => {
@@ -95,6 +98,10 @@ describe("tab renderer", () => {
 
     renderer.patch(tab({ active: false }));
     expect(row.hasAttribute("aria-current")).toBe(false);
+    expect(row.dataset.pinned).toBe("false");
+    expect(row.querySelector<HTMLButtonElement>(".tab-main")?.ariaLabel).toBe(
+      "切换到 Example page",
+    );
   });
 
   it("removes arbitrary IDs safely and reveals the empty state after the final row", () => {
@@ -139,5 +146,32 @@ describe("tab renderer", () => {
     image?.dispatchEvent(new Event("error"));
 
     expect(list.querySelector("img")).toBe(image);
+  });
+
+  it("keeps an emoji intact when deriving a favicon fallback", () => {
+    const renderer = createTabRenderer({ list, empty });
+
+    renderer.render([tab({ title: "😀 Tab" })]);
+
+    expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("😀");
+  });
+
+  it("renders and patches one hundred rows without replacing their nodes", () => {
+    const renderer = createTabRenderer({ list, empty });
+    const tabs = Array.from({ length: 100 }, (_, index) =>
+      tab({ id: index - 50, index, title: `Tab ${index}` }),
+    );
+    renderer.render(tabs);
+    const rows = Array.from(list.children);
+
+    for (const item of tabs) {
+      renderer.patch({ ...item, title: `${item.title} updated`, pinned: true });
+    }
+
+    expect(list.children).toHaveLength(100);
+    expect(Array.from(list.children)).toEqual(rows);
+    expect(list.lastElementChild?.querySelector(".tab-title")?.textContent).toBe(
+      "Tab 99 updated",
+    );
   });
 });
