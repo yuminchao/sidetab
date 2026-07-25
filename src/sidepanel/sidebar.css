@@ -99,6 +99,13 @@ input:focus-visible {
   line-height: 1;
 }
 
+.shortcut-button {
+  width: 32px;
+  height: 32px;
+  border-color: transparent;
+  background: transparent;
+}
+
 .shortcut-button img {
   display: block;
   width: 20px;
@@ -233,6 +240,7 @@ input:focus-visible {
   display: block;
   min-width: 0;
   overflow: hidden;
+  font-family: "Microsoft YaHei", "微软雅黑", "Segoe UI", system-ui, sans-serif;
   font-size: var(--tab-title-font-size);
   line-height: 1.2;
   text-overflow: ellipsis;

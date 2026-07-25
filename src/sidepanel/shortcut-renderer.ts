@@ -6,6 +6,7 @@ import {
   type Shortcut,
   type ShortcutSettings,
 } from "./shortcut-model";
+import { createFaviconCandidates, getHttpOrigin } from "./favicon-model";
 
 export type ShortcutRendererElements = {
   strip: HTMLElement;
@@ -29,6 +30,7 @@ export type ShortcutRendererCallbacks = {
 
 export type ShortcutRenderer = {
   render(settings: ShortcutSettings): void;
+  setFaviconsByOrigin(favicons: ReadonlyMap<string, string>): void;
   openSettings(settings: ShortcutSettings): void;
   setError(message: string): void;
   destroy(): void;
@@ -40,12 +42,6 @@ type EditorSession = {
   saving: boolean;
 };
 
-const shortcutIconPaths = {
-  openai: "/assets/shortcuts/openai.png",
-  google: "/assets/shortcuts/google.png",
-  github: "/assets/shortcuts/github.png",
-} as const;
-
 export function createShortcutRenderer(
   elements: ShortcutRendererElements,
   callbacks: ShortcutRendererCallbacks,
@@ -54,6 +50,7 @@ export function createShortcutRenderer(
   let generation = 0;
   let session: EditorSession | undefined;
   let active = true;
+  let faviconsByOrigin = new Map<string, string>();
 
   const setError = (message: string) => {
     elements.error.textContent = message;
@@ -80,7 +77,7 @@ export function createShortcutRenderer(
     const fragment = document.createDocumentFragment();
     if (settings.enabled) {
       for (const shortcut of settings.items.slice(0, 12)) {
-        fragment.append(createShortcutButton(shortcut));
+        fragment.append(createShortcutButton(shortcut, faviconsByOrigin));
       }
     }
     elements.strip.replaceChildren(fragment);
@@ -189,6 +186,12 @@ export function createShortcutRenderer(
     }
     const button = target.parentElement;
     if (!button?.classList.contains("shortcut-button")) {
+      return;
+    }
+    const nextUrl = target.dataset.nextUrl;
+    if (nextUrl) {
+      target.dataset.nextUrl = "";
+      target.src = nextUrl;
       return;
     }
     target.replaceWith(createShortcutLetter(target.dataset.fallback ?? ""));
@@ -391,6 +394,16 @@ export function createShortcutRenderer(
       previewFontSize(current.tabTitleFontSize);
     },
 
+    setFaviconsByOrigin(favicons) {
+      if (!active || mapsEqual(faviconsByOrigin, favicons)) {
+        return;
+      }
+      faviconsByOrigin = new Map(favicons);
+      if (current.enabled) {
+        renderStrip(current);
+      }
+    },
+
     openSettings(settings) {
       current = copySettings(settings);
       showSettings(current);
@@ -418,7 +431,10 @@ export function createShortcutRenderer(
   };
 }
 
-function createShortcutButton(shortcut: Shortcut): HTMLButtonElement {
+function createShortcutButton(
+  shortcut: Shortcut,
+  faviconsByOrigin: ReadonlyMap<string, string>,
+): HTMLButtonElement {
   const button = document.createElement("button");
   button.className = "shortcut-button";
   button.type = "button";
@@ -426,15 +442,18 @@ function createShortcutButton(shortcut: Shortcut): HTMLButtonElement {
   button.title = shortcut.name;
   button.setAttribute("aria-label", shortcut.name);
   const fallback = getFirstCharacter(shortcut.name);
+  const origin = getHttpOrigin(shortcut.url);
+  const candidates = createFaviconCandidates(faviconsByOrigin.get(origin), shortcut.url);
 
-  if (shortcut.icon === "letter") {
+  if (candidates.length === 0) {
     button.append(createShortcutLetter(fallback));
   } else {
     const image = document.createElement("img");
-    image.src = shortcutIconPaths[shortcut.icon];
+    image.src = candidates[0] as string;
     image.width = 20;
     image.height = 20;
     image.alt = "";
+    image.dataset.nextUrl = candidates[1] ?? "";
     image.dataset.fallback = fallback;
     button.append(image);
   }
@@ -534,6 +553,21 @@ function copySettings(settings: ShortcutSettings): ShortcutSettings {
     tabTitleFontSize: settings.tabTitleFontSize,
     items: settings.items.map((shortcut) => ({ ...shortcut })),
   };
+}
+
+function mapsEqual(
+  left: ReadonlyMap<string, string>,
+  right: ReadonlyMap<string, string>,
+): boolean {
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const [key, value] of left) {
+    if (right.get(key) !== value || !right.has(key)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function swap<T>(items: T[], first: number, second: number): void {

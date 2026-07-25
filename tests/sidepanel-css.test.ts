@@ -62,6 +62,20 @@ describe("side panel responsive CSS", () => {
     );
   });
 
+  it("renders shortcut buttons as transparent borderless 32px icon controls", () => {
+    expect(css).toMatch(
+      /\.shortcut-button\s*{[^}]*width:\s*32px[^}]*height:\s*32px[^}]*border-color:\s*transparent[^}]*background:\s*transparent/s,
+    );
+    expect(css).not.toMatch(/\.shortcut-button\s*{[^}]*display:\s*none/s);
+    expect(css).toMatch(/button:focus-visible[^}]*outline:/s);
+  });
+
+  it("uses Microsoft YaHei first for tab titles while retaining the size variable", () => {
+    expect(css).toMatch(
+      /\.tab-title\s*{[^}]*font-family:\s*"Microsoft YaHei",\s*"微软雅黑",\s*"Segoe UI",\s*system-ui,\s*sans-serif[^}]*font-size:\s*var\(--tab-title-font-size\)/s,
+    );
+  });
+
   it("supports 180px and 240px panels without positive minimum widths", () => {
     expect(css).toContain("@media (max-width: 240px)");
     expect(css).toContain("@media (max-width: 180px)");

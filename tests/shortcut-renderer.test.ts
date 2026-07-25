@@ -158,8 +158,82 @@ describe("shortcut renderer", () => {
     expect(buttons[0]?.dataset.shortcutId).toBe("openai");
     expect(buttons[0]?.getAttribute("aria-label")).toBe("OpenAI");
     expect(buttons[0]?.querySelector("img")?.getAttribute("src")).toBe(
-      "/assets/shortcuts/openai.png",
+      "https://chatgpt.com/favicon.ico",
     );
+  });
+
+  it.each(["openai", "google", "github", "letter"] as const)(
+    "renders the same network favicon candidates for the legacy %s icon value",
+    (icon) => {
+      const renderer = createShortcutRenderer(elements, { onOpen, onSave });
+      renderer.setFaviconsByOrigin(
+        new Map([["https://example.com", "https://cdn.example/icon.png"]]),
+      );
+
+      renderer.render(settings({ items: [shortcut({ icon })] }));
+
+      const image = elements.strip.querySelector("img");
+      expect(image?.getAttribute("src")).toBe("https://cdn.example/icon.png");
+      expect(image?.dataset.nextUrl).toBe("https://example.com/favicon.ico");
+      expect(image?.dataset.fallback).toBe("E");
+      expect(image?.width).toBe(20);
+      expect(image?.height).toBe(20);
+      expect(image?.alt).toBe("");
+    },
+  );
+
+  it("supports HTTP shortcut origins and filters a dangerous mapped URL", () => {
+    const renderer = createShortcutRenderer(elements, { onOpen, onSave });
+    renderer.setFaviconsByOrigin(
+      new Map([["http://example.com", "javascript:alert(1)"]]),
+    );
+
+    renderer.render(settings({ items: [shortcut({ url: "http://example.com/path" })] }));
+
+    const image = elements.strip.querySelector("img");
+    expect(image?.getAttribute("src")).toBe("http://example.com/favicon.ico");
+    expect(image?.dataset.nextUrl).toBe("");
+  });
+
+  it("does not redraw equal favicon maps, redraws changed maps, and copies map state", () => {
+    const renderer = createShortcutRenderer(elements, { onOpen, onSave });
+    const favicons = new Map([["https://example.com", "https://cdn.example/first.png"]]);
+    renderer.setFaviconsByOrigin(favicons);
+    renderer.render(settings());
+    const firstButton = elements.strip.firstElementChild;
+
+    renderer.setFaviconsByOrigin(
+      new Map([["https://example.com", "https://cdn.example/first.png"]]),
+    );
+    expect(elements.strip.firstElementChild).toBe(firstButton);
+
+    favicons.set("https://example.com", "https://cdn.example/mutated.png");
+    renderer.render(settings());
+    expect(elements.strip.querySelector("img")?.getAttribute("src")).toBe(
+      "https://cdn.example/first.png",
+    );
+
+    const buttonBeforeChange = elements.strip.firstElementChild;
+    renderer.setFaviconsByOrigin(
+      new Map([["https://example.com", "https://cdn.example/second.png"]]),
+    );
+    expect(elements.strip.firstElementChild).not.toBe(buttonBeforeChange);
+    expect(elements.strip.querySelector("img")?.getAttribute("src")).toBe(
+      "https://cdn.example/second.png",
+    );
+  });
+
+  it("does not render favicon images or redraw when favicon maps change while disabled", () => {
+    const renderer = createShortcutRenderer(elements, { onOpen, onSave });
+    renderer.render(settings({ enabled: false }));
+    const replaceChildren = vi.spyOn(elements.strip, "replaceChildren");
+
+    renderer.setFaviconsByOrigin(
+      new Map([["https://example.com", "https://cdn.example/icon.png"]]),
+    );
+
+    expect(replaceChildren).not.toHaveBeenCalled();
+    expect(elements.strip.querySelector("img")).toBeNull();
   });
 
   it("opens a shortcut through one delegated strip click", () => {
@@ -183,18 +257,27 @@ describe("shortcut renderer", () => {
     await vi.waitFor(() => expect(onOpenError).toHaveBeenCalledWith("Open failed"));
   });
 
-  it("replaces a failed default icon through one delegated error handler", () => {
+  it("falls back from a mapped favicon to the root and then the shortcut letter", () => {
     const renderer = createShortcutRenderer(elements, { onOpen, onSave });
-    renderer.render({ ...createDefaultShortcutSettings(), enabled: true });
+    renderer.setFaviconsByOrigin(
+      new Map([["https://example.com", "https://cdn.example/icon.png"]]),
+    );
+    renderer.render(settings());
     const image = elements.strip.querySelector("img");
+
+    image?.dispatchEvent(new Event("error"));
+
+    expect(elements.strip.querySelector("img")).toBe(image);
+    expect(image?.getAttribute("src")).toBe("https://example.com/favicon.ico");
+    expect(image?.dataset.nextUrl).toBe("");
 
     image?.dispatchEvent(new Event("error"));
 
     const firstButton = elements.strip.querySelector(".shortcut-button");
     expect(firstButton?.querySelector("img")).toBeNull();
-    expect(firstButton?.querySelector(".shortcut-letter")?.textContent).toBe("O");
+    expect(firstButton?.querySelector(".shortcut-letter")?.textContent).toBe("E");
 
-    renderer.render({ ...createDefaultShortcutSettings(), enabled: true });
+    renderer.render(settings());
     const imageAfterRender = elements.strip.querySelector("img");
     renderer.destroy();
     imageAfterRender?.dispatchEvent(new Event("error"));
@@ -205,6 +288,8 @@ describe("shortcut renderer", () => {
     const renderer = createShortcutRenderer(elements, { onOpen, onSave });
 
     renderer.render(settings({ items: [shortcut({ name: "😀 Site" })] }));
+
+    elements.strip.querySelector("img")?.dispatchEvent(new Event("error"));
 
     expect(elements.strip.querySelector(".shortcut-letter")?.textContent).toBe("😀");
   });
@@ -512,6 +597,8 @@ describe("shortcut renderer", () => {
 
     renderer.render(malicious);
     renderer.openSettings(malicious);
+
+    elements.strip.querySelector("img")?.dispatchEvent(new Event("error"));
 
     expect(document.querySelector("script")).toBeNull();
     expect(elements.strip.querySelector("img")).toBeNull();
