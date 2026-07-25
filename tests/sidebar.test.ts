@@ -112,6 +112,38 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
+  it("disables settings until storage settles and ignores quick click and save", async () => {
+    const storage = deferred<Record<string, unknown>>();
+    const fake = createFakeChrome();
+    fake.methods.storageGet.mockReturnValueOnce(storage.promise);
+
+    const started = startSidebar(fake);
+    await flush();
+    const settingsButton = element<HTMLButtonElement>("shortcut-settings");
+    expect(settingsButton.disabled).toBe(true);
+    click(settingsButton);
+    element<HTMLFormElement>("shortcut-form").dispatchEvent(
+      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+    );
+    expect(element<HTMLDialogElement>("shortcut-dialog").open).toBe(false);
+    expect(fake.methods.storageSet).not.toHaveBeenCalled();
+
+    storage.resolve({
+      shortcutSettings: {
+        enabled: true,
+        items: [{ id: "real", name: "Real setting", url: "https://real.example/", icon: "letter" }],
+      },
+    });
+    const cleanup = await started;
+    expect(settingsButton.disabled).toBe(false);
+    click(settingsButton);
+    expect(element<HTMLDialogElement>("shortcut-dialog").open).toBe(true);
+    expect(element("shortcut-editor-list").querySelector<HTMLInputElement>(".shortcut-name")?.value).toBe(
+      "Real setting",
+    );
+    cleanup();
+  });
+
   it.each(["window", "query"] as const)(
     "keeps shortcut settings available after a %s failure",
     async (failure) => {
@@ -130,6 +162,94 @@ describe("sidebar lifecycle", () => {
       expect(element("status-message").textContent).toBe("无法读取当前窗口的标签页");
       if (failure === "window") expect(fake.methods.query).not.toHaveBeenCalled();
       expect(fake.events.onCreated.listenerCount).toBe(0);
+      cleanup();
+    },
+  );
+
+  it("subscribes before a deferred query and replays buffered events once over the snapshot", async () => {
+    const query = deferred<chrome.tabs.Tab[]>();
+    const fake = createFakeChrome();
+    fake.methods.query.mockReturnValueOnce(query.promise);
+    const list = element("tab-list");
+    const replaceChildren = vi.spyOn(list, "replaceChildren");
+
+    const started = startSidebar(fake);
+    await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledWith({ windowId: 10 }));
+    for (const event of Object.values(fake.events)) expect(event.listenerCount).toBe(1);
+
+    fake.events.onCreated.emit(fakeTab({ id: 3, index: 2, title: "Three" }));
+    fake.events.onRemoved.emit(1, { windowId: 10, isWindowClosing: false });
+    fake.events.onMoved.emit(3, { windowId: 10, fromIndex: 2, toIndex: 0 });
+    fake.events.onActivated.emit({ tabId: 3, windowId: 10 });
+    expect(rowIds()).toEqual([]);
+
+    query.resolve([
+      fakeTab({ id: 1, index: 0, active: true }),
+      fakeTab({ id: 2, index: 1, title: "Two" }),
+      fakeTab({ id: 3, index: 2, title: "Three" }),
+    ]);
+    const cleanup = await started;
+
+    expect(rowIds()).toEqual([3, 2]);
+    expect(row(3).dataset.active).toBe("true");
+    expect(row(2).dataset.active).toBe("false");
+    expect(replaceChildren).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it("preserves attached event order while its tab lookup is deferred", async () => {
+    const query = deferred<chrome.tabs.Tab[]>();
+    const attached = deferred<chrome.tabs.Tab>();
+    const fake = createFakeChrome();
+    fake.methods.query.mockReturnValueOnce(query.promise);
+    fake.methods.get.mockReturnValueOnce(attached.promise);
+    const replaceChildren = vi.spyOn(element("tab-list"), "replaceChildren");
+    const started = startSidebar(fake);
+    await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledOnce());
+
+    fake.events.onAttached.emit(4, { newWindowId: 10, newPosition: 2 });
+    fake.events.onMoved.emit(4, { windowId: 10, fromIndex: 2, toIndex: 0 });
+    fake.events.onDetached.emit(4, { oldWindowId: 10, oldPosition: 0 });
+    query.resolve([
+      fakeTab({ id: 1, index: 0 }),
+      fakeTab({ id: 2, index: 1, title: "Two" }),
+    ]);
+    await flush();
+    expect(replaceChildren).not.toHaveBeenCalled();
+
+    attached.resolve(fakeTab({ id: 4, index: 2, title: "Attached" }));
+    const cleanup = await started;
+    expect(rowIds()).toEqual([1, 2]);
+    expect(replaceChildren).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it.each(["tabs-first", "shortcuts-first"] as const)(
+    "aggregates initialization errors deterministically when %s rejects",
+    async (order) => {
+      const query = deferred<chrome.tabs.Tab[]>();
+      const storage = deferred<Record<string, unknown>>();
+      const fake = createFakeChrome();
+      fake.methods.query.mockReturnValueOnce(query.promise);
+      fake.methods.storageGet.mockReturnValueOnce(storage.promise);
+      const started = startSidebar(fake);
+      await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledOnce());
+
+      if (order === "tabs-first") {
+        query.reject(new Error("tabs unavailable"));
+        await flush();
+        storage.reject(new Error("storage unavailable"));
+      } else {
+        storage.reject(new Error("storage unavailable"));
+        await flush();
+        query.reject(new Error("tabs unavailable"));
+      }
+      const cleanup = await started;
+
+      expect(element("status-message").textContent).toBe(
+        "无法读取当前窗口的标签页；无法读取快捷网站设置",
+      );
+      for (const event of Object.values(fake.events)) expect(event.listenerCount).toBe(0);
       cleanup();
     },
   );
@@ -167,6 +287,38 @@ describe("sidebar lifecycle", () => {
     expect(rowIds()).toEqual([7]);
     cleanup();
   });
+
+  it.each(["older-success", "older-failure"] as const)(
+    "lets only the latest tab operation update status when %s settles last",
+    async (olderResult) => {
+      const older = deferred<chrome.tabs.Tab>();
+      const latest = deferred<chrome.tabs.Tab>();
+      const fake = createFakeChrome({
+        tabs: [fakeTab({ id: 1 }), fakeTab({ id: 2, index: 1, title: "Two" })],
+      });
+      fake.methods.update
+        .mockReturnValueOnce(older.promise)
+        .mockReturnValueOnce(latest.promise);
+      const cleanup = await startSidebar(fake);
+
+      click(row(1).querySelector("[data-action='activate']")!);
+      click(row(2).querySelector("[data-action='activate']")!);
+      if (olderResult === "older-success") {
+        latest.reject(new Error("latest failed"));
+        await flush();
+        older.resolve(fakeTab({ id: 1 }));
+        await flush();
+        expect(element("status-message").textContent).toBe("无法切换到该标签页");
+      } else {
+        latest.resolve(fakeTab({ id: 2 }));
+        await flush();
+        older.reject(new Error("older failed"));
+        await flush();
+        expect(element("status-message").textContent).toBe("");
+      }
+      cleanup();
+    },
+  );
 
   it("opens shortcuts in an active new tab and reports rejected opens", async () => {
     const fake = createFakeChrome({
@@ -360,6 +512,7 @@ describe("sidebar lifecycle", () => {
     await vi.waitFor(() =>
       expect(fake.methods.query).toHaveBeenCalledWith({ windowId: 10 }),
     );
+    fake.events.onCreated.emit(fakeTab({ id: 4, index: 0, title: "Buffered" }));
 
     window.dispatchEvent(new Event("pagehide"));
     query.resolve([fakeTab()]);

@@ -52,11 +52,46 @@ async function startSidebarInternal(
   let currentQuery = "";
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
   let unsubscribeTabs: () => void = () => undefined;
+  let bufferingTabEvents = false;
+  const bufferedTabEvents: Array<Promise<() => void>> = [];
+  type AttachedSlot = { resolve(mutation: () => void): void };
+  const attachedSlotsById = new Map<number, AttachedSlot[]>();
+  const pendingAttachedSlots = new Set<AttachedSlot>();
+  const bufferedAttachedTabs = new WeakSet<chrome.tabs.Tab>();
+  let shortcutSettingsReady = false;
+  let operationGeneration = 0;
+  const statusSlots = {
+    tabs: "",
+    shortcuts: "",
+    operation: "",
+  };
 
-  const setStatus = (message: string): void => {
+  const setStatus = (source: keyof typeof statusSlots, message: string): void => {
     if (active) {
-      elements.status.textContent = message;
+      statusSlots[source] = message;
+      elements.status.textContent = [
+        statusSlots.tabs,
+        statusSlots.shortcuts,
+        statusSlots.operation,
+      ].filter(Boolean).join("；");
     }
+  };
+
+  const blockPendingSettings = (event: MouseEvent): void => {
+    if (!shortcutSettingsReady) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  };
+  elements.settingsButton.disabled = true;
+  elements.settingsButton.addEventListener("click", blockPendingSettings, true);
+
+  const discardPendingAttached = (): void => {
+    for (const slot of pendingAttachedSlots) {
+      slot.resolve(() => undefined);
+    }
+    pendingAttachedSlots.clear();
+    attachedSlotsById.clear();
   };
 
   const shortcutRenderer = createShortcutRenderer(
@@ -72,8 +107,20 @@ async function startSidebarInternal(
       settingsButton: elements.settingsButton,
     },
     {
-      onOpen: (url) => shortcutActions.open(url),
-      onOpenError: setStatus,
+      async onOpen(url) {
+        const generation = ++operationGeneration;
+        try {
+          await shortcutActions.open(url);
+          if (generation === operationGeneration) {
+            setStatus("operation", "");
+          }
+        } catch (error) {
+          if (generation === operationGeneration) {
+            throw error;
+          }
+        }
+      },
+      onOpenError: (message) => setStatus("operation", message),
       onSave: (settings) => shortcutStore.save(settings),
     },
   );
@@ -84,8 +131,12 @@ async function startSidebarInternal(
     }
     active = false;
     unsubscribeTabs();
+    bufferingTabEvents = false;
+    bufferedTabEvents.length = 0;
+    discardPendingAttached();
     elements.list.removeEventListener("click", onListClick);
     elements.search.removeEventListener("input", onSearchInput);
+    elements.settingsButton.removeEventListener("click", blockPendingSettings, true);
     if (searchTimer !== undefined) {
       clearTimeout(searchTimer);
       searchTimer = undefined;
@@ -123,9 +174,22 @@ async function startSidebarInternal(
         ? tabActions.close(tabId)
         : undefined;
     if (operation) {
-      void operation.catch((error: unknown) => {
-        setStatus(error instanceof Error ? error.message : "标签页操作失败");
-      });
+      const generation = ++operationGeneration;
+      void operation.then(
+        () => {
+          if (generation === operationGeneration) {
+            setStatus("operation", "");
+          }
+        },
+        (error: unknown) => {
+          if (generation === operationGeneration) {
+            setStatus(
+              "operation",
+              error instanceof Error ? error.message : "标签页操作失败",
+            );
+          }
+        },
+      );
     }
   };
 
@@ -151,44 +215,65 @@ async function startSidebarInternal(
     cleanup();
   }
 
-  const loadShortcuts = shortcutStore.load().then(
-    (settings) => {
-      if (active) {
-        shortcutRenderer.render(settings);
-      }
-    },
-    () => {
-      if (active) {
-        shortcutRenderer.render(createDefaultShortcutSettings());
-        setStatus("无法读取快捷网站设置");
-      }
-    },
-  );
+  const applyTabEvent = (mutate: () => void, renderLive: () => void): void => {
+    if (!active) {
+      return;
+    }
+    if (bufferingTabEvents) {
+      bufferedTabEvents.push(Promise.resolve(mutate));
+      return;
+    }
+    mutate();
+    renderLive();
+  };
 
-  const loadTabs = loadCurrentWindowTabs(deps, () => active).then(
-    ({ windowId, tabs }) => {
-      if (!active) {
+  const removeTab = (tabId: number): void => {
+    applyTabEvent(
+      () => {
+        tabStore.remove(tabId);
+      },
+      () => {
+        if (currentQuery) {
+          renderFilteredTabs();
+        } else {
+          tabRenderer.remove(tabId);
+        }
+      },
+    );
+  };
+
+  const tabEventHandlers = {
+    created(tab: chrome.tabs.Tab) {
+      applyTabEvent(
+        () => {
+          tabStore.add(tab);
+        },
+        renderFilteredTabs,
+      );
+    },
+    attached(tab: chrome.tabs.Tab) {
+      if (bufferedAttachedTabs.delete(tab)) {
         return;
       }
-      tabStore.initialize(tabs);
-      renderFilteredTabs();
-      unsubscribeTabs = subscribeToTabEvents(deps.tabs, windowId, {
-        created(tab) {
-          if (!active) return;
+      applyTabEvent(
+        () => {
           tabStore.add(tab);
-          renderFilteredTabs();
         },
-        attached(tab) {
-          if (!active) return;
-          tabStore.add(tab);
-          renderFilteredTabs();
-        },
-        updated(tab) {
-          if (!active) return;
-          const previous = tab.id === undefined
+        renderFilteredTabs,
+      );
+    },
+    updated(tab: chrome.tabs.Tab) {
+      let previous: ReturnType<TabStore["list"]>[number] | undefined;
+      let model: ReturnType<TabStore["replace"]>;
+      applyTabEvent(
+        () => {
+          const tabs = tabStore.list();
+          previous = tab.id === undefined
             ? undefined
-            : tabStore.list().find((item) => item.id === tab.id);
-          const model = tabStore.replace(tab);
+            : tabs.find((item) => item.id === tab.id);
+          model = tabStore.replace(tab);
+        },
+        () => {
           if (!model) return;
           const rowExists = findTabRow(elements.list, model.id) !== undefined;
           if (currentQuery || !previous || !rowExists || previous.index !== model.index) {
@@ -197,52 +282,186 @@ async function startSidebarInternal(
             tabRenderer.patch(model);
           }
         },
-        activated(tabId) {
-          if (!active) return;
-          const previousActiveIds = tabStore.list()
-            .filter((tab) => tab.active)
-            .map((tab) => tab.id);
+      );
+    },
+    activated(tabId: number) {
+      let affected = new Set<number>();
+      let tabs: ReturnType<TabStore["list"]> = [];
+      applyTabEvent(
+        () => {
+          const before = tabStore.list();
+          affected = new Set([
+            ...before.filter((tab) => tab.active).map((tab) => tab.id),
+            tabId,
+          ]);
           tabStore.activate(tabId);
+          tabs = tabStore.list();
+        },
+        () => {
           if (currentQuery) {
             renderFilteredTabs();
             return;
           }
-          const affected = new Set([...previousActiveIds, tabId]);
-          for (const tab of tabStore.list()) {
+          for (const tab of tabs) {
             if (affected.has(tab.id)) {
               tabRenderer.patch(tab);
             }
           }
         },
-        removed(tabId) {
-          if (!active) return;
-          tabStore.remove(tabId);
-          if (currentQuery) {
-            renderFilteredTabs();
-          } else {
-            tabRenderer.remove(tabId);
-          }
-        },
-        detached(tabId) {
-          if (!active) return;
-          tabStore.remove(tabId);
-          if (currentQuery) {
-            renderFilteredTabs();
-          } else {
-            tabRenderer.remove(tabId);
-          }
-        },
-        moved(tabId, index) {
-          if (!active) return;
+      );
+    },
+    removed: removeTab,
+    detached: removeTab,
+    moved(tabId: number, index: number) {
+      applyTabEvent(
+        () => {
           tabStore.move(tabId, index);
-          renderFilteredTabs();
         },
-      });
+        renderFilteredTabs,
+      );
+    },
+  };
+
+  const subscribeWithBufferedAttachments = (windowId: number): (() => void) => {
+    type AttachedListener = Parameters<typeof deps.tabs.onAttached.addListener>[0];
+    const attachedListeners = new Map<AttachedListener, AttachedListener>();
+    const wrappedOnAttached = {
+      addListener(listener: AttachedListener): void {
+        const wrapped: AttachedListener = (tabId, attachInfo) => {
+          if (active && bufferingTabEvents && attachInfo.newWindowId === windowId) {
+            let resolve!: (mutation: () => void) => void;
+            const promise = new Promise<() => void>((resolvePromise) => {
+              resolve = resolvePromise;
+            });
+            const slot: AttachedSlot = { resolve };
+            const slots = attachedSlotsById.get(tabId) ?? [];
+            slots.push(slot);
+            attachedSlotsById.set(tabId, slots);
+            pendingAttachedSlots.add(slot);
+            bufferedTabEvents.push(promise);
+          }
+          listener(tabId, attachInfo);
+        };
+        attachedListeners.set(listener, wrapped);
+        deps.tabs.onAttached.addListener(wrapped);
+      },
+      removeListener(listener: AttachedListener): void {
+        const wrapped = attachedListeners.get(listener);
+        if (wrapped) {
+          deps.tabs.onAttached.removeListener(wrapped);
+          attachedListeners.delete(listener);
+        }
+      },
+    } as typeof deps.tabs.onAttached;
+
+    const getAttachedTab = async (tabId: number): Promise<chrome.tabs.Tab> => {
+      const slots = attachedSlotsById.get(tabId);
+      const slot = slots?.shift();
+      if (slots?.length === 0) {
+        attachedSlotsById.delete(tabId);
+      }
+      try {
+        const tab = await deps.tabs.get(tabId);
+        if (slot) {
+          pendingAttachedSlots.delete(slot);
+          if (active && tab.windowId === windowId) {
+            bufferedAttachedTabs.add(tab);
+            slot.resolve(() => {
+              tabStore.add(tab);
+            });
+          } else {
+            slot.resolve(() => undefined);
+          }
+        }
+        return tab;
+      } catch (error) {
+        if (slot) {
+          pendingAttachedSlots.delete(slot);
+          slot.resolve(() => undefined);
+        }
+        throw error;
+      }
+    };
+
+    const tabsApi = new Proxy(deps.tabs, {
+      get(target, property, receiver) {
+        if (property === "onAttached") return wrappedOnAttached;
+        if (property === "get") return getAttachedTab;
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    });
+    return subscribeToTabEvents(tabsApi, windowId, tabEventHandlers);
+  };
+
+  const finishShortcutLoad = (
+    settings: ReturnType<typeof createDefaultShortcutSettings>,
+  ): void => {
+    if (!active) {
+      return;
+    }
+    shortcutRenderer.render(settings);
+    shortcutSettingsReady = true;
+    elements.settingsButton.disabled = false;
+  };
+
+  const loadShortcuts = shortcutStore.load().then(
+    (settings) => {
+      finishShortcutLoad(settings);
     },
     () => {
-      setStatus("无法读取当前窗口的标签页");
+      if (active) {
+        finishShortcutLoad(createDefaultShortcutSettings());
+        setStatus("shortcuts", "无法读取快捷网站设置");
+      }
     },
   );
+
+  const loadTabs = (async () => {
+    try {
+      const currentWindow = await deps.windows.getCurrent();
+      if (!active) return;
+      const windowId = currentWindow.id;
+      if (
+        typeof windowId !== "number" ||
+        !Number.isFinite(windowId) ||
+        !Number.isInteger(windowId)
+      ) {
+        throw new Error("当前窗口缺少有效 ID");
+      }
+
+      bufferingTabEvents = true;
+      unsubscribeTabs = subscribeWithBufferedAttachments(windowId);
+
+      let snapshot: chrome.tabs.Tab[];
+      try {
+        snapshot = await deps.tabs.query({ windowId });
+      } catch {
+        if (active) {
+          unsubscribeTabs();
+          unsubscribeTabs = () => undefined;
+          bufferingTabEvents = false;
+          bufferedTabEvents.length = 0;
+          discardPendingAttached();
+          setStatus("tabs", "无法读取当前窗口的标签页");
+        }
+        return;
+      }
+      if (!active) return;
+
+      tabStore.initialize(snapshot);
+      while (bufferedTabEvents.length > 0) {
+        const pending = bufferedTabEvents.shift();
+        if (!pending) break;
+        const apply = await pending;
+        if (!active) return;
+        apply();
+      }
+      bufferingTabEvents = false;
+      renderFilteredTabs();
+    } catch {
+      setStatus("tabs", "无法读取当前窗口的标签页");
+    }
+  })();
 
   await Promise.all([loadShortcuts, loadTabs]);
   if (active) {
@@ -250,25 +469,6 @@ async function startSidebarInternal(
   }
 
   return cleanup;
-}
-
-async function loadCurrentWindowTabs(
-  deps: SidebarDependencies,
-  isActive: () => boolean,
-): Promise<{ windowId: number; tabs: chrome.tabs.Tab[] }> {
-  const currentWindow = await deps.windows.getCurrent();
-  if (!isActive()) {
-    throw new Error("侧边栏已关闭");
-  }
-  const windowId = currentWindow.id;
-  if (typeof windowId !== "number" || !Number.isFinite(windowId) || !Number.isInteger(windowId)) {
-    throw new Error("当前窗口缺少有效 ID");
-  }
-  const tabs = await deps.tabs.query({ windowId });
-  if (!isActive()) {
-    throw new Error("侧边栏已关闭");
-  }
-  return { windowId, tabs };
 }
 
 function getSidebarElements(document: Document): SidebarElements {
