@@ -64,15 +64,15 @@ export function validateShortcutSettings(input: unknown): ValidationResult {
 
     const enabled = input.enabled;
     const rawItems = input.items;
-    const rawTabTitleFontSize = input.tabTitleFontSize;
+    const hasTabTitleFontSize = Object.hasOwn(input, "tabTitleFontSize");
+    const rawTabTitleFontSize = hasTabTitleFontSize
+      ? input.tabTitleFontSize
+      : DEFAULT_TAB_TITLE_FONT_SIZE;
     if (typeof enabled !== "boolean" || !Array.isArray(rawItems)) {
       return invalidFormat();
     }
 
-    const tabTitleFontSize =
-      rawTabTitleFontSize === undefined
-        ? DEFAULT_TAB_TITLE_FONT_SIZE
-        : rawTabTitleFontSize;
+    const tabTitleFontSize = rawTabTitleFontSize;
     if (
       typeof tabTitleFontSize !== "number" ||
       !Number.isFinite(tabTitleFontSize) ||

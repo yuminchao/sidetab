@@ -45,7 +45,7 @@ describe("shortcut model", () => {
     });
   });
 
-  it.each([11, 19, 14.5, Number.NaN, "14"])(
+  it.each([11, 19, 14.5, Number.NaN, "14", undefined])(
     "rejects invalid tab title font size %s",
     (tabTitleFontSize) => {
       expect(validateShortcutSettings({ enabled: true, items: [], tabTitleFontSize }).ok).toBe(
