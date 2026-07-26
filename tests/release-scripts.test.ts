@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -34,6 +36,10 @@ type PackageModule = {
   packageDist(projectRoot: string): Promise<{ archivePath: string; bytes: number }>;
 };
 
+type BuildModule = {
+  copyRequiredIcons(projectRoot: string, distRoot: string): Promise<void>;
+};
+
 const temporaryRoots = new Set<string>();
 
 afterEach(async () => {
@@ -56,6 +62,11 @@ async function loadCheckDist(): Promise<CheckDistModule> {
 async function loadPackage(): Promise<PackageModule> {
   const modulePath = "../scripts/package.mjs";
   return import(/* @vite-ignore */ modulePath) as Promise<PackageModule>;
+}
+
+async function loadBuild(): Promise<BuildModule> {
+  const modulePath = "../scripts/build.mjs";
+  return import(/* @vite-ignore */ modulePath) as Promise<BuildModule>;
 }
 
 async function createReleaseFixture(): Promise<{ root: string; dist: string; release: string }> {
@@ -209,6 +220,16 @@ describe("extension CSP validation", () => {
 });
 
 describe("dist validation", () => {
+  it("rejects with ENOENT when the required icon source directory is missing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sidetab-build-"));
+    temporaryRoots.add(root);
+    const { copyRequiredIcons } = await loadBuild();
+
+    await expect(copyRequiredIcons(root, join(root, "dist"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("accepts a packaged CSS reference that normalizes inside dist", async () => {
     const fixture = await createReleaseFixture();
     await overwrite(
