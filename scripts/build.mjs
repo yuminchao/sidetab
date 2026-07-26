@@ -8,6 +8,7 @@ const dist = resolve(root, "dist");
 await rm(dist, { recursive: true, force: true });
 await mkdir(resolve(dist, "background"), { recursive: true });
 await mkdir(resolve(dist, "sidepanel"), { recursive: true });
+await mkdir(resolve(dist, "assets"), { recursive: true });
 
 await build({
   entryPoints: {
@@ -23,7 +24,7 @@ await build({
 });
 
 try {
-  await cp(resolve(root, "assets"), resolve(dist, "assets"), { recursive: true });
+  await cp(resolve(root, "assets/icons"), resolve(dist, "assets/icons"), { recursive: true });
 } catch (error) {
   if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") {
     throw error;

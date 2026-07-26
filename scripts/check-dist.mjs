@@ -29,7 +29,7 @@ const expectedManifestKeys = [
 const expectedCspDirectives = new Map([
   ["connect-src", ["'none'"]],
   ["frame-src", ["'none'"]],
-  ["img-src", ["'self'", "data:", "https:"].sort()],
+  ["img-src", ["'self'", "data:", "http:", "https:"].sort()],
   ["object-src", ["'self'"]],
   ["script-src", ["'self'"]],
   ["style-src", ["'self'"]],
@@ -59,9 +59,6 @@ const pngSizes = new Map([
   ["assets/icons/icon-32.png", 32],
   ["assets/icons/icon-48.png", 48],
   ["assets/icons/icon-128.png", 128],
-  ["assets/shortcuts/openai.png", 32],
-  ["assets/shortcuts/google.png", 32],
-  ["assets/shortcuts/github.png", 32],
 ]);
 
 function assert(condition, message) {
@@ -83,10 +80,11 @@ export function validateExtensionCsp(value) {
     assert(!directives.has(name), `duplicate extension CSP directive: ${name}`);
     assert(sources.length > 0, `extension CSP directive has no sources: ${name}`);
     for (const source of sources) {
-      const isAllowedHttpsImageSource = name === "img-src" && source === "https:";
+      const isAllowedRemoteImageSource =
+        name === "img-src" && (source === "http:" || source === "https:");
       assert(
         !source.includes("*") &&
-          (!/^https?:/i.test(source) || isAllowedHttpsImageSource) &&
+          (!/^https?:/i.test(source) || isAllowedRemoteImageSource) &&
           source !== "'unsafe-inline'" &&
           source !== "'unsafe-eval'",
         `forbidden extension CSP source: ${source}`,

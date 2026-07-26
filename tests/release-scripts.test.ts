@@ -13,9 +13,6 @@ const expectedFiles = [
   "assets/icons/icon-32.png",
   "assets/icons/icon-48.png",
   "assets/icons/pin.svg",
-  "assets/shortcuts/github.png",
-  "assets/shortcuts/google.png",
-  "assets/shortcuts/openai.png",
   "background/service-worker.js",
   "manifest.json",
   "sidepanel/index.html",
@@ -75,7 +72,7 @@ async function createReleaseFixture(): Promise<{ root: string; dist: string; rel
     permissions: ["sidePanel", "tabs", "storage"],
     content_security_policy: {
       extension_pages:
-        "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data: https:; style-src 'self'; frame-src 'none'",
+        "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data: http: https:; style-src 'self'; frame-src 'none'",
     },
     background: {
       service_worker: "background/service-worker.js",
@@ -132,7 +129,7 @@ describe("release file contract", () => {
     const { EXPECTED_FILES } = await loadReleaseFiles();
 
     expect(EXPECTED_FILES).toEqual(expectedFiles);
-    expect(EXPECTED_FILES).toHaveLength(14);
+    expect(EXPECTED_FILES).toHaveLength(11);
     expect(EXPECTED_FILES).toEqual([...EXPECTED_FILES].sort());
   });
 
@@ -166,7 +163,7 @@ describe("extension CSP validation", () => {
 
     expect(() =>
       validateExtensionCsp(
-        "frame-src 'none'; style-src 'self'; img-src https: data: 'self'; connect-src 'none'; object-src 'self'; script-src 'self'",
+        "frame-src 'none'; style-src 'self'; img-src https: data: http: 'self'; connect-src 'none'; object-src 'self'; script-src 'self'",
       ),
     ).not.toThrow();
   });
@@ -174,26 +171,34 @@ describe("extension CSP validation", () => {
   it.each([
     [
       "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data:; style-src 'self'; frame-src 'none'",
-      "old policy missing HTTPS images",
+      "policy missing HTTP and HTTPS images",
     ],
     [
-      "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data: https:; style-src 'self'",
+      "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data: https:; style-src 'self'; frame-src 'none'",
+      "policy missing HTTP images",
+    ],
+    [
+      "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data: http:; style-src 'self'; frame-src 'none'",
+      "policy missing HTTPS images",
+    ],
+    [
+      "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data: http: https:; style-src 'self'",
       "missing frame-src",
     ],
     [
-      "script-src 'self'; object-src 'self'; connect-src https:; img-src 'self' data: https:; style-src 'self'; frame-src 'none'",
+      "script-src 'self'; object-src 'self'; connect-src https:; img-src 'self' data: http: https:; style-src 'self'; frame-src 'none'",
       "remote connect-src",
     ],
     [
-      "script-src 'self'; object-src 'self'; connect-src 'none'; img-src * data: https:; style-src 'self'; frame-src 'none'",
+      "script-src 'self'; object-src 'self'; connect-src 'none'; img-src * data: http: https:; style-src 'self'; frame-src 'none'",
       "wildcard img-src",
     ],
     [
-      "script-src 'self' 'unsafe-inline'; object-src 'self'; connect-src 'none'; img-src 'self' data: https:; style-src 'self'; frame-src 'none'",
+      "script-src 'self' 'unsafe-inline'; object-src 'self'; connect-src 'none'; img-src 'self' data: http: https:; style-src 'self'; frame-src 'none'",
       "unsafe-inline",
     ],
     [
-      "script-src 'self' 'unsafe-eval'; object-src 'self'; connect-src 'none'; img-src 'self' data: https:; style-src 'self'; frame-src 'none'",
+      "script-src 'self' 'unsafe-eval'; object-src 'self'; connect-src 'none'; img-src 'self' data: http: https:; style-src 'self'; frame-src 'none'",
       "unsafe-eval",
     ],
   ])("rejects an unsafe or incomplete extension CSP: %s", async (value) => {
@@ -218,7 +223,7 @@ describe("dist validation", () => {
     });
   });
 
-  it("builds the real dist with all fourteen reviewed files and validates it", async () => {
+  it("builds the real dist with all eleven reviewed files and excludes shortcut PNGs", async () => {
     execFileSync(process.execPath, ["scripts/build.mjs"], { cwd: resolve(".") });
     const { checkDist } = await loadCheckDist();
 
@@ -228,6 +233,9 @@ describe("dist validation", () => {
     await expect(readFile(resolve("dist/THIRD_PARTY_NOTICES.md"), "utf8")).resolves.toContain(
       "ISC License",
     );
+    for (const shortcut of ["openai.png", "google.png", "github.png"]) {
+      await expect(readFile(resolve("dist/assets/shortcuts", shortcut))).rejects.toThrow();
+    }
   });
 
   it("rejects a manifest path that escapes dist even when the outside file exists", async () => {
