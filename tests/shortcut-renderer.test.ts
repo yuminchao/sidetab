@@ -223,6 +223,53 @@ describe("shortcut renderer", () => {
     );
   });
 
+  it("preserves shortcut nodes and fallback progress when unrelated favicons change", () => {
+    const renderer = createShortcutRenderer(elements, { onOpen, onSave });
+    renderer.setFaviconsByOrigin(
+      new Map([["https://example.com", "https://cdn.example/docs.png"]]),
+    );
+    renderer.render(settings());
+    const button = elements.strip.querySelector<HTMLButtonElement>(".shortcut-button");
+    const image = button?.querySelector<HTMLImageElement>("img");
+    image?.dispatchEvent(new Event("error"));
+    expect(image?.getAttribute("src")).toBe("https://example.com/favicon.ico");
+
+    renderer.setFaviconsByOrigin(
+      new Map([
+        ["https://unrelated.example", "https://cdn.example/unrelated-one.png"],
+        ["https://example.com", "https://cdn.example/docs.png"],
+      ]),
+    );
+    renderer.setFaviconsByOrigin(
+      new Map([
+        ["https://example.com", "https://cdn.example/docs.png"],
+        ["https://unrelated.example", "https://cdn.example/unrelated-two.png"],
+      ]),
+    );
+    renderer.setFaviconsByOrigin(
+      new Map([["https://example.com", "https://cdn.example/docs.png"]]),
+    );
+
+    expect(elements.strip.querySelector(".shortcut-button")).toBe(button);
+    expect(elements.strip.querySelector("img")).toBe(image);
+    expect(image?.getAttribute("src")).toBe("https://example.com/favicon.ico");
+
+    renderer.setFaviconsByOrigin(
+      new Map([["https://example.com", "https://cdn.example/docs-new.png"]]),
+    );
+    const changedButton = elements.strip.querySelector(".shortcut-button");
+    expect(changedButton).not.toBe(button);
+    expect(changedButton?.querySelector("img")?.getAttribute("src")).toBe(
+      "https://cdn.example/docs-new.png",
+    );
+
+    renderer.setFaviconsByOrigin(new Map());
+    expect(elements.strip.querySelector(".shortcut-button")).not.toBe(changedButton);
+    expect(elements.strip.querySelector("img")?.getAttribute("src")).toBe(
+      "https://example.com/favicon.ico",
+    );
+  });
+
   it("does not render favicon images or redraw when favicon maps change while disabled", () => {
     const renderer = createShortcutRenderer(elements, { onOpen, onSave });
     renderer.render(settings({ enabled: false }));
@@ -231,9 +278,19 @@ describe("shortcut renderer", () => {
     renderer.setFaviconsByOrigin(
       new Map([["https://example.com", "https://cdn.example/icon.png"]]),
     );
+    renderer.setFaviconsByOrigin(
+      new Map([["https://latest.example", "https://cdn.example/latest.png"]]),
+    );
 
     expect(replaceChildren).not.toHaveBeenCalled();
     expect(elements.strip.querySelector("img")).toBeNull();
+
+    renderer.render(
+      settings({ items: [shortcut({ url: "https://latest.example/path" })] }),
+    );
+    expect(elements.strip.querySelector("img")?.getAttribute("src")).toBe(
+      "https://cdn.example/latest.png",
+    );
   });
 
   it("opens a shortcut through one delegated strip click", () => {

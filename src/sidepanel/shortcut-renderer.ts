@@ -395,11 +395,13 @@ export function createShortcutRenderer(
     },
 
     setFaviconsByOrigin(favicons) {
-      if (!active || mapsEqual(faviconsByOrigin, favicons)) {
+      if (!active) {
         return;
       }
+      const previousSignature = createShortcutFaviconSignature(current, faviconsByOrigin);
       faviconsByOrigin = new Map(favicons);
-      if (current.enabled) {
+      const nextSignature = createShortcutFaviconSignature(current, faviconsByOrigin);
+      if (current.enabled && !stringArraysEqual(previousSignature, nextSignature)) {
         renderStrip(current);
       }
     },
@@ -555,19 +557,21 @@ function copySettings(settings: ShortcutSettings): ShortcutSettings {
   };
 }
 
-function mapsEqual(
-  left: ReadonlyMap<string, string>,
-  right: ReadonlyMap<string, string>,
-): boolean {
-  if (left.size !== right.size) {
+function createShortcutFaviconSignature(
+  settings: ShortcutSettings,
+  faviconsByOrigin: ReadonlyMap<string, string>,
+): string[] {
+  return settings.items.slice(0, 12).map((shortcut) => {
+    const origin = getHttpOrigin(shortcut.url);
+    return createFaviconCandidates(faviconsByOrigin.get(origin), shortcut.url)[0] ?? "";
+  });
+}
+
+function stringArraysEqual(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) {
     return false;
   }
-  for (const [key, value] of left) {
-    if (right.get(key) !== value || !right.has(key)) {
-      return false;
-    }
-  }
-  return true;
+  return left.every((value, index) => value === right[index]);
 }
 
 function swap<T>(items: T[], first: number, second: number): void {
