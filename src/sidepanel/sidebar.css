@@ -129,7 +129,6 @@ input:focus-visible {
   gap: 4px;
   min-width: 0;
   padding: 6px;
-  border-top: 1px solid ButtonBorder;
 }
 
 #tab-search {
@@ -137,7 +136,7 @@ input:focus-visible {
   height: 32px;
   padding: 0 9px;
   border: 1px solid ButtonBorder;
-  border-radius: 6px;
+  border-radius: 16px;
   background: Field;
 }
 
@@ -179,10 +178,12 @@ input:focus-visible {
 .new-tab-button {
   display: grid;
   place-items: center;
-  width: 100%;
-  height: 30px;
+  width: 44px;
+  height: 24px;
+  margin: 3px auto;
   padding: 0;
-  border: 0;
+  border: 1px solid ButtonBorder;
+  border-radius: 5px;
   background: transparent;
   color: CanvasText;
   font: inherit;
@@ -370,6 +371,22 @@ input:focus-visible {
   background: transparent;
   text-align: left;
   white-space: nowrap;
+}
+
+.tab-context-menu > button:hover:not(:disabled) {
+  background: color-mix(in srgb, CanvasText 8%, transparent);
+}
+
+.tab-context-menu > button:focus-visible {
+  background: color-mix(in srgb, CanvasText 8%, transparent);
+}
+
+.tab-context-menu > button:active:not(:disabled) {
+  background: color-mix(in srgb, CanvasText 13%, transparent);
+}
+
+.tab-context-menu > button:disabled {
+  color: GrayText;
 }
 
 #shortcut-dialog {

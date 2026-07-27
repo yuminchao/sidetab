@@ -58,10 +58,26 @@ describe("side panel responsive CSS", () => {
 
   it("keeps the new-tab control compact and the empty state non-interactive", () => {
     expect(css).toMatch(
-      /\.new-tab-button\s*{[^}]*width:\s*100%[^}]*height:\s*30px[^}]*border:\s*0/s,
+      /\.new-tab-button\s*{[^}]*width:\s*44px[^}]*height:\s*24px[^}]*margin:\s*3px\s+auto[^}]*border:\s*1px\s+solid\s+ButtonBorder[^}]*border-radius:\s*5px/s,
     );
     expect(css).toMatch(
       /\.empty-message\s*{[^}]*position:\s*absolute[^}]*z-index:\s*1[^}]*inset:\s*30px\s+0\s+0[^}]*pointer-events:\s*none/s,
+    );
+  });
+
+  it("styles context-menu states and the rounded search field", () => {
+    expect(css).toMatch(
+      /\.tab-context-menu\s*>\s*button:hover:not\(:disabled\)\s*{[^}]*background:\s*color-mix\(in\s+srgb,\s*CanvasText\s+8%,\s*transparent\)/s,
+    );
+    expect(css).toMatch(
+      /\.tab-context-menu\s*>\s*button:active:not\(:disabled\)\s*{[^}]*background:\s*color-mix\(in\s+srgb,\s*CanvasText\s+13%,\s*transparent\)/s,
+    );
+    expect(css).toMatch(
+      /\.tab-context-menu\s*>\s*button:focus-visible\s*{[^}]*background:\s*color-mix\(in\s+srgb,\s*CanvasText\s+8%,\s*transparent\)/s,
+    );
+    expect(css).not.toMatch(/\.bottom-toolbar\s*{[^}]*border-top/s);
+    expect(css).toMatch(
+      /#tab-search\s*{[^}]*height:\s*32px[^}]*border-radius:\s*16px/s,
     );
   });
 
