@@ -2,7 +2,8 @@ import type { TabViewModel } from "./tab-model";
 
 export type TabContextCommand =
   | { action: "duplicate"; tabId: number }
-  | { action: "set-pinned"; tabId: number; pinned: boolean };
+  | { action: "set-pinned"; tabId: number; pinned: boolean }
+  | { action: "add-shortcut"; tabId: number };
 
 export function createTabContextMenu(
   elements: { document: Document; list: HTMLElement; viewport: Window },
@@ -18,7 +19,8 @@ export function createTabContextMenu(
 
   const duplicate = createItem("duplicate", "复制标签页");
   const setPinned = createItem("set-pinned", "固定标签");
-  menu.append(duplicate, setPinned);
+  const addShortcut = createItem("add-shortcut", "设为快捷网站");
+  menu.append(duplicate, setPinned, addShortcut);
   elements.document.body.append(menu);
 
   let openTabId: number | undefined;
@@ -86,9 +88,24 @@ export function createTabContextMenu(
       ? event.target.closest<HTMLButtonElement>("[data-menu-action]")
       : null;
     if (!button || openTabId === undefined || !menu.contains(button)) return;
-    const command: TabContextCommand = button.dataset.menuAction === "duplicate"
-      ? { action: "duplicate", tabId: openTabId }
-      : { action: "set-pinned", tabId: openTabId, pinned: button.dataset.nextPinned === "true" };
+    let command: TabContextCommand;
+    switch (button.dataset.menuAction) {
+      case "duplicate":
+        command = { action: "duplicate", tabId: openTabId };
+        break;
+      case "set-pinned":
+        command = {
+          action: "set-pinned",
+          tabId: openTabId,
+          pinned: button.dataset.nextPinned === "true",
+        };
+        break;
+      case "add-shortcut":
+        command = { action: "add-shortcut", tabId: openTabId };
+        break;
+      default:
+        return;
+    }
     close();
     callbacks.onCommand(command);
   };
@@ -99,7 +116,7 @@ export function createTabContextMenu(
       close(true);
       return;
     }
-    const items = [duplicate, setPinned];
+    const items = [duplicate, setPinned, addShortcut];
     const current = Math.max(0, items.indexOf(elements.document.activeElement as HTMLButtonElement));
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();

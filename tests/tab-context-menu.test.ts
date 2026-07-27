@@ -32,19 +32,45 @@ describe("tab context menu", () => {
       { getTab: (id) => tabs.find((tab) => tab.id === id), onCommand },
     );
     const popup = document.querySelector<HTMLElement>(".tab-context-menu")!;
-    vi.spyOn(popup, "getBoundingClientRect").mockReturnValue({ top: 0, left: 0, right: 120, bottom: 60, width: 120, height: 60, x: 0, y: 0, toJSON: () => ({}) });
+    vi.spyOn(popup, "getBoundingClientRect").mockReturnValue({ top: 0, left: 0, right: 120, bottom: 90, width: 120, height: 90, x: 0, y: 0, toJSON: () => ({}) });
 
     const event = context(row(1), window.innerWidth - 2, window.innerHeight - 2);
     expect(event.defaultPrevented).toBe(true);
     expect(popup.hidden).toBe(false);
     expect(popup.style.left).toBe(`${window.innerWidth - 120}px`);
-    expect(popup.style.top).toBe(`${window.innerHeight - 60}px`);
+    expect(popup.style.top).toBe(`${window.innerHeight - 90}px`);
     expect(document.querySelectorAll(".tab-context-menu")).toHaveLength(1);
+    expect(
+      Array.from(popup.querySelectorAll("[role='menuitem']"), (item) => item.textContent),
+    ).toEqual(["复制标签页", "固定标签", "设为快捷网站"]);
     expect(document.activeElement).toBe(popup.querySelector("[data-menu-action='duplicate']"));
 
     (popup.querySelector("[data-menu-action='duplicate']") as HTMLElement).click();
     expect(onCommand).toHaveBeenCalledWith({ action: "duplicate", tabId: 1 });
     expect(popup.hidden).toBe(true);
+    menu.destroy();
+  });
+
+  it("dispatches add-shortcut from mouse and keyboard", () => {
+    const onCommand = vi.fn();
+    const menu = createTabContextMenu(
+      { document, list, viewport: window },
+      { getTab: (id) => tabs.find((tab) => tab.id === id), onCommand },
+    );
+    const popup = document.querySelector<HTMLElement>(".tab-context-menu")!;
+
+    context(row(1));
+    (popup.querySelector("[data-menu-action='add-shortcut']") as HTMLButtonElement).click();
+    expect(onCommand).toHaveBeenLastCalledWith({ action: "add-shortcut", tabId: 1 });
+
+    context(row(2));
+    popup.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    popup.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(document.activeElement).toBe(
+      popup.querySelector("[data-menu-action='add-shortcut']"),
+    );
+    popup.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(onCommand).toHaveBeenLastCalledWith({ action: "add-shortcut", tabId: 2 });
     menu.destroy();
   });
 
