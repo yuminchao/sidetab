@@ -34,11 +34,17 @@
       <p id="status-message" class="status-message" role="status" aria-live="polite"></p>
 
       <footer class="bottom-toolbar">
+        <div
+          id="history-search-results"
+          role="listbox"
+          aria-label="历史记录搜索结果"
+          hidden
+        ></div>
         <input
           id="tab-search"
           type="search"
-          placeholder="搜索标签页"
-          aria-label="搜索标签页"
+          placeholder="搜索历史记录"
+          aria-label="搜索历史记录"
           autocomplete="off"
         />
         <button

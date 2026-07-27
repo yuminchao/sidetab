@@ -13,6 +13,7 @@ function installFixture(): void {
   document.body.innerHTML = `
     <div id="shortcut-strip" hidden></div>
     <input id="tab-search" />
+    <div id="history-search-results" role="listbox" hidden></div>
     <button id="shortcut-settings"></button>
     <p id="status-message"></p>
     <section id="tab-region">
@@ -218,7 +219,7 @@ describe("sidebar lifecycle", () => {
 
     input("does-not-match");
     await vi.advanceTimersByTimeAsync(100);
-    expect(rowIds()).toEqual([]);
+    expect(rowIds()).toEqual([1, 2]);
     expect(shortcutImage()?.getAttribute("src")).toBe("data:image/png;base64,two");
 
     fake.events.onDetached.emit(2, { oldWindowId: 10, oldPosition: 1 });
@@ -501,19 +502,76 @@ describe("sidebar lifecycle", () => {
     },
   );
 
-  it("debounces search by 100ms and always reads the latest value", async () => {
+  it("shows recent history and debounces all-time search without filtering tabs", async () => {
     vi.useFakeTimers();
     const fake = createFakeChrome({
       tabs: [fakeTab({ id: 1, title: "Alpha" }), fakeTab({ id: 2, index: 1, title: "Beta" })],
+      historyItems: [{ id: "history-1", title: "History", url: "https://history.example/" }],
     });
     const cleanup = await startSidebar(fake);
+
+    element<HTMLInputElement>("tab-search").focus();
+    await flush();
+    expect(fake.methods.historySearch).toHaveBeenCalledWith({
+      text: "",
+      startTime: 0,
+      maxResults: 20,
+    });
+    expect(element("history-search-results").textContent).toContain("History");
+    fake.methods.historySearch.mockClear();
 
     input("alpha");
     await vi.advanceTimersByTimeAsync(79);
     expect(rowIds()).toEqual([1, 2]);
     element<HTMLInputElement>("tab-search").value = "beta";
     await vi.advanceTimersByTimeAsync(21);
-    expect(rowIds()).toEqual([2]);
+    expect(fake.methods.historySearch).toHaveBeenCalledWith({
+      text: "beta",
+      startTime: 0,
+      maxResults: 20,
+    });
+    expect(rowIds()).toEqual([1, 2]);
+    cleanup();
+  });
+
+  it("opens history results and closes the upward panel for settings and tab scrolling", async () => {
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 1 })],
+      historyItems: [{ id: "docs", title: "Docs", url: "https://docs.example/guide" }],
+    });
+    const cleanup = await startSidebar(fake);
+    const search = element<HTMLInputElement>("tab-search");
+    const results = element("history-search-results");
+
+    search.focus();
+    await flush();
+    click(results.querySelector("[role='option']")!);
+    await flush();
+    expect(fake.methods.create).toHaveBeenCalledWith({
+      url: "https://docs.example/guide",
+      active: true,
+    });
+    expect(results.hidden).toBe(true);
+
+    search.click();
+    await flush();
+    click(element("shortcut-settings"));
+    expect(results.hidden).toBe(true);
+    expect(element<HTMLDialogElement>("shortcut-dialog").open).toBe(true);
+    element<HTMLDialogElement>("shortcut-dialog").close();
+
+    search.click();
+    await flush();
+    element("tab-scroll").dispatchEvent(new Event("scroll"));
+    expect(results.hidden).toBe(true);
+
+    fake.methods.create.mockRejectedValueOnce(new Error("browser failed"));
+    search.click();
+    await flush();
+    click(results.querySelector("[role='option']")!);
+    await vi.waitFor(() =>
+      expect(element("status-message").textContent).toBe("无法打开历史记录"),
+    );
     cleanup();
   });
 
@@ -621,7 +679,7 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
-  it("keeps new-tab creation available when search has no matches", async () => {
+  it("keeps new-tab creation and the complete tab list while history has no matches", async () => {
     vi.useFakeTimers();
     const fake = createFakeChrome({ tabs: [fakeTab({ title: "Alpha" })] });
     const cleanup = await startSidebar(fake);
@@ -630,7 +688,7 @@ describe("sidebar lifecycle", () => {
     input("does-not-match");
     await vi.advanceTimersByTimeAsync(100);
 
-    expect(rowIds()).toEqual([]);
+    expect(rowIds()).toEqual([1]);
     expect(button.hidden).toBe(false);
     expect(button.disabled).toBe(false);
     click(button);
@@ -785,7 +843,7 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
-  it("submits one cross-group reorder and disables dragging during search or a pending move", async () => {
+  it("submits one cross-group reorder and keeps dragging enabled during history search", async () => {
     const pendingMove = deferred<chrome.tabs.Tab>();
     const fake = createFakeChrome({
       tabs: [
@@ -815,7 +873,7 @@ describe("sidebar lifecycle", () => {
     await flush();
     expect(row(1).draggable).toBe(true);
     input("one");
-    expect(row(1).draggable).toBe(false);
+    expect(row(1).draggable).toBe(true);
     input("");
     expect(row(1).draggable).toBe(true);
     cleanup();
@@ -938,7 +996,7 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
-  it("patches an ordinary update in place and rerenders while searching", async () => {
+  it("patches an ordinary update in place while history search is open", async () => {
     vi.useFakeTimers();
     const fake = createFakeChrome({ tabs: [fakeTab({ id: 1, title: "Alpha" })] });
     const cleanup = await startSidebar(fake);
@@ -949,9 +1007,9 @@ describe("sidebar lifecycle", () => {
 
     input("alpha");
     await vi.advanceTimersByTimeAsync(100);
-    const filtered = row(1);
+    const whileSearching = row(1);
     fake.events.onUpdated.emit(1, {}, fakeTab({ id: 1, title: "Alpha again" }));
-    expect(row(1)).not.toBe(filtered);
+    expect(row(1)).toBe(whileSearching);
     cleanup();
   });
 
@@ -1000,6 +1058,7 @@ describe("sidebar lifecycle", () => {
     expect(row(1).querySelector("img")).toBe(image);
     expect(element<HTMLDialogElement>("shortcut-dialog").open).toBe(false);
     expect(fake.methods.remove).not.toHaveBeenCalled();
+    expect(fake.methods.historySearch).not.toHaveBeenCalled();
     for (const event of Object.values(fake.events)) expect(event.listenerCount).toBe(0);
   });
 
@@ -1012,6 +1071,7 @@ describe("sidebar lifecycle", () => {
     vi.stubGlobal("chrome", {
       tabs: fake.tabs,
       windows: fake.windows,
+      history: fake.history,
       storage: { local: fake.storage },
     });
     vi.resetModules();
@@ -1038,6 +1098,7 @@ describe("sidebar lifecycle", () => {
     vi.stubGlobal("chrome", {
       tabs: fake.tabs,
       windows: fake.windows,
+      history: fake.history,
       storage: { local: fake.storage },
     });
     vi.resetModules();
@@ -1062,6 +1123,7 @@ describe("sidebar lifecycle", () => {
     vi.stubGlobal("chrome", {
       tabs: fake.tabs,
       windows: fake.windows,
+      history: fake.history,
       storage: { local: fake.storage },
     });
     vi.resetModules();
@@ -1085,6 +1147,7 @@ describe("sidebar lifecycle", () => {
     vi.stubGlobal("chrome", {
       tabs: fake.tabs,
       windows: fake.windows,
+      history: fake.history,
       storage: { local: fake.storage },
     });
     vi.resetModules();
@@ -1102,6 +1165,7 @@ describe("sidebar lifecycle", () => {
     "tab-scroll",
     "new-tab-button",
     "tab-region",
+    "history-search-results",
     "shortcut-dialog-title",
     "shortcut-cancel",
     "shortcut-save",
@@ -1117,6 +1181,7 @@ describe("sidebar lifecycle", () => {
     type RealChromeDependencies = {
       tabs: typeof chrome.tabs;
       windows: typeof chrome.windows;
+      history: typeof chrome.history;
       storage: typeof chrome.storage.local;
       document: Document;
     };
@@ -1184,9 +1249,16 @@ describe("sidebar document structure", () => {
     const footer = page.querySelector("footer.bottom-toolbar");
 
     expect(page.querySelectorAll("#tab-search")).toHaveLength(1);
+    expect(page.querySelectorAll("#history-search-results")).toHaveLength(1);
     expect(page.querySelectorAll("#shortcut-settings")).toHaveLength(1);
     expect(page.querySelectorAll("#status-message")).toHaveLength(1);
     expect(footer?.querySelector("#tab-search")).not.toBeNull();
+    expect(footer?.querySelector("#history-search-results")?.getAttribute("role"))
+      .toBe("listbox");
+    expect(footer?.querySelector<HTMLInputElement>("#tab-search")?.placeholder)
+      .toBe("搜索历史记录");
+    expect(footer?.querySelector("#tab-search")?.getAttribute("aria-label"))
+      .toBe("搜索历史记录");
     expect(footer?.querySelector("#shortcut-settings")).not.toBeNull();
     expect(footer?.querySelector("#status-message")).toBeNull();
   });

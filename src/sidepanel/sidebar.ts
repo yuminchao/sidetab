@@ -3,6 +3,10 @@ import { createShortcutActions } from "./shortcut-actions";
 import { createShortcutRenderer } from "./shortcut-renderer";
 import { createShortcutStore, type StorageArea } from "./shortcut-store";
 import { createOriginFaviconMap } from "./favicon-model";
+import {
+  createHistorySearchController,
+  type HistorySearchApi,
+} from "./history-search";
 import { createTabActions } from "./tab-actions";
 import { createTabContextMenu } from "./tab-context-menu";
 import { createTabDragController } from "./tab-drag-controller";
@@ -15,12 +19,14 @@ export type SidebarDependencies = {
   tabs: typeof chrome.tabs;
   windows: Pick<typeof chrome.windows, "getCurrent">;
   storage: StorageArea;
+  history: HistorySearchApi;
   document: Document;
 };
 
 type SidebarElements = {
   shortcutStrip: HTMLElement;
   search: HTMLInputElement;
+  historyResults: HTMLElement;
   settingsButton: HTMLButtonElement;
   status: HTMLElement;
   tabRegion: HTMLElement;
@@ -56,8 +62,6 @@ async function startSidebarInternal(
   const shortcutActions = createShortcutActions(deps.tabs);
   const tabRenderer = createTabRenderer({ list: elements.list, empty: elements.empty });
   let active = true;
-  let currentQuery = "";
-  let searchTimer: ReturnType<typeof setTimeout> | undefined;
   let unsubscribeTabs: () => void = () => undefined;
   let bufferingTabEvents = false;
   const bufferedTabEvents: Array<Promise<() => void>> = [];
@@ -152,9 +156,30 @@ async function startSidebarInternal(
     },
   );
 
+  const historySearch = createHistorySearchController(
+    {
+      document: deps.document,
+      input: elements.search,
+      results: elements.historyResults,
+    },
+    {
+      history: deps.history,
+      async onOpen(url) {
+        try {
+          await deps.tabs.create({ url, active: true });
+        } catch {
+          throw new Error("无法打开历史记录");
+        }
+      },
+      onOpenError: (message) => setStatus("operation", message),
+    },
+  );
+
   const syncShortcutFavicons = (): void => {
     if (active) {
-      shortcutRenderer.setFaviconsByOrigin(createOriginFaviconMap(tabStore.list()));
+      const favicons = createOriginFaviconMap(tabStore.list());
+      shortcutRenderer.setFaviconsByOrigin(favicons);
+      historySearch.setFaviconsByOrigin(favicons);
     }
   };
 
@@ -189,7 +214,7 @@ async function startSidebarInternal(
   };
 
   const updateDragEnabled = (): void => {
-    tabRenderer.setDragEnabled(elements.search.value.trim() === "" && !reorderBusy);
+    tabRenderer.setDragEnabled(!reorderBusy);
   };
 
   const contextMenu = createTabContextMenu(
@@ -213,7 +238,7 @@ async function startSidebarInternal(
     { list: elements.list },
     {
       onDrop(intent) {
-        if (reorderBusy || elements.search.value.trim()) return;
+        if (reorderBusy) return;
         const plan = createTabReorderPlan(
           tabStore.list(), intent.sourceId, intent.targetId, intent.placement,
         );
@@ -240,7 +265,10 @@ async function startSidebarInternal(
   const onTabScroll = (): void => {
     contextMenu.close();
     dragController.cancel();
+    historySearch.close();
   };
+
+  const onSettingsClick = (): void => historySearch.close();
 
   const cleanup = (): void => {
     if (!active) {
@@ -252,25 +280,16 @@ async function startSidebarInternal(
     bufferedTabEvents.length = 0;
     discardPendingAttached();
     elements.list.removeEventListener("click", onListClick);
-    elements.search.removeEventListener("input", onSearchInput);
     elements.newTabButton.removeEventListener("click", onNewTabClick);
     elements.tabScroll.removeEventListener("scroll", onTabScroll);
+    elements.settingsButton.removeEventListener("click", onSettingsClick);
     elements.settingsButton.removeEventListener("click", blockPendingSettings, true);
     contextMenu.destroy();
     dragController.destroy();
-    if (searchTimer !== undefined) {
-      clearTimeout(searchTimer);
-      searchTimer = undefined;
-    }
+    historySearch.destroy();
     tabRenderer.destroy();
     shortcutRenderer.destroy();
     signal?.removeEventListener("abort", cleanup);
-  };
-
-  const renderFilteredTabs = (): void => {
-    if (active) {
-      tabRenderer.render(tabStore.filter(currentQuery));
-    }
   };
 
   const onListClick = (event: MouseEvent): void => {
@@ -299,27 +318,10 @@ async function startSidebarInternal(
     }
   };
 
-  const onSearchInput = (): void => {
-    updateDragEnabled();
-    contextMenu.close();
-    dragController.cancel();
-    if (searchTimer !== undefined) {
-      clearTimeout(searchTimer);
-    }
-    searchTimer = setTimeout(() => {
-      searchTimer = undefined;
-      if (!active) {
-        return;
-      }
-      currentQuery = elements.search.value;
-      renderFilteredTabs();
-    }, 100);
-  };
-
   elements.list.addEventListener("click", onListClick);
-  elements.search.addEventListener("input", onSearchInput);
   elements.newTabButton.addEventListener("click", onNewTabClick);
   elements.tabScroll.addEventListener("scroll", onTabScroll);
+  elements.settingsButton.addEventListener("click", onSettingsClick);
   shortcutRenderer.render(createDefaultShortcutSettings());
   updateDragEnabled();
   signal?.addEventListener("abort", cleanup, { once: true });
@@ -347,11 +349,7 @@ async function startSidebarInternal(
         tabStore.remove(tabId);
       },
       () => {
-        if (currentQuery) {
-          renderFilteredTabs();
-        } else {
-          tabRenderer.remove(tabId);
-        }
+        tabRenderer.remove(tabId);
       },
     );
   };
@@ -362,7 +360,7 @@ async function startSidebarInternal(
         () => {
           tabStore.add(tab);
         },
-        renderFilteredTabs,
+        () => tabRenderer.render(tabStore.list()),
       );
     },
     attached(tab: chrome.tabs.Tab) {
@@ -373,7 +371,7 @@ async function startSidebarInternal(
         () => {
           tabStore.add(tab);
         },
-        renderFilteredTabs,
+        () => tabRenderer.render(tabStore.list()),
       );
     },
     updated(tab: chrome.tabs.Tab) {
@@ -393,8 +391,8 @@ async function startSidebarInternal(
         () => {
           if (!model) return;
           const rowExists = findTabRow(elements.list, model.id) !== undefined;
-          if (currentQuery || !previous || !rowExists || previous.index !== model.index) {
-            renderFilteredTabs();
+          if (!previous || !rowExists || previous.index !== model.index) {
+            tabRenderer.render(tabStore.list());
           } else {
             tabRenderer.patch(model);
           }
@@ -415,10 +413,6 @@ async function startSidebarInternal(
           tabs = tabStore.list();
         },
         () => {
-          if (currentQuery) {
-            renderFilteredTabs();
-            return;
-          }
           for (const tab of tabs) {
             if (affected.has(tab.id)) {
               tabRenderer.patch(tab);
@@ -434,7 +428,7 @@ async function startSidebarInternal(
         () => {
           tabStore.move(tabId, index);
         },
-        renderFilteredTabs,
+        () => tabRenderer.render(tabStore.list()),
       );
     },
   };
@@ -575,7 +569,7 @@ async function startSidebarInternal(
       }
       bufferingTabEvents = false;
       syncShortcutFavicons();
-      renderFilteredTabs();
+      tabRenderer.render(tabStore.list());
     } catch {
       setStatus("tabs", "无法读取当前窗口的标签页");
     }
@@ -593,6 +587,7 @@ function getSidebarElements(document: Document): SidebarElements {
   return {
     shortcutStrip: requireElement(document, "shortcut-strip", HTMLElement),
     search: requireElement(document, "tab-search", HTMLInputElement),
+    historyResults: requireElement(document, "history-search-results", HTMLElement),
     settingsButton: requireElement(document, "shortcut-settings", HTMLButtonElement),
     status: requireElement(document, "status-message", HTMLElement),
     tabRegion: requireElement(document, "tab-region", HTMLElement),
@@ -685,6 +680,7 @@ if (typeof chrome !== "undefined" && typeof document !== "undefined") {
   void bootstrapSidebar({
     tabs: chrome.tabs,
     windows: chrome.windows,
+    history: chrome.history,
     storage: chrome.storage.local,
     document,
   }, window);

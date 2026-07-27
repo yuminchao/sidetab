@@ -29,6 +29,7 @@ export function fakeTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.T
 export function createFakeChrome(options: {
   currentWindow?: chrome.windows.Window;
   tabs?: chrome.tabs.Tab[];
+  historyItems?: chrome.history.HistoryItem[];
   stored?: Record<string, unknown>;
 } = {}) {
   const initialTabs = options.tabs ?? [];
@@ -63,6 +64,7 @@ export function createFakeChrome(options: {
   const storageSet = vi.fn<(items: Record<string, unknown>) => Promise<void>>(
     async () => undefined,
   );
+  const historySearch = vi.fn(async () => options.historyItems ?? []);
 
   return {
     tabs: {
@@ -76,10 +78,23 @@ export function createFakeChrome(options: {
       create,
     } as unknown as typeof chrome.tabs,
     windows: { getCurrent } as Pick<typeof chrome.windows, "getCurrent">,
+    history: { search: historySearch } as Pick<typeof chrome.history, "search">,
     storage: { get: storageGet, set: storageSet },
     document,
     events,
-    methods: { query, get, update, remove, duplicate, move, create, getCurrent, storageGet, storageSet },
+    methods: {
+      query,
+      get,
+      update,
+      remove,
+      duplicate,
+      move,
+      create,
+      getCurrent,
+      historySearch,
+      storageGet,
+      storageSet,
+    },
   };
 }
 
