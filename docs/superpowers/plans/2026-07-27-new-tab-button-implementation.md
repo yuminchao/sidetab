@@ -316,6 +316,19 @@ it("removes the new-tab listener and ignores pending completion after cleanup", 
   expect(fake.methods.create).toHaveBeenCalledOnce();
   expect(button.disabled).toBe(true);
 });
+
+it("clears transient tab UI when the shared tab container scrolls", async () => {
+  const fake = createFakeChrome({ tabs: [fakeTab({ id: 1 }), fakeTab({ id: 2, index: 1 })] });
+  const cleanup = await startSidebar(fake);
+
+  row(1).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+  expect(document.querySelector<HTMLElement>(".tab-context-menu")?.hidden).toBe(false);
+
+  element("tab-scroll").dispatchEvent(new Event("scroll"));
+
+  expect(document.querySelector<HTMLElement>(".tab-context-menu")?.hidden).toBe(true);
+  cleanup();
+});
 ```
 
 - [ ] **Step 2: 运行集成测试确认失败**
@@ -329,12 +342,14 @@ Expected: FAIL，按钮没有绑定创建动作或 `new-tab-button` 尚未注册
 在 `SidebarElements` 中增加：
 
 ```ts
+tabScroll: HTMLElement;
 newTabButton: HTMLButtonElement;
 ```
 
 在 `getSidebarElements()` 中增加：
 
 ```ts
+tabScroll: requireElement(document, "tab-scroll", HTMLElement),
 newTabButton: requireElement(document, "new-tab-button", HTMLButtonElement),
 ```
 
@@ -352,12 +367,19 @@ const onNewTabClick = (): void => {
 };
 
 elements.newTabButton.addEventListener("click", onNewTabClick);
+
+const onTabScroll = (): void => {
+  contextMenu.close();
+  dragController.cancel();
+};
+elements.tabScroll.addEventListener("scroll", onTabScroll);
 ```
 
 在 `cleanup()` 中移除监听器：
 
 ```ts
 elements.newTabButton.removeEventListener("click", onNewTabClick);
+elements.tabScroll.removeEventListener("scroll", onTabScroll);
 ```
 
 - [ ] **Step 4: 运行集成、动作和类型测试**
