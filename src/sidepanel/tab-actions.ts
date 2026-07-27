@@ -1,6 +1,6 @@
 import type { TabReorderPlan } from "./tab-reorder-model";
 
-export type TabsActionApi = Pick<typeof chrome.tabs, "duplicate" | "move" | "remove" | "update">;
+export type TabsActionApi = Pick<typeof chrome.tabs, "create" | "duplicate" | "move" | "remove" | "update">;
 
 export function createTabActions(api: TabsActionApi) {
   const setPinned = async (tabId: number, pinned: boolean): Promise<void> => {
@@ -12,6 +12,14 @@ export function createTabActions(api: TabsActionApi) {
   };
 
   return {
+    async create(): Promise<void> {
+      try {
+        await api.create({ active: true });
+      } catch {
+        throw new Error("无法新建标签页");
+      }
+    },
+
     async activate(tabId: number): Promise<void> {
       try {
         await api.update(tabId, { active: true });

@@ -19,6 +19,7 @@ const crossGroupPlan: TabReorderPlan = {
 
 function tabApi(overrides: Partial<Parameters<typeof createTabActions>[0]> = {}) {
   return {
+    create: vi.fn().mockResolvedValue(tab),
     update: vi.fn().mockResolvedValue(tab),
     remove: vi.fn().mockResolvedValue(undefined),
     duplicate: vi.fn().mockResolvedValue(tab),
@@ -42,6 +43,24 @@ const compileTimeCompatibility: [ChromeTabsSupportsTabActions, ChromeTabsSupport
 void compileTimeCompatibility;
 
 describe("tab actions", () => {
+  it("creates exactly one active tab", async () => {
+    const create = vi.fn().mockResolvedValue(tab);
+
+    await createTabActions(tabApi({ create })).create();
+
+    expect(create).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledWith({ active: true });
+  });
+
+  it.each([
+    ["synchronous throw", () => vi.fn(() => { throw new Error("chrome failed"); })],
+    ["promise rejection", () => vi.fn().mockRejectedValue(new Error("chrome failed"))],
+  ])("maps a create %s to the user-facing error", async (_case, makeCreate) => {
+    const actions = createTabActions(tabApi({ create: makeCreate() }));
+
+    await expect(actions.create()).rejects.toThrow("无法新建标签页");
+  });
+
   it("activates exactly the requested tab", async () => {
     const update = vi.fn().mockResolvedValue(tab);
 
