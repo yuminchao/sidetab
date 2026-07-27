@@ -4,7 +4,10 @@ import { createShortcutRenderer } from "./shortcut-renderer";
 import { createShortcutStore, type StorageArea } from "./shortcut-store";
 import { createOriginFaviconMap } from "./favicon-model";
 import { createTabActions } from "./tab-actions";
+import { createTabContextMenu } from "./tab-context-menu";
+import { createTabDragController } from "./tab-drag-controller";
 import { subscribeToTabEvents } from "./tab-events";
+import { createTabReorderPlan } from "./tab-reorder-model";
 import { createTabRenderer } from "./tab-renderer";
 import { TabStore } from "./tab-store";
 
@@ -62,6 +65,7 @@ async function startSidebarInternal(
   const bufferedAttachedTabs = new WeakSet<chrome.tabs.Tab>();
   let shortcutSettingsReady = false;
   let operationGeneration = 0;
+  let reorderBusy = false;
   const statusSlots = {
     tabs: "",
     shortcuts: "",
@@ -77,6 +81,20 @@ async function startSidebarInternal(
         statusSlots.operation,
       ].filter(Boolean).join("；");
     }
+  };
+
+  const runTabOperation = (operation: Promise<void>, onSettled?: () => void): void => {
+    const generation = ++operationGeneration;
+    void operation.then(
+      () => {
+        if (generation === operationGeneration) setStatus("operation", "");
+      },
+      (error: unknown) => {
+        if (generation === operationGeneration) {
+          setStatus("operation", error instanceof Error ? error.message : "标签页操作失败");
+        }
+      },
+    ).finally(onSettled);
   };
 
   const blockPendingSettings = (event: MouseEvent): void => {
@@ -137,6 +155,43 @@ async function startSidebarInternal(
     }
   };
 
+  const updateDragEnabled = (): void => {
+    tabRenderer.setDragEnabled(elements.search.value.trim() === "" && !reorderBusy);
+  };
+
+  const contextMenu = createTabContextMenu(
+    { document: deps.document, list: elements.list, viewport: deps.document.defaultView! },
+    {
+      getTab: (id) => tabStore.list().find((tab) => tab.id === id),
+      onCommand(command) {
+        const operation = command.action === "duplicate"
+          ? tabActions.duplicate(command.tabId)
+          : tabActions.setPinned(command.tabId, command.pinned);
+        runTabOperation(operation);
+      },
+    },
+  );
+
+  const dragController = createTabDragController(
+    { list: elements.list },
+    {
+      onDrop(intent) {
+        if (reorderBusy || elements.search.value.trim()) return;
+        const plan = createTabReorderPlan(
+          tabStore.list(), intent.sourceId, intent.targetId, intent.placement,
+        );
+        if (!plan) return;
+        reorderBusy = true;
+        updateDragEnabled();
+        runTabOperation(tabActions.reorder(plan), () => {
+          if (!active) return;
+          reorderBusy = false;
+          updateDragEnabled();
+        });
+      },
+    },
+  );
+
   const cleanup = (): void => {
     if (!active) {
       return;
@@ -149,6 +204,8 @@ async function startSidebarInternal(
     elements.list.removeEventListener("click", onListClick);
     elements.search.removeEventListener("input", onSearchInput);
     elements.settingsButton.removeEventListener("click", blockPendingSettings, true);
+    contextMenu.destroy();
+    dragController.destroy();
     if (searchTimer !== undefined) {
       clearTimeout(searchTimer);
       searchTimer = undefined;
@@ -186,26 +243,14 @@ async function startSidebarInternal(
         ? tabActions.close(tabId)
         : undefined;
     if (operation) {
-      const generation = ++operationGeneration;
-      void operation.then(
-        () => {
-          if (generation === operationGeneration) {
-            setStatus("operation", "");
-          }
-        },
-        (error: unknown) => {
-          if (generation === operationGeneration) {
-            setStatus(
-              "operation",
-              error instanceof Error ? error.message : "标签页操作失败",
-            );
-          }
-        },
-      );
+      runTabOperation(operation);
     }
   };
 
   const onSearchInput = (): void => {
+    updateDragEnabled();
+    contextMenu.close();
+    dragController.cancel();
     if (searchTimer !== undefined) {
       clearTimeout(searchTimer);
     }
@@ -222,6 +267,7 @@ async function startSidebarInternal(
   elements.list.addEventListener("click", onListClick);
   elements.search.addEventListener("input", onSearchInput);
   shortcutRenderer.render(createDefaultShortcutSettings());
+  updateDragEnabled();
   signal?.addEventListener("abort", cleanup, { once: true });
   if (signal?.aborted) {
     cleanup();
@@ -241,6 +287,7 @@ async function startSidebarInternal(
   };
 
   const removeTab = (tabId: number): void => {
+    contextMenu.closeForTab(tabId);
     applyTabEvent(
       () => {
         tabStore.remove(tabId);

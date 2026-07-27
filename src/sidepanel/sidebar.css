@@ -81,6 +81,7 @@ input:focus-visible {
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
+  border-bottom: 1px solid ButtonBorder;
 }
 
 .shortcut-region {
@@ -172,12 +173,36 @@ input:focus-visible {
 }
 
 .tab-row {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 26px;
   align-items: center;
   width: 100%;
   height: var(--tab-row-height);
   min-width: 0;
+}
+
+.tab-row[data-drag-source="true"] {
+  opacity: 0.55;
+}
+
+.tab-row[data-drop-placement="before"]::before,
+.tab-row[data-drop-placement="after"]::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  inset-inline: 4px;
+  height: 2px;
+  background: AccentColor;
+  pointer-events: none;
+}
+
+.tab-row[data-drop-placement="before"]::before {
+  top: 0;
+}
+
+.tab-row[data-drop-placement="after"]::after {
+  bottom: 0;
 }
 
 .tab-row[data-active="true"] {
@@ -285,6 +310,28 @@ input:focus-visible {
   padding: 24px 12px;
   color: GrayText;
   text-align: center;
+}
+
+.tab-context-menu {
+  position: fixed;
+  z-index: 20;
+  display: grid;
+  min-width: min(132px, 100vw);
+  padding: 4px;
+  border: 1px solid ButtonBorder;
+  border-radius: 6px;
+  background: Canvas;
+  box-shadow: 0 3px 10px rgb(0 0 0 / 22%);
+}
+
+.tab-context-menu > button {
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  text-align: left;
+  white-space: nowrap;
 }
 
 #shortcut-dialog {

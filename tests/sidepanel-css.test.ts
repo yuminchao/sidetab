@@ -82,4 +82,13 @@ describe("side panel responsive CSS", () => {
     expect(css).not.toMatch(/min-width:\s*(?!0(?:px|rem|em|%)?\s*[;}])(?:[1-9]|0?\.[0-9]*[1-9])/);
     expect(css).toMatch(/#shortcut-dialog\s*{[^}]*max-width:\s*calc\(100vw\s*-\s*8px\)[^}]*overflow-y:\s*auto/s);
   });
+
+  it("styles the shortcut divider, context menu, and zero-shift drag indicators", () => {
+    expect(css).toMatch(/\.shortcut-strip\s*\{[^}]*border-bottom:\s*1px solid ButtonBorder/s);
+    expect(css).toMatch(/\[hidden\]\s*\{[^}]*display:\s*none !important/s);
+    expect(css).toMatch(/\.tab-context-menu\s*\{[^}]*position:\s*fixed[^}]*z-index:\s*20/s);
+    expect(css).toMatch(/\.tab-row\[data-drop-placement="before"\]::before/s);
+    expect(css).toMatch(/\.tab-row\[data-drop-placement="after"\]::after/s);
+    expect(css).toMatch(/\.tab-row\[data-drag-source="true"\]\s*\{[^}]*opacity:/s);
+  });
 });

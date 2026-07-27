@@ -520,6 +520,61 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
+  it("dispatches duplicate and dynamic pinned commands from the tab context menu", async () => {
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 7, pinned: false })] });
+    const cleanup = await startSidebar(fake);
+
+    row(7).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    click(document.querySelector("[data-menu-action='duplicate']")!);
+    await flush();
+    expect(fake.methods.duplicate).toHaveBeenCalledWith(7);
+
+    row(7).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    const pinned = document.querySelector<HTMLElement>("[data-menu-action='set-pinned']")!;
+    expect(pinned.textContent).toBe("固定标签");
+    click(pinned);
+    await flush();
+    expect(fake.methods.update).toHaveBeenCalledWith(7, { pinned: true });
+    cleanup();
+    expect(document.querySelector(".tab-context-menu")).toBeNull();
+  });
+
+  it("submits one cross-group reorder and disables dragging during search or a pending move", async () => {
+    const pendingMove = deferred<chrome.tabs.Tab>();
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, pinned: true }),
+        fakeTab({ id: 2, index: 1 }),
+        fakeTab({ id: 3, index: 2 }),
+      ],
+    });
+    fake.methods.move.mockReturnValueOnce(pendingMove.promise);
+    const cleanup = await startSidebar(fake);
+    vi.spyOn(row(1), "getBoundingClientRect").mockReturnValue({
+      top: 0, height: 30, bottom: 30, left: 0, right: 100, width: 100,
+      x: 0, y: 0, toJSON: () => ({}),
+    });
+
+    row(3).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
+    const over = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.defineProperty(over, "clientY", { value: 29 });
+    row(1).dispatchEvent(over);
+    row(1).dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
+    await flush();
+    expect(fake.methods.update).toHaveBeenCalledWith(3, { pinned: true });
+    expect(fake.methods.move).toHaveBeenCalledWith(3, { index: 1 });
+    expect(row(1).draggable).toBe(false);
+
+    pendingMove.resolve(fakeTab({ id: 3, index: 1, pinned: true }));
+    await flush();
+    expect(row(1).draggable).toBe(true);
+    input("one");
+    expect(row(1).draggable).toBe(false);
+    input("");
+    expect(row(1).draggable).toBe(true);
+    cleanup();
+  });
+
   it.each(["older-success", "older-failure"] as const)(
     "lets only the latest tab operation update status when %s settles last",
     async (olderResult) => {
