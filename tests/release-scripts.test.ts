@@ -80,7 +80,7 @@ async function createReleaseFixture(): Promise<{ root: string; dist: string; rel
     version: "0.1.0",
     description: "Release validation fixture",
     minimum_chrome_version: "114",
-    permissions: ["sidePanel", "tabs", "storage"],
+    permissions: ["sidePanel", "tabs", "storage", "history"],
     content_security_policy: {
       extension_pages:
         "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data: http: https:; style-src 'self'; frame-src 'none'",

@@ -278,7 +278,10 @@ export async function checkDist(distDirectory) {
     "manifest top-level keys must exactly match the reviewed allowlist",
   );
   assert(manifest.manifest_version === 3, "manifest_version must be 3");
-  assert(JSON.stringify(manifest.permissions) === JSON.stringify(["sidePanel", "tabs", "storage"]), "permissions must be exactly sidePanel, tabs, storage");
+  assert(
+    JSON.stringify(manifest.permissions) === JSON.stringify(["sidePanel", "tabs", "storage", "history"]),
+    "permissions must be exactly sidePanel, tabs, storage, history",
+  );
   assert(!Object.hasOwn(manifest, "host_permissions"), "host_permissions must not be present");
   assert(!Object.hasOwn(manifest, "content_scripts"), "content_scripts must not be present");
   assert(manifest.minimum_chrome_version === "114", "minimum_chrome_version must be 114");

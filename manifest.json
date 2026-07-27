@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "SideTab Lite",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "minimum_chrome_version": "114",
   "description": "A fast side panel for managing tabs in the current Chrome window.",
-  "permissions": ["sidePanel", "tabs", "storage"],
+  "permissions": ["sidePanel", "tabs", "storage", "history"],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data: http: https:; style-src 'self'; frame-src 'none'"
   },
