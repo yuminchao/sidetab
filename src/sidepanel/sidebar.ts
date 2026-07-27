@@ -323,9 +323,6 @@ async function startSidebarInternal(
       );
     },
     updated(tab: chrome.tabs.Tab) {
-      if (tab.id !== undefined) {
-        contextMenu.closeForTab(tab.id);
-      }
       let previous: ReturnType<TabStore["list"]>[number] | undefined;
       let model: ReturnType<TabStore["replace"]>;
       applyTabEvent(
@@ -335,6 +332,9 @@ async function startSidebarInternal(
             ? undefined
             : tabs.find((item) => item.id === tab.id);
           model = tabStore.replace(tab);
+          if (previous && model && previous.pinned !== model.pinned) {
+            contextMenu.closeForTab(model.id);
+          }
         },
         () => {
           if (!model) return;
