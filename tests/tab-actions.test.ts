@@ -138,8 +138,11 @@ describe("tab actions", () => {
     expect(update.mock.invocationCallOrder[0]!).toBeLessThan(move.mock.invocationCallOrder[0]!);
   });
 
-  it("does not move across groups when pinning fails", async () => {
-    const update = vi.fn().mockRejectedValue(new Error("chrome failed"));
+  it.each([
+    ["synchronous throw", () => vi.fn(() => { throw new Error("chrome failed"); })],
+    ["promise rejection", () => vi.fn().mockRejectedValue(new Error("chrome failed"))],
+  ])("does not move across groups after a pinning %s", async (_case, makeUpdate) => {
+    const update = makeUpdate();
     const move = vi.fn().mockResolvedValue(tab);
 
     await expect(createTabActions(tabApi({ update, move })).reorder(crossGroupPlan)).rejects.toThrow(
@@ -149,11 +152,14 @@ describe("tab actions", () => {
   });
 
   it.each([
-    ["same group", sameGroupPlan],
-    ["across groups", crossGroupPlan],
-  ])("maps a %s move failure to the user-facing error", async (_case, plan) => {
+    ["same group synchronous throw", sameGroupPlan, () => vi.fn(() => { throw new Error("chrome failed"); })],
+    ["same group promise rejection", sameGroupPlan, () => vi.fn().mockRejectedValue(new Error("chrome failed"))],
+    ["across groups synchronous throw", crossGroupPlan, () => vi.fn(() => { throw new Error("chrome failed"); })],
+    ["across groups promise rejection", crossGroupPlan, () => vi.fn().mockRejectedValue(new Error("chrome failed"))],
+  ])("maps a %s to the user-facing error", async (_case, plan, makeMove) => {
+    const move = makeMove();
     await expect(
-      createTabActions(tabApi({ move: vi.fn().mockRejectedValue(new Error("chrome failed")) })).reorder(plan),
+      createTabActions(tabApi({ move })).reorder(plan),
     ).rejects.toThrow("无法移动该标签页");
   });
 });
