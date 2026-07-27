@@ -56,6 +56,26 @@ export function normalizeShortcutUrl(raw: string): string {
   }
 }
 
+export function appendTabShortcut(
+  settings: ShortcutSettings,
+  tab: { id: string; title: string; url: string },
+): ShortcutSettings {
+  const url = normalizeShortcutUrl(tab.url);
+  const name = tab.title.trim() || new URL(url).hostname;
+  const validation = validateShortcutSettings({
+    enabled: settings.enabled,
+    tabTitleFontSize: settings.tabTitleFontSize,
+    items: [
+      ...settings.items.map((item) => ({ ...item })),
+      { id: tab.id, name, url, icon: "letter" },
+    ],
+  });
+  if (!validation.ok) {
+    throw new Error(validation.message);
+  }
+  return validation.value;
+}
+
 export function validateShortcutSettings(input: unknown): ValidationResult {
   try {
     if (!isRecord(input)) {

@@ -3,6 +3,7 @@ import {
   DEFAULT_TAB_TITLE_FONT_SIZE,
   MAX_TAB_TITLE_FONT_SIZE,
   MIN_TAB_TITLE_FONT_SIZE,
+  appendTabShortcut,
   createDefaultShortcutSettings,
   normalizeShortcutUrl,
   validateShortcutSettings,
@@ -18,6 +19,74 @@ const shortcut = (overrides: Partial<Shortcut> = {}): Shortcut => ({
 });
 
 describe("shortcut model", () => {
+  it("appends a normalized letter shortcut from a tab", () => {
+    const settings = createDefaultShortcutSettings();
+    const result = appendTabShortcut(settings, {
+      id: "tab-1",
+      title: "  Example page  ",
+      url: "example.com/path",
+    });
+
+    expect(result.items.at(-1)).toEqual({
+      id: "tab-1",
+      name: "Example page",
+      url: "https://example.com/path",
+      icon: "letter",
+    });
+    expect(settings).toEqual(createDefaultShortcutSettings());
+  });
+
+  it("uses the hostname when a tab has no title", () => {
+    const result = appendTabShortcut(createDefaultShortcutSettings(), {
+      id: "tab-empty-title",
+      title: "   ",
+      url: "https://docs.example.test/guide",
+    });
+
+    expect(result.items.at(-1)?.name).toBe("docs.example.test");
+  });
+
+  it.each([
+    ["chrome://settings/", "仅支持 HTTP 或 HTTPS 地址"],
+    ["https://chatgpt.com/", "快捷网站地址不能重复"],
+  ])("rejects %s without mutating settings", (url, message) => {
+    const settings = createDefaultShortcutSettings();
+    const before = structuredClone(settings);
+
+    expect(() =>
+      appendTabShortcut(settings, { id: "rejected", title: "Rejected", url }),
+    ).toThrow(message);
+    expect(settings).toEqual(before);
+  });
+
+  it("rejects a thirteenth item and duplicate ID", () => {
+    const full = {
+      enabled: true,
+      tabTitleFontSize: 14,
+      items: Array.from({ length: 12 }, (_, index) => ({
+        id: `item-${index}`,
+        name: `Item ${index}`,
+        url: `https://item-${index}.example/`,
+        icon: "letter" as const,
+      })),
+    };
+
+    expect(() =>
+      appendTabShortcut(full, {
+        id: "item-12",
+        title: "Overflow",
+        url: "https://overflow.example/",
+      }),
+    ).toThrow("最多只能添加 12 个快捷网站");
+    expect(() =>
+      appendTabShortcut(createDefaultShortcutSettings(), {
+        id: "openai",
+        title: "Different",
+        url: "https://different.example/",
+      }),
+    ).toThrow("快捷网站 ID 不能重复");
+  });
+
   it("creates disabled default settings with the three prescribed shortcuts", () => {
     expect(createDefaultShortcutSettings()).toEqual({
       enabled: false,
