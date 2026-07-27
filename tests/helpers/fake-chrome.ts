@@ -51,6 +51,10 @@ export function createFakeChrome(options: {
     fakeTab({ id: tabId, ...properties }),
   );
   const remove = vi.fn(async () => undefined);
+  const duplicate = vi.fn(async (tabId: number) => fakeTab({ id: tabId + 1000 }));
+  const move = vi.fn(async (tabId: number, moveProperties: chrome.tabs.MoveProperties) =>
+    fakeTab({ id: tabId, index: moveProperties.index as number }),
+  );
   const create = vi.fn(async (properties: chrome.tabs.CreateProperties) =>
     fakeTab({ id: 999, url: properties.url, active: properties.active ?? true }),
   );
@@ -65,13 +69,15 @@ export function createFakeChrome(options: {
       get,
       update,
       remove,
+      duplicate,
+      move,
       create,
     } as unknown as typeof chrome.tabs,
     windows: { getCurrent } as Pick<typeof chrome.windows, "getCurrent">,
     storage: { get: storageGet, set: storageSet },
     document,
     events,
-    methods: { query, get, update, remove, create, getCurrent, storageGet, storageSet },
+    methods: { query, get, update, remove, duplicate, move, create, getCurrent, storageGet, storageSet },
   };
 }
 

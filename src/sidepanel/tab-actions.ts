@@ -1,4 +1,6 @@
-export type TabsActionApi = Pick<typeof chrome.tabs, "update" | "remove">;
+import type { TabReorderPlan } from "./tab-reorder-model";
+
+export type TabsActionApi = Pick<typeof chrome.tabs, "duplicate" | "move" | "remove" | "update">;
 
 export function createTabActions(api: TabsActionApi) {
   return {
@@ -15,6 +17,34 @@ export function createTabActions(api: TabsActionApi) {
         await api.remove(tabId);
       } catch {
         throw new Error("无法关闭该标签页");
+      }
+    },
+
+    async duplicate(tabId: number): Promise<void> {
+      try {
+        await api.duplicate(tabId);
+      } catch {
+        throw new Error("无法复制该标签页");
+      }
+    },
+
+    async setPinned(tabId: number, pinned: boolean): Promise<void> {
+      try {
+        await api.update(tabId, { pinned });
+      } catch {
+        throw new Error("无法更新标签固定状态");
+      }
+    },
+
+    async reorder(plan: TabReorderPlan): Promise<void> {
+      if (plan.pinnedChanged) {
+        await this.setPinned(plan.tabId, plan.targetPinned);
+      }
+
+      try {
+        await api.move(plan.tabId, { index: plan.targetIndex });
+      } catch {
+        throw new Error("无法移动该标签页");
       }
     },
   };
