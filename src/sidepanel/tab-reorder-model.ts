@@ -19,7 +19,7 @@ export function createTabReorderPlan(
     return undefined;
   }
 
-  const sortedTabs = [...tabs].sort((left, right) => left.index - right.index);
+  const sortedTabs = [...tabs].sort((left, right) => left.index - right.index || left.id - right.id);
   const source = sortedTabs.find((tab) => tab.id === sourceId);
   const target = sortedTabs.find((tab) => tab.id === targetId);
   if (!source || !target) {

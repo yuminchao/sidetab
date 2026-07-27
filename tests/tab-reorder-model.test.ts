@@ -33,6 +33,21 @@ describe("createTabReorderPlan", () => {
     });
   });
 
+  it("breaks equal Chrome-index ties by ID regardless of input order", () => {
+    const tabs = [
+      fakeTabModel({ id: 3, index: 0 }),
+      fakeTabModel({ id: 2, index: 0 }),
+      fakeTabModel({ id: 1, index: 1 }),
+    ];
+
+    expect(createTabReorderPlan(tabs, 1, 2, "before")).toEqual({
+      tabId: 1,
+      targetIndex: 0,
+      targetPinned: false,
+      pinnedChanged: false,
+    });
+  });
+
   it.each([
     ["downward", 1, 2, "after", 1],
     ["upward", 3, 2, "before", 1],
