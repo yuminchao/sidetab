@@ -323,6 +323,9 @@ async function startSidebarInternal(
       );
     },
     updated(tab: chrome.tabs.Tab) {
+      if (tab.id !== undefined) {
+        contextMenu.closeForTab(tab.id);
+      }
       let previous: ReturnType<TabStore["list"]>[number] | undefined;
       let model: ReturnType<TabStore["replace"]>;
       applyTabEvent(

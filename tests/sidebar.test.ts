@@ -539,6 +539,21 @@ describe("sidebar lifecycle", () => {
     expect(document.querySelector(".tab-context-menu")).toBeNull();
   });
 
+  it("closes an open tab menu when its pinned state changes", async () => {
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 7, pinned: false })] });
+    const cleanup = await startSidebar(fake);
+
+    row(7).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    const menu = document.querySelector<HTMLElement>(".tab-context-menu")!;
+    expect(menu.hidden).toBe(false);
+
+    fake.events.onUpdated.emit(7, { pinned: true }, fakeTab({ id: 7, pinned: true }));
+    await flush();
+
+    expect(menu.hidden).toBe(true);
+    cleanup();
+  });
+
   it("submits one cross-group reorder and disables dragging during search or a pending move", async () => {
     const pendingMove = deferred<chrome.tabs.Tab>();
     const fake = createFakeChrome({

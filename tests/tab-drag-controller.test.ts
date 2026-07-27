@@ -60,6 +60,42 @@ describe("tab drag controller", () => {
     controller.destroy();
   });
 
+  it("cancels without dispatch when the source row disappears", () => {
+    const onDrop = vi.fn();
+    const controller = createTabDragController({ list }, { onDrop });
+
+    drag(rows[0]!, "dragstart");
+    rows[0]!.remove();
+    const over = drag(rows[1]!, "dragover", 11);
+    drag(rows[1]!, "drop", 11);
+
+    expect(over.defaultPrevented).toBe(false);
+    expect(onDrop).not.toHaveBeenCalled();
+    expect(list.querySelector("[data-drop-placement], [data-drag-source]")).toBeNull();
+    controller.destroy();
+  });
+
+  it.each([
+    ["leaves the list", (list: HTMLElement, target: HTMLElement) => {
+      const event = new Event("dragleave", { bubbles: true });
+      Object.defineProperty(event, "relatedTarget", { value: document.body });
+      target.dispatchEvent(event);
+    }],
+    ["the list scrolls", (list: HTMLElement) => list.dispatchEvent(new Event("scroll"))],
+  ])("clears drag feedback when %s", (_reason, interrupt) => {
+    const onDrop = vi.fn();
+    const controller = createTabDragController({ list }, { onDrop });
+
+    drag(rows[0]!, "dragstart");
+    drag(rows[1]!, "dragover", 11);
+    interrupt(list, rows[1]!);
+    drag(rows[1]!, "drop", 11);
+
+    expect(onDrop).not.toHaveBeenCalled();
+    expect(list.querySelector("[data-drop-placement], [data-drag-source]")).toBeNull();
+    controller.destroy();
+  });
+
   it("cancels same-row, invalid, ended, and destroyed drags without dispatch", () => {
     const onDrop = vi.fn();
     const controller = createTabDragController({ list }, { onDrop });
