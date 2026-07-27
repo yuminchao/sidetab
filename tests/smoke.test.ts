@@ -25,6 +25,11 @@ describe("extension manifest", () => {
     expect(packageLock.packages[""].version).toBe("0.3.0");
   });
 
+  it("documents the current release archive", () => {
+    const readme = readFileSync("README.md", "utf8");
+    expect(readme).toContain(`release/sidetab-lite-${manifest.version}.zip`);
+  });
+
   it("uses the required restricted MV3 permissions", () => {
     expect(manifest.manifest_version).toBe(3);
     expect(manifest.minimum_chrome_version).toBe("114");
