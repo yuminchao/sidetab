@@ -19,6 +19,8 @@
 - 修改 `src/sidepanel/sidebar.ts`：把菜单命令写入现有快捷网站存储并刷新渲染。
 - 修改 `tests/sidebar.test.ts`：验证保存、错误、并发、生命周期和标签操作隔离。
 - 修改 `src/sidepanel/sidebar.css`、`tests/sidepanel-css.test.ts`：实现并锁定菜单、加号和搜索区域样式。
+- 新建 `src/sidepanel/history-search.ts`、`tests/history-search.test.ts`：封装历史查询、结果标准化、向上结果框、键盘导航和异步竞态控制。
+- 修改 `src/sidepanel/index.html`、`src/sidepanel/sidebar.ts`、测试夹具与 Chrome 假实现：接入历史搜索并彻底移除当前标签过滤。
 - 修改版本、smoke 测试、README 和商店清单：发布 `0.4.0`。
 
 ### Task 1: 建立标签转快捷网站纯模型
@@ -518,7 +520,127 @@ git add src/sidepanel/sidebar.css tests/sidepanel-css.test.ts
 git commit -m "$timestamp feat 优化菜单与搜索界面样式"
 ```
 
-### Task 5: 发布 `0.4.0` 并完成验收
+### Task 5: 建立历史记录查询与标准化模型
+
+**Files:**
+- Create: `src/sidepanel/history-search.ts`
+- Create: `tests/history-search.test.ts`
+
+- [ ] **Step 1: 写入查询参数、顺序、过滤和错误文案的失败测试**
+
+测试 `searchHistory(api, text)` 必须调用：
+
+```ts
+api.search({ text, startTime: 0, maxResults: 20 });
+```
+
+并锁定以下行为：保留 Chrome 返回顺序；过滤无 URL、非 HTTP/HTTPS 和无法解析的地址；标题为空时回退为 hostname；最多返回 20 项；查询失败统一抛出 `无法读取历史记录`。
+
+- [ ] **Step 2: 运行模型测试确认失败**
+
+Run: `npm test -- --run tests/history-search.test.ts`
+
+Expected: FAIL，模块或导出尚不存在。
+
+- [ ] **Step 3: 实现最小查询模型**
+
+导出只读接口和结果类型：
+
+```ts
+export type HistorySearchApi = Pick<typeof chrome.history, "search">;
+
+export type HistorySearchResult = {
+  id: string;
+  title: string;
+  url: string;
+};
+```
+
+`searchHistory()` 只负责 Chrome API 调用和无副作用标准化，不访问 DOM、标签存储或扩展 Storage。
+
+- [ ] **Step 4: 运行模型测试和类型检查**
+
+Run: `npm test -- --run tests/history-search.test.ts && npm run typecheck`
+
+Expected: 全部 PASS。
+
+- [ ] **Step 5: 提交历史查询模型**
+
+读取提交规则后提交 `src/sidepanel/history-search.ts` 和 `tests/history-search.test.ts`，消息为 `feat 新增历史记录查询模型`。
+
+### Task 6: 实现向上历史结果框与键盘交互
+
+**Files:**
+- Modify: `src/sidepanel/history-search.ts`
+- Modify: `tests/history-search.test.ts`
+- Modify: `src/sidepanel/sidebar.css`
+- Modify: `tests/sidepanel-css.test.ts`
+
+- [ ] **Step 1: 写入控制器失败测试**
+
+覆盖：聚焦和再次点击立即展示最近 20 条；输入后 100ms 防抖；加载、默认空、搜索空和读取失败文案；结果框向上展开且内部滚动；上下方向键循环、Enter 打开、Esc 保留输入并关闭；Tab、外部点击和显式 `close()` 关闭；打开成功后清空并关闭；打开失败回调 `无法打开历史记录`；新查询使旧结果失效；`destroy()` 后定时器和异步结果不得改 DOM。
+
+- [ ] **Step 2: 运行控制器和 CSS 测试确认失败**
+
+Run: `npm test -- --run tests/history-search.test.ts tests/sidepanel-css.test.ts`
+
+Expected: FAIL，控制器和结果框样式尚不存在。
+
+- [ ] **Step 3: 实现控制器、ARIA 和 favicon 回退**
+
+`createHistorySearchController()` 返回 `close()`、`setFaviconsByOrigin()`、`destroy()`。输入框使用 combobox ARIA，结果容器使用 listbox、结果使用 option；favicon 优先使用同源当前标签的 `favIconUrl`，其次 `/favicon.ico`，最后首字母。使用查询代次编号丢弃过期结果，并以打开忙状态防止重复创建标签。
+
+- [ ] **Step 4: 实现向上结果框 CSS**
+
+结果框绝对定位于整个 `.bottom-toolbar` 上方，最大高度 `360px`、内部滚动；每项只显示 favicon 和单行标题，隐藏 URL。保留系统色、紧凑高度和 180px 最小宽度可用性。
+
+- [ ] **Step 5: 运行测试和类型检查**
+
+Run: `npm test -- --run tests/history-search.test.ts tests/sidepanel-css.test.ts && npm run typecheck`
+
+Expected: 全部 PASS。
+
+- [ ] **Step 6: 提交历史结果控制器**
+
+读取提交规则后提交相关文件，消息为 `feat 新增历史记录搜索结果框`。
+
+### Task 7: 接入侧边栏并移除标签过滤
+
+**Files:**
+- Modify: `src/sidepanel/index.html`
+- Modify: `src/sidepanel/sidebar.ts`
+- Modify: `tests/sidebar.test.ts`
+- Modify: `tests/helpers/fake-chrome.ts`
+
+- [ ] **Step 1: 写入侧边栏接入失败测试**
+
+扩展假 Chrome 实现以记录 `history.search`。测试聚焦空搜索框查询最近记录，输入查询所有历史并保持当前标签列表完整，点击与 Enter 调用 `tabs.create({ url, active: true })`，设置按钮、滚动和清理会关闭结果框，历史搜索不会禁用拖动或改变右键菜单。
+
+- [ ] **Step 2: 运行侧边栏测试确认失败**
+
+Run: `npm test -- --run tests/sidebar.test.ts`
+
+Expected: FAIL，当前输入框仍过滤标签且未调用 History API。
+
+- [ ] **Step 3: 接入依赖与真实 DOM**
+
+`SidebarDependencies` 增加只读 `history.search`，生产启动传入 `chrome.history`；HTML 增加结果 listbox，并把输入框设置为 combobox。实例化历史控制器，打开结果时调用 `tabs.create({ url, active: true })`，失败写入 `无法打开历史记录`。
+
+- [ ] **Step 4: 删除旧标签过滤路径**
+
+移除 `currentQuery`、搜索定时器、`renderFilteredTabs()` 及其监听器。标签创建、更新、移除、激活、拖动始终作用于完整 `tabStore.list()`；搜索只操作历史结果 DOM。标签 favicon 同源映射同时提供给快捷网站和历史结果控制器。
+
+- [ ] **Step 5: 运行集成测试和完整类型检查**
+
+Run: `npm test -- --run tests/sidebar.test.ts tests/history-search.test.ts && npm run typecheck`
+
+Expected: 全部 PASS。
+
+- [ ] **Step 6: 提交侧边栏接入**
+
+读取提交规则后提交相关文件，消息为 `feat 接入侧边栏历史记录搜索`。
+
+### Task 8: 发布 `0.4.0` 并完成验收
 
 **Files:**
 - Modify: `package.json`
@@ -527,6 +649,7 @@ git commit -m "$timestamp feat 优化菜单与搜索界面样式"
 - Modify: `tests/smoke.test.ts`
 - Modify: `README.md`
 - Modify: `docs/chrome-web-store-checklist.md`
+- Modify: `docs/privacy-policy.md`
 
 - [ ] **Step 1: 先更新发布一致性测试**
 
@@ -552,6 +675,7 @@ Expected: FAIL，当前版本仍为 `0.3.0`。
 Run: `npm version 0.4.0 --no-git-tag-version`
 
 将 `manifest.json` 改为 `"version": "0.4.0"`，README 包名改为 `release/sidetab-lite-0.4.0.zip`。
+在 `manifest.json` 的 `permissions` 中加入 `"history"`，并更新 README、权限说明、隐私政策和商店清单：历史记录只在用户聚焦或输入搜索框时通过本地 Chrome API 临时读取，不写入 Storage、不上传；空输入最多展示最近 20 条，输入后最多返回 20 条匹配结果。
 
 在 `docs/chrome-web-store-checklist.md` 的“标签页与快捷入口”增加：
 
@@ -559,6 +683,7 @@ Run: `npm version 0.4.0 --no-git-tag-version`
 - [ ] 标签右键菜单的三项命令在鼠标悬停、键盘焦点和按下时均有清晰反馈；`Shift+F10`、方向键、`Enter`、空格和 `Esc` 可操作。
 - [ ] “设为快捷网站”可保存当前 HTTP/HTTPS 标签；重复地址、12 项上限、无效地址和保存失败均有明确反馈，且不会自动开启快捷入口总开关。
 - [ ] 标签列表末尾的加号为有边框的居中按钮；搜索区域上方无分割线，搜索框为圆角，底部工具栏仍固定。
+- [ ] 聚焦搜索框向上展示最近 20 条历史记录；输入后只搜索历史记录，键盘、空状态、读取失败和打开失败反馈正确，当前标签列表不被过滤。
 ```
 
 - [ ] **Step 4: 运行完整检查与打包**
@@ -598,7 +723,7 @@ Expected: ZIP 恰好 11 项，内部版本为 `0.4.0`，输出 SHA-256，差异�
 ```text
 标签数量：0、3、30
 快捷入口：关闭、开启
-搜索：无匹配结果
+历史搜索：最近记录、输入查询、无结果、读取失败、键盘循环、点击与 Enter 打开
 右键：三项菜单、hover、focus-visible、active、Shift+F10 键盘执行
 ```
 
