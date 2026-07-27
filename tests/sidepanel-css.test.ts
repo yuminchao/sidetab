@@ -81,6 +81,20 @@ describe("side panel responsive CSS", () => {
     );
   });
 
+  it("positions compact history results above the fixed bottom toolbar", () => {
+    expect(css).toMatch(/\.bottom-toolbar\s*{[^}]*position:\s*relative/s);
+    expect(css).toMatch(
+      /#history-search-results\s*{[^}]*position:\s*absolute[^}]*bottom:\s*100%[^}]*max-height:\s*360px[^}]*overflow-y:\s*auto/s,
+    );
+    expect(css).toMatch(
+      /\.history-search-option\s*{[^}]*grid-template-columns:\s*16px\s+minmax\(0,\s*1fr\)[^}]*height:\s*30px/s,
+    );
+    expect(css).toMatch(
+      /\.history-search-title\s*{[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s,
+    );
+    expect(css).not.toMatch(/\.history-search-option\s+\.history-search-url/s);
+  });
+
   it("uses a compact bottom toolbar and reveals close controls accessibly", () => {
     expect(css).toMatch(/\.bottom-toolbar\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+32px[^}]*padding:\s*6px/s);
     expect(css).toMatch(/\.tab-close\s*{[^}]*width:\s*26px[^}]*height:\s*26px[^}]*opacity:\s*0/s);

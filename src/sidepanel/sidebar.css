@@ -123,12 +123,83 @@ input:focus-visible {
 }
 
 .bottom-toolbar {
+  position: relative;
   display: grid;
   grid-row: 4;
   grid-template-columns: minmax(0, 1fr) 32px;
   gap: 4px;
   min-width: 0;
   padding: 6px;
+}
+
+#history-search-results {
+  position: absolute;
+  z-index: 15;
+  right: 42px;
+  bottom: 100%;
+  left: 6px;
+  max-height: 360px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border: 1px solid ButtonBorder;
+  border-radius: 6px;
+  background: Canvas;
+  box-shadow: 0 -3px 10px rgb(0 0 0 / 18%);
+}
+
+.history-search-option {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  height: 30px;
+  padding: 2px 7px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.history-search-option:hover:not(:disabled),
+.history-search-option[aria-selected="true"] {
+  background: color-mix(in srgb, CanvasText 8%, transparent);
+}
+
+.history-favicon-image,
+.history-favicon-fallback {
+  width: 16px;
+  height: 16px;
+}
+
+.history-favicon-image {
+  display: block;
+  object-fit: contain;
+}
+
+.history-favicon-fallback {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid ButtonBorder;
+  border-radius: 3px;
+  color: GrayText;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.history-search-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-search-message {
+  min-height: 36px;
+  padding: 10px 8px;
+  color: GrayText;
+  text-align: center;
 }
 
 #tab-search {
