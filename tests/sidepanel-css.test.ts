@@ -84,7 +84,9 @@ describe("side panel responsive CSS", () => {
   });
 
   it("styles the shortcut divider, context menu, and zero-shift drag indicators", () => {
-    expect(css).toMatch(/\.shortcut-strip\s*\{[^}]*border-bottom:\s*1px solid ButtonBorder/s);
+    expect(css).toMatch(
+      /\.shortcut-strip\s*\{[^}]*border-bottom:\s*1px solid color-mix\(in srgb, CanvasText 18%, transparent\)/s,
+    );
     expect(css).toMatch(/\[hidden\]\s*\{[^}]*display:\s*none !important/s);
     expect(css).toMatch(/\.tab-context-menu\s*\{[^}]*position:\s*fixed[^}]*z-index:\s*20/s);
     expect(css).toMatch(/\.tab-row\[data-drop-placement="before"\]::before/s);

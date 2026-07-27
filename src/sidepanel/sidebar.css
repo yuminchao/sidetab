@@ -81,7 +81,7 @@ input:focus-visible {
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
-  border-bottom: 1px solid ButtonBorder;
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
 }
 
 .shortcut-region {
