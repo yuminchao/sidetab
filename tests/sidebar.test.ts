@@ -1,6 +1,9 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createDefaultShortcutSettings } from "../src/sidepanel/shortcut-model";
+import {
+  createDefaultShortcutSettings,
+  type ShortcutSettings,
+} from "../src/sidepanel/shortcut-model";
 import { startSidebar, type SidebarDependencies } from "../src/sidepanel/sidebar";
 import { createFakeChrome, deferred, fakeTab } from "./helpers/fake-chrome";
 
@@ -67,6 +70,10 @@ function row(id: number): HTMLElement {
 
 function click(target: Element): void {
   target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+}
+
+function contextMenuItem(action: string): HTMLButtonElement {
+  return document.querySelector<HTMLButtonElement>(`[data-menu-action='${action}']`)!;
 }
 
 function input(value: string): void {
@@ -649,6 +656,114 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.update).toHaveBeenCalledWith(7, { pinned: true });
     cleanup();
     expect(document.querySelector(".tab-context-menu")).toBeNull();
+  });
+
+  it("persists the current tab as a shortcut without Chrome tab actions", async () => {
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 17, title: "Example", url: "https://example.com/path" })],
+    });
+    const cleanup = await startSidebar(fake);
+
+    row(17).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    click(contextMenuItem("add-shortcut"));
+
+    await vi.waitFor(() => expect(fake.methods.storageSet).toHaveBeenCalledOnce());
+    const saved = fake.methods.storageSet.mock.calls.at(-1)?.[0]
+      .shortcutSettings as ShortcutSettings;
+    expect(saved.items.at(-1)).toMatchObject({
+      name: "Example",
+      url: "https://example.com/path",
+      icon: "letter",
+    });
+    expect(saved.enabled).toBe(false);
+    expect(element("shortcut-strip").hidden).toBe(true);
+    expect(element("status-message").textContent).toBe("已添加到快捷网站");
+    expect(fake.methods.create).not.toHaveBeenCalled();
+    expect(fake.methods.duplicate).not.toHaveBeenCalled();
+    expect(fake.methods.move).not.toHaveBeenCalled();
+    expect(fake.methods.update).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("renders a saved context-menu shortcut immediately when shortcuts are enabled", async () => {
+    const fake = createFakeChrome({
+      stored: enabledShortcuts([]),
+      tabs: [fakeTab({
+        id: 18,
+        title: "Docs",
+        url: "https://docs.example/guide",
+        favIconUrl: "data:image/png;base64,docs-menu",
+      })],
+    });
+    const cleanup = await startSidebar(fake);
+
+    row(18).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    click(contextMenuItem("add-shortcut"));
+    await vi.waitFor(() => expect(fake.methods.storageSet).toHaveBeenCalledOnce());
+
+    expect(element("shortcut-strip").hidden).toBe(false);
+    expect(element("shortcut-strip").children).toHaveLength(1);
+    expect(element("shortcut-strip").querySelector("img")?.getAttribute("src"))
+      .toBe("data:image/png;base64,docs-menu");
+    cleanup();
+  });
+
+  it("ignores a repeated pending add and reports save failure", async () => {
+    const pending = deferred<void>();
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 19, url: "https://pending.example/" })],
+    });
+    fake.methods.storageSet.mockReturnValueOnce(pending.promise);
+    const cleanup = await startSidebar(fake);
+
+    row(19).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    click(contextMenuItem("add-shortcut"));
+    row(19).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    click(contextMenuItem("add-shortcut"));
+    await vi.waitFor(() => expect(fake.methods.storageSet).toHaveBeenCalledOnce());
+
+    pending.reject(new Error("storage failed"));
+    await vi.waitFor(() =>
+      expect(element("status-message").textContent).toBe("无法保存快捷网站设置"),
+    );
+    cleanup();
+  });
+
+  it.each([
+    ["chrome://settings/", "仅支持 HTTP 或 HTTPS 地址"],
+    ["https://chatgpt.com/", "快捷网站地址不能重复"],
+  ])("reports a rejected shortcut URL %s without persisting", async (url, message) => {
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 20, url })] });
+    const cleanup = await startSidebar(fake);
+
+    row(20).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    click(contextMenuItem("add-shortcut"));
+    await vi.waitFor(() => expect(element("status-message").textContent).toBe(message));
+
+    expect(fake.methods.storageSet).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("ignores a pending shortcut save completion after cleanup", async () => {
+    const pending = deferred<void>();
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 21, url: "https://late.example/" })],
+    });
+    fake.methods.storageSet.mockReturnValueOnce(pending.promise);
+    const cleanup = await startSidebar(fake);
+
+    row(21).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    click(contextMenuItem("add-shortcut"));
+    await vi.waitFor(() => expect(fake.methods.storageSet).toHaveBeenCalledOnce());
+    const statusBefore = element("status-message").textContent;
+    const shortcutsBefore = element("shortcut-strip").innerHTML;
+
+    cleanup();
+    pending.resolve();
+    await flush();
+
+    expect(element("status-message").textContent).toBe(statusBefore);
+    expect(element("shortcut-strip").innerHTML).toBe(shortcutsBefore);
   });
 
   it("keeps an open tab menu for ordinary updates and closes it when pinned state changes", async () => {

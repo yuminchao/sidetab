@@ -1,4 +1,4 @@
-import { createDefaultShortcutSettings } from "./shortcut-model";
+import { appendTabShortcut, createDefaultShortcutSettings } from "./shortcut-model";
 import { createShortcutActions } from "./shortcut-actions";
 import { createShortcutRenderer } from "./shortcut-renderer";
 import { createShortcutStore, type StorageArea } from "./shortcut-store";
@@ -68,6 +68,7 @@ async function startSidebarInternal(
   let shortcutSettingsReady = false;
   let operationGeneration = 0;
   let reorderBusy = false;
+  let addShortcutBusy = false;
   const statusSlots = {
     tabs: "",
     shortcuts: "",
@@ -157,6 +158,36 @@ async function startSidebarInternal(
     }
   };
 
+  const addTabShortcut = async (tabId: number): Promise<void> => {
+    if (addShortcutBusy) return;
+    addShortcutBusy = true;
+    try {
+      const tab = tabStore.list().find((item) => item.id === tabId);
+      if (!tab) throw new Error("标签页已不存在");
+      const settings = await shortcutStore.load();
+      if (!active) return;
+      const next = appendTabShortcut(settings, {
+        id: crypto.randomUUID(),
+        title: tab.title,
+        url: tab.url,
+      });
+      const saved = await shortcutStore.save(next);
+      if (!active) return;
+      shortcutRenderer.render(saved);
+      syncShortcutFavicons();
+      setStatus("shortcuts", "已添加到快捷网站");
+    } catch (error) {
+      if (active) {
+        setStatus(
+          "shortcuts",
+          error instanceof Error ? error.message : "无法保存快捷网站设置",
+        );
+      }
+    } finally {
+      addShortcutBusy = false;
+    }
+  };
+
   const updateDragEnabled = (): void => {
     tabRenderer.setDragEnabled(elements.search.value.trim() === "" && !reorderBusy);
   };
@@ -166,6 +197,10 @@ async function startSidebarInternal(
     {
       getTab: (id) => tabStore.list().find((tab) => tab.id === id),
       onCommand(command) {
+        if (command.action === "add-shortcut") {
+          void addTabShortcut(command.tabId);
+          return;
+        }
         const operation = command.action === "duplicate"
           ? tabActions.duplicate(command.tabId)
           : tabActions.setPinned(command.tabId, command.pinned);

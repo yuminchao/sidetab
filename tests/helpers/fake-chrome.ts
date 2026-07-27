@@ -60,7 +60,9 @@ export function createFakeChrome(options: {
   );
   const getCurrent = vi.fn(async () => options.currentWindow ?? ({ id: 10 } as chrome.windows.Window));
   const storageGet = vi.fn(async () => options.stored ?? {});
-  const storageSet = vi.fn(async () => undefined);
+  const storageSet = vi.fn<(items: Record<string, unknown>) => Promise<void>>(
+    async () => undefined,
+  );
 
   return {
     tabs: {
