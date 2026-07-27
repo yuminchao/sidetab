@@ -528,6 +528,110 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
+  it("disables new-tab creation while one request is pending", async () => {
+    const pendingCreate = deferred<chrome.tabs.Tab>();
+    const fake = createFakeChrome();
+    fake.methods.create.mockReturnValueOnce(pendingCreate.promise);
+    const cleanup = await startSidebar(fake);
+    const button = element<HTMLButtonElement>("new-tab-button");
+
+    click(button);
+    click(button);
+
+    expect(fake.methods.create).toHaveBeenCalledOnce();
+    expect(fake.methods.create).toHaveBeenCalledWith({ active: true });
+    expect(button.disabled).toBe(true);
+
+    pendingCreate.resolve(fakeTab({ id: 999, active: true }));
+    await flush();
+    expect(button.disabled).toBe(false);
+    cleanup();
+  });
+
+  it("restores new-tab creation and reports a rejected request", async () => {
+    const pendingCreate = deferred<chrome.tabs.Tab>();
+    const fake = createFakeChrome();
+    fake.methods.create.mockReturnValueOnce(pendingCreate.promise);
+    const cleanup = await startSidebar(fake);
+    const button = element<HTMLButtonElement>("new-tab-button");
+
+    click(button);
+    pendingCreate.reject(new Error("browser failed"));
+    await flush();
+
+    expect(button.disabled).toBe(false);
+    expect(element("status-message").textContent).toBe("无法新建标签页");
+    cleanup();
+  });
+
+  it("leaves pending new-tab state untouched and removes its listener after cleanup", async () => {
+    const pendingCreate = deferred<chrome.tabs.Tab>();
+    const fake = createFakeChrome();
+    fake.methods.create.mockReturnValueOnce(pendingCreate.promise);
+    const cleanup = await startSidebar(fake);
+    const button = element<HTMLButtonElement>("new-tab-button");
+
+    click(button);
+    expect(button.disabled).toBe(true);
+    cleanup();
+    pendingCreate.resolve(fakeTab({ id: 999, active: true }));
+    await flush();
+    click(button);
+
+    expect(fake.methods.create).toHaveBeenCalledOnce();
+    expect(button.disabled).toBe(true);
+  });
+
+  it("closes transient tab UI when the shared tab region scrolls", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0 }),
+        fakeTab({ id: 2, index: 1, title: "Two" }),
+      ],
+    });
+    const cleanup = await startSidebar(fake);
+    vi.spyOn(row(1), "getBoundingClientRect").mockReturnValue({
+      top: 0, height: 30, bottom: 30, left: 0, right: 100, width: 100,
+      x: 0, y: 0, toJSON: () => ({}),
+    });
+
+    row(1).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    const menu = document.querySelector<HTMLElement>(".tab-context-menu")!;
+    row(2).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
+    const over = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.defineProperty(over, "clientY", { value: 29 });
+    row(1).dispatchEvent(over);
+    expect(row(2).dataset.dragSource).toBe("true");
+    expect(row(1).dataset.dropPlacement).toBe("after");
+
+    element("tab-scroll").dispatchEvent(new Event("scroll"));
+
+    expect(menu.hidden).toBe(true);
+    expect(row(2).hasAttribute("data-drag-source")).toBe(false);
+    expect(row(1).hasAttribute("data-drop-placement")).toBe(false);
+    expect(fake.methods.move).not.toHaveBeenCalled();
+    expect(fake.methods.update).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("keeps new-tab creation available when search has no matches", async () => {
+    vi.useFakeTimers();
+    const fake = createFakeChrome({ tabs: [fakeTab({ title: "Alpha" })] });
+    const cleanup = await startSidebar(fake);
+    const button = element<HTMLButtonElement>("new-tab-button");
+
+    input("does-not-match");
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(rowIds()).toEqual([]);
+    expect(button.hidden).toBe(false);
+    expect(button.disabled).toBe(false);
+    click(button);
+    await flush();
+    expect(fake.methods.create).toHaveBeenCalledWith({ active: true });
+    cleanup();
+  });
+
   it("dispatches duplicate and dynamic pinned commands from the tab context menu", async () => {
     const fake = createFakeChrome({ tabs: [fakeTab({ id: 7, pinned: false })] });
     const cleanup = await startSidebar(fake);
@@ -880,6 +984,8 @@ describe("sidebar lifecycle", () => {
 
   it.each([
     "tab-list",
+    "tab-scroll",
+    "new-tab-button",
     "tab-region",
     "shortcut-dialog-title",
     "shortcut-cancel",

@@ -24,8 +24,10 @@ type SidebarElements = {
   settingsButton: HTMLButtonElement;
   status: HTMLElement;
   tabRegion: HTMLElement;
+  tabScroll: HTMLElement;
   empty: HTMLElement;
   list: HTMLElement;
+  newTabButton: HTMLButtonElement;
   dialog: HTMLDialogElement;
   form: HTMLFormElement;
   dialogTitle: HTMLElement;
@@ -192,6 +194,19 @@ async function startSidebarInternal(
     },
   );
 
+  const onNewTabClick = (): void => {
+    if (elements.newTabButton.disabled) return;
+    elements.newTabButton.disabled = true;
+    runTabOperation(tabActions.create(), () => {
+      if (active) elements.newTabButton.disabled = false;
+    });
+  };
+
+  const onTabScroll = (): void => {
+    contextMenu.close();
+    dragController.cancel();
+  };
+
   const cleanup = (): void => {
     if (!active) {
       return;
@@ -203,6 +218,8 @@ async function startSidebarInternal(
     discardPendingAttached();
     elements.list.removeEventListener("click", onListClick);
     elements.search.removeEventListener("input", onSearchInput);
+    elements.newTabButton.removeEventListener("click", onNewTabClick);
+    elements.tabScroll.removeEventListener("scroll", onTabScroll);
     elements.settingsButton.removeEventListener("click", blockPendingSettings, true);
     contextMenu.destroy();
     dragController.destroy();
@@ -266,6 +283,8 @@ async function startSidebarInternal(
 
   elements.list.addEventListener("click", onListClick);
   elements.search.addEventListener("input", onSearchInput);
+  elements.newTabButton.addEventListener("click", onNewTabClick);
+  elements.tabScroll.addEventListener("scroll", onTabScroll);
   shortcutRenderer.render(createDefaultShortcutSettings());
   updateDragEnabled();
   signal?.addEventListener("abort", cleanup, { once: true });
@@ -542,8 +561,10 @@ function getSidebarElements(document: Document): SidebarElements {
     settingsButton: requireElement(document, "shortcut-settings", HTMLButtonElement),
     status: requireElement(document, "status-message", HTMLElement),
     tabRegion: requireElement(document, "tab-region", HTMLElement),
+    tabScroll: requireElement(document, "tab-scroll", HTMLElement),
     empty: requireElement(document, "tab-empty", HTMLElement),
     list: requireElement(document, "tab-list", HTMLElement),
+    newTabButton: requireElement(document, "new-tab-button", HTMLButtonElement),
     dialog: requireElement(document, "shortcut-dialog", HTMLDialogElement),
     form: requireElement(document, "shortcut-form", HTMLFormElement),
     dialogTitle: requireElement(document, "shortcut-dialog-title", HTMLElement),
