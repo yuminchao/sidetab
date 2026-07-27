@@ -348,6 +348,25 @@ describe("tab renderer", () => {
     expect(list.querySelector("img")).toBe(image);
   });
 
+  it("keeps row drag availability across render and patch", () => {
+    const renderer = createTabRenderer({ list, empty });
+    renderer.render([tab()]);
+    const row = list.firstElementChild as HTMLElement;
+    expect(row.draggable).toBe(true);
+
+    renderer.setDragEnabled(false);
+    expect(row.draggable).toBe(false);
+    expect(row.title).toBe("清空搜索后可排序");
+    renderer.render([tab({ title: "Again" })]);
+    const rerendered = list.firstElementChild as HTMLElement;
+    expect(rerendered.draggable).toBe(false);
+
+    renderer.setDragEnabled(true);
+    renderer.patch(tab({ title: "Patched" }));
+    expect(rerendered.draggable).toBe(true);
+    expect(rerendered.title).toBe("");
+  });
+
   it("keeps an emoji intact when deriving a favicon fallback", () => {
     const renderer = createTabRenderer({ list, empty });
 

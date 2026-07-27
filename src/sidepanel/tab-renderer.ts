@@ -10,10 +10,12 @@ export type TabRenderer = {
   render(tabs: readonly TabViewModel[]): void;
   patch(tab: TabViewModel): void;
   remove(id: number): void;
+  setDragEnabled(enabled: boolean): void;
   destroy(): void;
 };
 
 export function createTabRenderer({ list, empty }: TabRendererElements): TabRenderer {
+  let dragEnabled = true;
   const onFaviconError = (event: Event) => {
     const target = event.target;
     if (!(target instanceof HTMLImageElement) || !list.contains(target)) {
@@ -44,7 +46,7 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
     render(tabs) {
       const fragment = document.createDocumentFragment();
       for (const tab of tabs) {
-        fragment.append(createTabRow(tab));
+        fragment.append(createTabRow(tab, dragEnabled));
       }
       list.replaceChildren(fragment);
       empty.hidden = tabs.length !== 0;
@@ -53,7 +55,7 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
     patch(tab) {
       const row = findTabRow(list, tab.id);
       if (row) {
-        updateTabRow(row, tab);
+        updateTabRow(row, tab, dragEnabled);
       }
     },
 
@@ -62,13 +64,20 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
       empty.hidden = list.childElementCount !== 0;
     },
 
+    setDragEnabled(enabled) {
+      dragEnabled = enabled;
+      for (const child of Array.from(list.children)) {
+        if (child instanceof HTMLElement) updateRowDragState(child, enabled);
+      }
+    },
+
     destroy() {
       list.removeEventListener("error", onFaviconError, true);
     },
   };
 }
 
-function createTabRow(tab: TabViewModel): HTMLElement {
+function createTabRow(tab: TabViewModel, dragEnabled: boolean): HTMLElement {
   const row = document.createElement("div");
   row.className = "tab-row";
   row.setAttribute("role", "listitem");
@@ -98,15 +107,16 @@ function createTabRow(tab: TabViewModel): HTMLElement {
   close.textContent = "×";
 
   row.append(main, close);
-  updateTabRow(row, tab);
+  updateTabRow(row, tab, dragEnabled);
   return row;
 }
 
-function updateTabRow(row: HTMLElement, tab: TabViewModel): void {
+function updateTabRow(row: HTMLElement, tab: TabViewModel, dragEnabled: boolean): void {
   row.dataset.tabId = String(tab.id);
   row.dataset.active = String(tab.active);
   row.dataset.pinned = String(tab.pinned);
   row.dataset.hasPin = String(tab.pinned);
+  updateRowDragState(row, dragEnabled);
   if (tab.active) {
     row.setAttribute("aria-current", "page");
   } else {
@@ -128,6 +138,11 @@ function updateTabRow(row: HTMLElement, tab: TabViewModel): void {
   close.title = `关闭 ${tab.title}`;
   title.textContent = tab.title;
   updateFavicon(favicon, tab);
+}
+
+function updateRowDragState(row: HTMLElement, enabled: boolean): void {
+  row.draggable = enabled;
+  row.title = enabled ? "" : "清空搜索后可排序";
 }
 
 function updatePin(main: HTMLElement, pinned: boolean): void {
