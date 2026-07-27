@@ -17,7 +17,18 @@
 
       <section id="tab-region" class="tab-region" aria-label="当前窗口标签页">
         <p id="tab-empty" class="empty-message" hidden>没有匹配的标签页</p>
-        <div id="tab-list" class="tab-list" role="list"></div>
+        <div id="tab-scroll" class="tab-scroll">
+          <div id="tab-list" class="tab-list" role="list"></div>
+          <button
+            id="new-tab-button"
+            class="new-tab-button"
+            type="button"
+            title="新建标签页"
+            aria-label="新建标签页"
+          >
+            +
+          </button>
+        </div>
       </section>
 
       <p id="status-message" class="status-message" role="status" aria-live="polite"></p>

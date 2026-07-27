@@ -13,8 +13,16 @@ function installFixture(): void {
     <button id="shortcut-settings"></button>
     <p id="status-message"></p>
     <section id="tab-region">
-    <p id="tab-empty" hidden></p>
-    <div id="tab-list"></div>
+      <p id="tab-empty" hidden></p>
+      <div id="tab-scroll">
+        <div id="tab-list" role="list"></div>
+        <button
+          id="new-tab-button"
+          type="button"
+          title="新建标签页"
+          aria-label="新建标签页"
+        >+</button>
+      </div>
     </section>
     <dialog id="shortcut-dialog">
       <form id="shortcut-form">
@@ -897,6 +905,23 @@ describe("sidebar lifecycle", () => {
 });
 
 describe("sidebar document structure", () => {
+  it("keeps the tab list and new-tab control together in the scrolling region", () => {
+    const html = readFileSync("src/sidepanel/index.html", "utf8");
+    const page = new DOMParser().parseFromString(html, "text/html");
+    const scroll = page.querySelector("#tab-scroll");
+    const list = page.querySelector("#tab-list");
+    const button = page.querySelector<HTMLButtonElement>("#new-tab-button");
+
+    expect(Array.from(scroll?.children ?? [], (child) => child.id)).toEqual([
+      "tab-list",
+      "new-tab-button",
+    ]);
+    expect(list?.getAttribute("role")).toBe("list");
+    expect(button?.type).toBe("button");
+    expect(button?.title).toBe("新建标签页");
+    expect(button?.getAttribute("aria-label")).toBe("新建标签页");
+  });
+
   it("provides the bounded tab title font size control in the appearance section", () => {
     const html = readFileSync("src/sidepanel/index.html", "utf8");
     const page = new DOMParser().parseFromString(html, "text/html");

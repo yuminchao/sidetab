@@ -42,15 +42,27 @@ describe("side panel responsive CSS", () => {
     );
   });
 
-  it("gives only the tab list vertical scrolling and hides horizontal overflow", () => {
+  it("gives only the tab scroll container vertical scrolling", () => {
     expect(css).toMatch(/\.sidebar-shell\s*{[^}]*grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto\s+auto/s);
     expect(css).toMatch(/\.shortcut-region\s*{[^}]*grid-row:\s*1/s);
     expect(css).toMatch(/\.tab-region\s*{[^}]*grid-row:\s*2/s);
     expect(css).toMatch(/\.status-message\s*{[^}]*grid-row:\s*3/s);
     expect(css).toMatch(/\.bottom-toolbar\s*{[^}]*grid-row:\s*4/s);
     expect(css).toMatch(/\.tab-region\s*{[^}]*overflow:\s*hidden/s);
-    expect(css).toMatch(/\.tab-list\s*{[^}]*overflow-y:\s*auto[^}]*overflow-x:\s*hidden/s);
+    expect(css).toMatch(
+      /\.tab-scroll\s*{[^}]*height:\s*100%[^}]*overflow-y:\s*auto[^}]*overflow-x:\s*hidden[^}]*scrollbar-width:\s*thin/s,
+    );
+    expect(css).not.toMatch(/\.tab-list\s*{[^}]*overflow-y:\s*auto/s);
     expect(css).toMatch(/\.status-message:empty\s*{[^}]*display:\s*none/s);
+  });
+
+  it("keeps the new-tab control compact and the empty state non-interactive", () => {
+    expect(css).toMatch(
+      /\.new-tab-button\s*{[^}]*width:\s*100%[^}]*height:\s*30px[^}]*border:\s*0/s,
+    );
+    expect(css).toMatch(
+      /\.empty-message\s*{[^}]*position:\s*absolute[^}]*z-index:\s*1[^}]*inset:\s*30px\s+0\s+0[^}]*pointer-events:\s*none/s,
+    );
   });
 
   it("uses a compact bottom toolbar and reveals close controls accessibly", () => {
