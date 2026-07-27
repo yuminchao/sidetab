@@ -3,6 +3,14 @@ import type { TabReorderPlan } from "./tab-reorder-model";
 export type TabsActionApi = Pick<typeof chrome.tabs, "duplicate" | "move" | "remove" | "update">;
 
 export function createTabActions(api: TabsActionApi) {
+  const setPinned = async (tabId: number, pinned: boolean): Promise<void> => {
+    try {
+      await api.update(tabId, { pinned });
+    } catch {
+      throw new Error("无法更新标签固定状态");
+    }
+  };
+
   return {
     async activate(tabId: number): Promise<void> {
       try {
@@ -28,17 +36,11 @@ export function createTabActions(api: TabsActionApi) {
       }
     },
 
-    async setPinned(tabId: number, pinned: boolean): Promise<void> {
-      try {
-        await api.update(tabId, { pinned });
-      } catch {
-        throw new Error("无法更新标签固定状态");
-      }
-    },
+    setPinned,
 
     async reorder(plan: TabReorderPlan): Promise<void> {
       if (plan.pinnedChanged) {
-        await this.setPinned(plan.tabId, plan.targetPinned);
+        await setPinned(plan.tabId, plan.targetPinned);
       }
 
       try {

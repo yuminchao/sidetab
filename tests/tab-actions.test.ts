@@ -138,6 +138,17 @@ describe("tab actions", () => {
     expect(update.mock.invocationCallOrder[0]!).toBeLessThan(move.mock.invocationCallOrder[0]!);
   });
 
+  it("reorders across groups when the action is called without its owner object", async () => {
+    const update = vi.fn().mockResolvedValue(tab);
+    const move = vi.fn().mockResolvedValue(tab);
+    const { reorder } = createTabActions(tabApi({ update, move }));
+
+    await reorder(crossGroupPlan);
+
+    expect(update).toHaveBeenCalledWith(7, { pinned: true });
+    expect(move).toHaveBeenCalledWith(7, { index: 0 });
+  });
+
   it.each([
     ["synchronous throw", () => vi.fn(() => { throw new Error("chrome failed"); })],
     ["promise rejection", () => vi.fn().mockRejectedValue(new Error("chrome failed"))],
