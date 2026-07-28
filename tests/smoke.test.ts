@@ -27,7 +27,7 @@ describe("extension manifest", () => {
 
   it("documents the current release archive", () => {
     const readme = readFileSync("README.md", "utf8");
-    expect(readme).toContain("release/sidetab-lite-0.5.0.zip");
+    expect(readme).toContain(`release/sidetab-lite-${manifest.version}.zip`);
   });
 
   it("uses the required restricted MV3 permissions", () => {
