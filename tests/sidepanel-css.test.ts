@@ -118,6 +118,27 @@ describe("side panel responsive CSS", () => {
     );
   });
 
+  it("styles the appearance entry and settings gear without button chrome", () => {
+    expect(css).toMatch(
+      /\.appearance-setting\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)\s+32px[^}]*min-width:\s*0/s,
+    );
+    expect(css).toMatch(
+      /\.appearance-setting-hint\s*{[^}]*min-width:\s*0[^}]*overflow-wrap:\s*anywhere/s,
+    );
+    expect(css).toMatch(
+      /#shortcut-settings\s*{[^}]*border-color:\s*transparent[^}]*background:\s*transparent[^}]*box-shadow:\s*none/s,
+    );
+    expect(css).toMatch(
+      /#shortcut-settings:hover:not\(:disabled\)\s*{[^}]*background:\s*transparent/s,
+    );
+  });
+
+  it("uses Microsoft YaHei for the context menu", () => {
+    expect(css).toMatch(
+      /\.tab-context-menu\s*{[^}]*font-family:\s*"Microsoft YaHei",\s*"微软雅黑",\s*"Segoe UI",\s*system-ui,\s*sans-serif/s,
+    );
+  });
+
   it("supports 180px and 240px panels without positive minimum widths", () => {
     expect(css).toContain("@media (max-width: 240px)");
     expect(css).toContain("@media (max-width: 180px)");

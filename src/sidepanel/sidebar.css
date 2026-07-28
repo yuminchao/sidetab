@@ -107,6 +107,21 @@ input:focus-visible {
   background: transparent;
 }
 
+#shortcut-settings {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+#shortcut-settings:hover:not(:disabled) {
+  background: transparent;
+  color: color-mix(in srgb, CanvasText 78%, transparent);
+}
+
+#shortcut-settings:active:not(:disabled) {
+  opacity: 0.72;
+}
+
 .shortcut-button img {
   display: block;
   width: 20px;
@@ -432,6 +447,7 @@ input:focus-visible {
   border-radius: 6px;
   background: Canvas;
   box-shadow: 0 3px 10px rgb(0 0 0 / 22%);
+  font-family: "Microsoft YaHei", "微软雅黑", "Segoe UI", system-ui, sans-serif;
 }
 
 .tab-context-menu > button {
@@ -526,6 +542,28 @@ input:focus-visible {
   border: 1px solid ButtonBorder;
   border-radius: 5px;
   background: Field;
+}
+
+.appearance-setting {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 32px;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.appearance-setting-hint {
+  min-width: 0;
+  color: GrayText;
+  overflow-wrap: anywhere;
+}
+
+.appearance-settings-link {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
 }
 
 .toggle-label {
