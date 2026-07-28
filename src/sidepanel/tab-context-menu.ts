@@ -3,12 +3,14 @@ import type { TabViewModel } from "./tab-model";
 export type TabContextCommand =
   | { action: "duplicate"; tabId: number }
   | { action: "set-pinned"; tabId: number; pinned: boolean }
-  | { action: "add-shortcut"; tabId: number };
+  | { action: "add-shortcut"; tabId: number }
+  | { action: "close-below"; tabId: number };
 
 export function createTabContextMenu(
   elements: { document: Document; list: HTMLElement; viewport: Window },
   callbacks: {
     getTab(id: number): TabViewModel | undefined;
+    canCloseBelow?(id: number): boolean;
     onCommand(command: TabContextCommand): void;
   },
 ) {
@@ -20,7 +22,8 @@ export function createTabContextMenu(
   const duplicate = createItem("duplicate", "复制标签页");
   const setPinned = createItem("set-pinned", "固定标签");
   const addShortcut = createItem("add-shortcut", "设为快捷网站");
-  menu.append(duplicate, setPinned, addShortcut);
+  const closeBelow = createItem("close-below", "关闭下方标签页");
+  menu.append(duplicate, setPinned, addShortcut, closeBelow);
   elements.document.body.append(menu);
 
   let openTabId: number | undefined;
@@ -48,6 +51,7 @@ export function createTabContextMenu(
     returnFocus = focusTarget;
     setPinned.textContent = tab.pinned ? "取消固定" : "固定标签";
     setPinned.dataset.nextPinned = String(!tab.pinned);
+    closeBelow.disabled = !callbacks.canCloseBelow?.(tab.id);
     menu.hidden = false;
     menu.style.left = "0px";
     menu.style.top = "0px";
@@ -88,6 +92,7 @@ export function createTabContextMenu(
       ? event.target.closest<HTMLButtonElement>("[data-menu-action]")
       : null;
     if (!button || openTabId === undefined || !menu.contains(button)) return;
+    if (button.disabled) return;
     let command: TabContextCommand;
     switch (button.dataset.menuAction) {
       case "duplicate":
@@ -103,6 +108,9 @@ export function createTabContextMenu(
       case "add-shortcut":
         command = { action: "add-shortcut", tabId: openTabId };
         break;
+      case "close-below":
+        command = { action: "close-below", tabId: openTabId };
+        break;
       default:
         return;
     }
@@ -116,15 +124,18 @@ export function createTabContextMenu(
       close(true);
       return;
     }
-    const items = [duplicate, setPinned, addShortcut];
-    const current = Math.max(0, items.indexOf(elements.document.activeElement as HTMLButtonElement));
+    const items = [duplicate, setPinned, addShortcut, closeBelow];
+    if (event.target instanceof HTMLButtonElement && event.target.disabled) return;
+    const availableItems = items.filter((item) => !item.disabled);
+    const current = availableItems.indexOf(elements.document.activeElement as HTMLButtonElement);
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const delta = event.key === "ArrowDown" ? 1 : -1;
-      items[(current + delta + items.length) % items.length]?.focus();
+      const next = current === -1 ? 0 : (current + delta + availableItems.length) % availableItems.length;
+      availableItems[next]?.focus();
     } else if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      items[current]?.click();
+      availableItems[current]?.click();
     }
   };
 

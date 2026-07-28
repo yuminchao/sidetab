@@ -42,7 +42,7 @@ describe("tab context menu", () => {
     expect(document.querySelectorAll(".tab-context-menu")).toHaveLength(1);
     expect(
       Array.from(popup.querySelectorAll("[role='menuitem']"), (item) => item.textContent),
-    ).toEqual(["复制标签页", "固定标签", "设为快捷网站"]);
+    ).toEqual(["复制标签页", "固定标签", "设为快捷网站", "关闭下方标签页"]);
     expect(document.activeElement).toBe(popup.querySelector("[data-menu-action='duplicate']"));
 
     (popup.querySelector("[data-menu-action='duplicate']") as HTMLElement).click();
@@ -71,6 +71,79 @@ describe("tab context menu", () => {
     );
     popup.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(onCommand).toHaveBeenLastCalledWith({ action: "add-shortcut", tabId: 2 });
+    menu.destroy();
+  });
+
+  it("dispatches close-below from mouse when a following tab can be closed", () => {
+    const onCommand = vi.fn();
+    const menu = createTabContextMenu(
+      { document, list, viewport: window },
+      {
+        getTab: (id) => tabs.find((tab) => tab.id === id),
+        canCloseBelow: (id) => id === 1,
+        onCommand,
+      },
+    );
+    const popup = document.querySelector<HTMLElement>(".tab-context-menu")!;
+
+    context(row(1));
+    const closeBelow = popup.querySelector<HTMLButtonElement>("[data-menu-action='close-below']")!;
+    expect(closeBelow.disabled).toBe(false);
+    closeBelow.click();
+
+    expect(onCommand).toHaveBeenCalledWith({ action: "close-below", tabId: 1 });
+    expect(popup.hidden).toBe(true);
+    menu.destroy();
+  });
+
+  it("disables close-below without a following tab and skips it during navigation", () => {
+    const onCommand = vi.fn();
+    const menu = createTabContextMenu(
+      { document, list, viewport: window },
+      {
+        getTab: (id) => tabs.find((tab) => tab.id === id),
+        canCloseBelow: () => false,
+        onCommand,
+      },
+    );
+    const popup = document.querySelector<HTMLElement>(".tab-context-menu")!;
+
+    context(row(1));
+    const closeBelow = popup.querySelector<HTMLButtonElement>("[data-menu-action='close-below']")!;
+    expect(closeBelow.disabled).toBe(true);
+    closeBelow.click();
+    closeBelow.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    closeBelow.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    expect(onCommand).not.toHaveBeenCalled();
+
+    const addShortcut = popup.querySelector<HTMLButtonElement>("[data-menu-action='add-shortcut']")!;
+    addShortcut.focus();
+    popup.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(document.activeElement).toBe(popup.querySelector("[data-menu-action='duplicate']"));
+    popup.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    expect(document.activeElement).toBe(addShortcut);
+    menu.destroy();
+  });
+
+  it("focuses enabled close-below and dispatches it from Enter", () => {
+    const onCommand = vi.fn();
+    const menu = createTabContextMenu(
+      { document, list, viewport: window },
+      {
+        getTab: (id) => tabs.find((tab) => tab.id === id),
+        canCloseBelow: () => true,
+        onCommand,
+      },
+    );
+    const popup = document.querySelector<HTMLElement>(".tab-context-menu")!;
+
+    context(row(1));
+    popup.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    popup.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    popup.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(document.activeElement).toBe(popup.querySelector("[data-menu-action='close-below']"));
+    popup.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(onCommand).toHaveBeenCalledWith({ action: "close-below", tabId: 1 });
     menu.destroy();
   });
 
