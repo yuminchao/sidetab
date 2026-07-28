@@ -97,6 +97,32 @@ describe("tab actions", () => {
     await expect(actions.close(7)).rejects.toThrow("无法关闭该标签页");
   });
 
+  it("closes the requested tabs with one remove call", async () => {
+    const remove = vi.fn().mockResolvedValue(undefined);
+
+    await createTabActions(tabApi({ remove })).closeMany([3, 4, 5]);
+
+    expect(remove).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledWith([3, 4, 5]);
+  });
+
+  it("does not remove tabs when closeMany receives no tab IDs", async () => {
+    const remove = vi.fn().mockResolvedValue(undefined);
+
+    await createTabActions(tabApi({ remove })).closeMany([]);
+
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["synchronous throw", () => vi.fn(() => { throw new Error("chrome failed"); })],
+    ["promise rejection", () => vi.fn().mockRejectedValue(new Error("chrome failed"))],
+  ])("maps a closeMany %s to the user-facing error", async (_case, makeRemove) => {
+    const actions = createTabActions(tabApi({ remove: makeRemove() }));
+
+    await expect(actions.closeMany([3, 4, 5])).rejects.toThrow("无法关闭下方标签页");
+  });
+
   it("duplicates exactly the requested tab", async () => {
     const duplicate = vi.fn().mockResolvedValue(tab);
 

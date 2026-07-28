@@ -36,6 +36,18 @@ export function createTabActions(api: TabsActionApi) {
       }
     },
 
+    async closeMany(tabIds: number[]): Promise<void> {
+      if (tabIds.length === 0) {
+        return;
+      }
+
+      try {
+        await api.remove(tabIds);
+      } catch {
+        throw new Error("无法关闭下方标签页");
+      }
+    },
+
     async duplicate(tabId: number): Promise<void> {
       try {
         await api.duplicate(tabId);
