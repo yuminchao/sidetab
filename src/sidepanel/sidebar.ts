@@ -8,6 +8,7 @@ import {
   type HistorySearchApi,
 } from "./history-search";
 import { createTabActions } from "./tab-actions";
+import { getClosableTabsBelow } from "./tab-close-model";
 import { createTabContextMenu } from "./tab-context-menu";
 import { createTabDragController } from "./tab-drag-controller";
 import { subscribeToTabEvents } from "./tab-events";
@@ -221,9 +222,15 @@ async function startSidebarInternal(
     { document: deps.document, list: elements.list, viewport: deps.document.defaultView! },
     {
       getTab: (id) => tabStore.list().find((tab) => tab.id === id),
+      canCloseBelow: (id) => getClosableTabsBelow(tabStore.list(), id).length > 0,
       onCommand(command) {
         if (command.action === "add-shortcut") {
           void addTabShortcut(command.tabId);
+          return;
+        }
+        if (command.action === "close-below") {
+          const tabIds = getClosableTabsBelow(tabStore.list(), command.tabId);
+          runTabOperation(tabActions.closeMany(tabIds));
           return;
         }
         const operation = command.action === "duplicate"

@@ -77,6 +77,22 @@ function contextMenuItem(action: string): HTMLButtonElement {
   return document.querySelector<HTMLButtonElement>(`[data-menu-action='${action}']`)!;
 }
 
+function openTabContextMenu(tabId: number): void {
+  row(tabId).dispatchEvent(
+    new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+  );
+}
+
+function mixedTabs(): chrome.tabs.Tab[] {
+  return [
+    fakeTab({ id: 1, index: 0, pinned: true, title: "Pinned one" }),
+    fakeTab({ id: 2, index: 1, active: true, title: "Current" }),
+    fakeTab({ id: 3, index: 2, pinned: true, title: "Pinned three" }),
+    fakeTab({ id: 4, index: 3, title: "Four" }),
+    fakeTab({ id: 5, index: 4, title: "Five" }),
+  ];
+}
+
 function input(value: string): void {
   const search = element<HTMLInputElement>("tab-search");
   search.value = value;
@@ -714,6 +730,125 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.update).toHaveBeenCalledWith(7, { pinned: true });
     cleanup();
     expect(document.querySelector(".tab-context-menu")).toBeNull();
+  });
+
+  it("closes only ordinary tabs below an ordinary tab and waits for removal events", async () => {
+    const fake = createFakeChrome({ tabs: mixedTabs() });
+    const cleanup = await startSidebar(fake);
+    expect(rowIds()).toEqual([1, 3, 2, 4, 5]);
+
+    openTabContextMenu(2);
+    const closeBelow = contextMenuItem("close-below");
+    expect(closeBelow.disabled).toBe(false);
+    click(closeBelow);
+    await flush();
+
+    expect(fake.methods.remove).toHaveBeenCalledOnce();
+    expect(fake.methods.remove).toHaveBeenCalledWith([4, 5]);
+    expect(fake.methods.query).toHaveBeenCalledOnce();
+    expect(rowIds()).toEqual([1, 3, 2, 4, 5]);
+    expect(row(2).dataset.active).toBe("true");
+
+    fake.events.onRemoved.emit(4, { windowId: 10, isWindowClosing: false });
+    fake.events.onRemoved.emit(5, { windowId: 10, isWindowClosing: false });
+    expect(rowIds()).toEqual([1, 3, 2]);
+    cleanup();
+  });
+
+  it("keeps later pinned tabs when closing below a pinned tab", async () => {
+    const fake = createFakeChrome({ tabs: mixedTabs() });
+    const cleanup = await startSidebar(fake);
+
+    openTabContextMenu(1);
+    click(contextMenuItem("close-below"));
+    await flush();
+
+    expect(fake.methods.remove).toHaveBeenCalledOnce();
+    expect(fake.methods.remove).toHaveBeenCalledWith([2, 4, 5]);
+    expect(fake.methods.query).toHaveBeenCalledOnce();
+    expect(rowIds()).toEqual([1, 3, 2, 4, 5]);
+
+    for (const tabId of [2, 4, 5]) {
+      fake.events.onRemoved.emit(tabId, { windowId: 10, isWindowClosing: false });
+    }
+    expect(rowIds()).toEqual([1, 3]);
+    cleanup();
+  });
+
+  it("disables close-below on the last ordinary tab without removing anything", async () => {
+    const fake = createFakeChrome({ tabs: mixedTabs() });
+    const cleanup = await startSidebar(fake);
+
+    openTabContextMenu(5);
+    const closeBelow = contextMenuItem("close-below");
+    expect(closeBelow.disabled).toBe(true);
+    click(closeBelow);
+    await flush();
+
+    expect(fake.methods.remove).not.toHaveBeenCalled();
+    expect(fake.methods.query).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it("recomputes close-below targets from the latest order when the command runs", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0 }),
+        fakeTab({ id: 2, index: 1, title: "Two" }),
+        fakeTab({ id: 3, index: 2, title: "Three" }),
+      ],
+    });
+    const cleanup = await startSidebar(fake);
+
+    openTabContextMenu(2);
+    expect(contextMenuItem("close-below").disabled).toBe(false);
+    fake.events.onMoved.emit(1, { windowId: 10, fromIndex: 0, toIndex: 2 });
+    expect(rowIds()).toEqual([2, 3, 1]);
+    click(contextMenuItem("close-below"));
+    await flush();
+
+    expect(fake.methods.remove).toHaveBeenCalledOnce();
+    expect(fake.methods.remove).toHaveBeenCalledWith([3, 1]);
+    expect(fake.methods.query).toHaveBeenCalledOnce();
+    expect(rowIds()).toEqual([2, 3, 1]);
+    cleanup();
+  });
+
+  it("shows the batch-close domain error when closing below fails", async () => {
+    const fake = createFakeChrome({ tabs: mixedTabs() });
+    fake.methods.remove.mockRejectedValueOnce(new Error("browser failed"));
+    const cleanup = await startSidebar(fake);
+
+    openTabContextMenu(2);
+    click(contextMenuItem("close-below"));
+    await vi.waitFor(() =>
+      expect(element("status-message").textContent).toBe("无法关闭下方标签页"),
+    );
+
+    expect(fake.methods.remove).toHaveBeenCalledOnce();
+    expect(fake.methods.remove).toHaveBeenCalledWith([4, 5]);
+    expect(fake.methods.query).toHaveBeenCalledOnce();
+    expect(rowIds()).toEqual([1, 3, 2, 4, 5]);
+    cleanup();
+  });
+
+  it("ignores a late close-below rejection after cleanup", async () => {
+    const pendingRemove = deferred<undefined>();
+    const fake = createFakeChrome({ tabs: mixedTabs() });
+    fake.methods.remove.mockReturnValueOnce(pendingRemove.promise);
+    const cleanup = await startSidebar(fake);
+
+    openTabContextMenu(2);
+    click(contextMenuItem("close-below"));
+    expect(fake.methods.remove).toHaveBeenCalledWith([4, 5]);
+    const statusBefore = element("status-message").textContent;
+
+    cleanup();
+    pendingRemove.reject(new Error("browser failed"));
+    await flush();
+
+    expect(element("status-message").textContent).toBe(statusBefore);
+    expect(fake.methods.query).toHaveBeenCalledOnce();
   });
 
   it("persists the current tab as a shortcut without Chrome tab actions", async () => {
