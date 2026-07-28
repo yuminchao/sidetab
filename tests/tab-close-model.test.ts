@@ -21,8 +21,8 @@ describe("getClosableTabsBelow", () => {
     fakeTabModel({ id: 1, index: 0, pinned: true }),
     fakeTabModel({ id: 2, index: 1 }),
     fakeTabModel({ id: 3, index: 2, pinned: true }),
-    fakeTabModel({ id: 4, index: 3 }),
-    fakeTabModel({ id: 5, index: 4 }),
+    fakeTabModel({ id: 4, index: 20 }),
+    fakeTabModel({ id: 5, index: 10 }),
   ];
 
   it("returns only unpinned tab IDs after an unpinned target in display order", () => {
