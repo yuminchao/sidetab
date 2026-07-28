@@ -29,6 +29,7 @@ type SidebarElements = {
   search: HTMLInputElement;
   historyResults: HTMLElement;
   settingsButton: HTMLButtonElement;
+  chromeAppearanceSettings: HTMLButtonElement;
   status: HTMLElement;
   tabRegion: HTMLElement;
   tabScroll: HTMLElement;
@@ -74,6 +75,7 @@ async function startSidebarInternal(
   let operationGeneration = 0;
   let reorderBusy = false;
   let addShortcutBusy = false;
+  let appearanceSettingsBusy = false;
   const statusSlots = {
     tabs: "",
     shortcuts: "",
@@ -277,6 +279,31 @@ async function startSidebarInternal(
 
   const onSettingsClick = (): void => historySearch.close();
 
+  const onChromeAppearanceSettingsClick = (): void => {
+    if (appearanceSettingsBusy) return;
+    appearanceSettingsBusy = true;
+    elements.chromeAppearanceSettings.disabled = true;
+    elements.shortcutError.textContent = "";
+
+    void (async () => {
+      try {
+        await deps.tabs.create({
+          url: "chrome://settings/appearance",
+          active: true,
+        });
+      } catch {
+        if (active) {
+          elements.shortcutError.textContent = "无法打开 Chrome 外观设置";
+        }
+      } finally {
+        if (active) {
+          appearanceSettingsBusy = false;
+          elements.chromeAppearanceSettings.disabled = false;
+        }
+      }
+    })();
+  };
+
   const cleanup = (): void => {
     if (!active) {
       return;
@@ -290,6 +317,10 @@ async function startSidebarInternal(
     elements.newTabButton.removeEventListener("click", onNewTabClick);
     elements.tabScroll.removeEventListener("scroll", onTabScroll);
     elements.settingsButton.removeEventListener("click", onSettingsClick);
+    elements.chromeAppearanceSettings.removeEventListener(
+      "click",
+      onChromeAppearanceSettingsClick,
+    );
     elements.settingsButton.removeEventListener("click", blockPendingSettings, true);
     contextMenu.destroy();
     dragController.destroy();
@@ -329,6 +360,10 @@ async function startSidebarInternal(
   elements.newTabButton.addEventListener("click", onNewTabClick);
   elements.tabScroll.addEventListener("scroll", onTabScroll);
   elements.settingsButton.addEventListener("click", onSettingsClick);
+  elements.chromeAppearanceSettings.addEventListener(
+    "click",
+    onChromeAppearanceSettingsClick,
+  );
   shortcutRenderer.render(createDefaultShortcutSettings());
   updateDragEnabled();
   signal?.addEventListener("abort", cleanup, { once: true });
@@ -596,6 +631,11 @@ function getSidebarElements(document: Document): SidebarElements {
     search: requireElement(document, "tab-search", HTMLInputElement),
     historyResults: requireElement(document, "history-search-results", HTMLElement),
     settingsButton: requireElement(document, "shortcut-settings", HTMLButtonElement),
+    chromeAppearanceSettings: requireElement(
+      document,
+      "chrome-appearance-settings",
+      HTMLButtonElement,
+    ),
     status: requireElement(document, "status-message", HTMLElement),
     tabRegion: requireElement(document, "tab-region", HTMLElement),
     tabScroll: requireElement(document, "tab-scroll", HTMLElement),

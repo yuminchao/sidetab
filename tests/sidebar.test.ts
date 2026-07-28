@@ -32,6 +32,7 @@ function installFixture(): void {
       <form id="shortcut-form">
         <h2 id="shortcut-dialog-title"></h2>
         <input id="tab-title-font-size" type="number" min="12" max="18" step="1" />
+        <button id="chrome-appearance-settings" type="button"></button>
         <input id="shortcut-enabled" type="checkbox" />
         <div id="shortcut-editor-list"></div>
         <p id="shortcut-error"></p>
@@ -661,6 +662,63 @@ describe("sidebar lifecycle", () => {
 
     expect(fake.methods.create).toHaveBeenCalledOnce();
     expect(button.disabled).toBe(true);
+  });
+
+  it("opens Chrome appearance settings once while the request is pending", async () => {
+    const pending = deferred<chrome.tabs.Tab>();
+    const fake = createFakeChrome();
+    fake.methods.create.mockReturnValueOnce(pending.promise);
+    const cleanup = await startSidebar(fake);
+    const button = element<HTMLButtonElement>("chrome-appearance-settings");
+
+    click(button);
+    click(button);
+
+    expect(fake.methods.create).toHaveBeenCalledOnce();
+    expect(fake.methods.create).toHaveBeenCalledWith({
+      url: "chrome://settings/appearance",
+      active: true,
+    });
+    expect(button.disabled).toBe(true);
+
+    pending.resolve(fakeTab({ id: 999 }));
+    await flush();
+    expect(button.disabled).toBe(false);
+    cleanup();
+  });
+
+  it("reports a rejected Chrome appearance settings request", async () => {
+    const fake = createFakeChrome();
+    fake.methods.create.mockRejectedValueOnce(new Error("browser failed"));
+    const cleanup = await startSidebar(fake);
+    const button = element<HTMLButtonElement>("chrome-appearance-settings");
+
+    click(button);
+    await flush();
+
+    expect(button.disabled).toBe(false);
+    expect(element("shortcut-error").textContent).toBe(
+      "无法打开 Chrome 外观设置",
+    );
+    cleanup();
+  });
+
+  it("does not update or reopen Chrome settings after cleanup", async () => {
+    const pending = deferred<chrome.tabs.Tab>();
+    void pending.promise.catch(() => undefined);
+    const fake = createFakeChrome();
+    fake.methods.create.mockReturnValueOnce(pending.promise);
+    const cleanup = await startSidebar(fake);
+    const button = element<HTMLButtonElement>("chrome-appearance-settings");
+
+    click(button);
+    cleanup();
+    pending.reject(new Error("late failure"));
+    await flush();
+    click(button);
+
+    expect(fake.methods.create).toHaveBeenCalledOnce();
+    expect(element("shortcut-error").textContent).toBe("");
   });
 
   it("closes transient tab UI when the shared tab region scrolls", async () => {

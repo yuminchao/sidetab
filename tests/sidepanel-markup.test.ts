@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 
-const document = new JSDOM(
+const document = new DOMParser().parseFromString(
   readFileSync("src/sidepanel/index.html", "utf8"),
-).window.document;
+  "text/html",
+);
 
 describe("side panel settings markup", () => {
   it("provides a static Chrome appearance settings entry", () => {
