@@ -111,6 +111,7 @@ input:focus-visible {
   border-color: transparent;
   background: transparent;
   box-shadow: none;
+  font-size: 18px;
 }
 
 #shortcut-settings:hover:not(:disabled) {

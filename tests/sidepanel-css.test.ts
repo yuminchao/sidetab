@@ -128,6 +128,7 @@ describe("side panel responsive CSS", () => {
     expect(css).toMatch(
       /#shortcut-settings\s*{[^}]*border-color:\s*transparent[^}]*background:\s*transparent[^}]*box-shadow:\s*none/s,
     );
+    expect(css).toMatch(/#shortcut-settings\s*{[^}]*font-size:\s*18px/s);
     expect(css).toMatch(
       /#shortcut-settings:hover:not\(:disabled\)\s*{[^}]*background:\s*transparent/s,
     );
