@@ -16,13 +16,13 @@ function parseCsp(value: string): Record<string, string[]> {
 }
 
 describe("extension manifest", () => {
-  it("keeps the npm and extension release versions aligned at 0.5.0", () => {
+  it("keeps the npm and extension release versions aligned at 0.6.0", () => {
     const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
     const packageLock = JSON.parse(readFileSync("package-lock.json", "utf8"));
-    expect(manifest.version).toBe("0.5.0");
-    expect(packageJson.version).toBe("0.5.0");
-    expect(packageLock.version).toBe("0.5.0");
-    expect(packageLock.packages[""].version).toBe("0.5.0");
+    expect(manifest.version).toBe("0.6.0");
+    expect(packageJson.version).toBe("0.6.0");
+    expect(packageLock.version).toBe("0.6.0");
+    expect(packageLock.packages[""].version).toBe("0.6.0");
   });
 
   it("documents the current release archive", () => {
