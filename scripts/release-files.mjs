@@ -14,6 +14,8 @@ export const EXPECTED_FILES = Object.freeze(
     "assets/icons/icon-48.png",
     "assets/icons/icon-128.png",
     "assets/icons/pin.svg",
+    "assets/icons/search.svg",
+    "assets/icons/settings.svg",
   ].sort(),
 );
 
@@ -54,7 +56,9 @@ export async function listReleaseFiles(root, prefix = "") {
   const files = [];
   for (const entry of entries) {
     const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) {
+    if (entry.isSymbolicLink()) {
+      throw new Error(`symbolic links are forbidden in release: ${relativePath}`);
+    } else if (entry.isDirectory()) {
       files.push(...(await listReleaseFiles(absoluteRoot, relativePath)));
     } else if (entry.isFile()) {
       files.push(relativePath);

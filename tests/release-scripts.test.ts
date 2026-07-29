@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -15,6 +15,8 @@ const expectedFiles = [
   "assets/icons/icon-32.png",
   "assets/icons/icon-48.png",
   "assets/icons/pin.svg",
+  "assets/icons/search.svg",
+  "assets/icons/settings.svg",
   "background/service-worker.js",
   "manifest.json",
   "sidepanel/index.html",
@@ -24,6 +26,7 @@ const expectedFiles = [
 
 type ReleaseFilesModule = {
   EXPECTED_FILES: readonly string[];
+  assertExactReleaseFiles(root: string): Promise<string[]>;
   safeReleasePath(root: string, relativePath: string): string;
 };
 
@@ -80,7 +83,7 @@ async function createReleaseFixture(): Promise<{ root: string; dist: string; rel
     version: "0.1.0",
     description: "Release validation fixture",
     minimum_chrome_version: "114",
-    permissions: ["sidePanel", "tabs", "storage", "history"],
+    permissions: ["sidePanel", "tabs", "tabGroups", "storage", "history"],
     content_security_policy: {
       extension_pages:
         "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data: http: https:; style-src 'self'; frame-src 'none'",
@@ -113,6 +116,8 @@ async function createReleaseFixture(): Promise<{ root: string; dist: string; rel
       await copyFile(resolve(import.meta.dirname, "..", path), target);
     } else if (path === "assets/icons/pin.svg") {
       await writeFile(target, '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0" /></svg>');
+    } else if (path.endsWith(".svg")) {
+      await writeFile(target, '<svg viewBox="0 0 24 24"><path d="M0 0" /></svg>');
     } else if (path === "THIRD_PARTY_NOTICES.md") {
       await writeFile(target, "Lucide is distributed under the ISC License.\n");
     } else if (path === "manifest.json") {
@@ -140,7 +145,7 @@ describe("release file contract", () => {
     const { EXPECTED_FILES } = await loadReleaseFiles();
 
     expect(EXPECTED_FILES).toEqual(expectedFiles);
-    expect(EXPECTED_FILES).toHaveLength(11);
+    expect(EXPECTED_FILES).toHaveLength(13);
     expect(EXPECTED_FILES).toEqual([...EXPECTED_FILES].sort());
   });
 
@@ -165,6 +170,36 @@ describe("release file contract", () => {
     ]) {
       expect(() => safeReleasePath(root, unsafe), unsafe).toThrow();
     }
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "rejects a file symbolic link with an explicit release error",
+    async () => {
+      const fixture = await createReleaseFixture();
+      const target = join(fixture.root, "linked-sidebar.js");
+      const link = join(fixture.dist, "sidepanel", "sidebar.js");
+      await writeFile(target, "export const linked = true;");
+      await rm(link);
+      await symlink(target, link, "file");
+      const { assertExactReleaseFiles } = await loadReleaseFiles();
+
+      await expect(assertExactReleaseFiles(fixture.dist)).rejects.toThrow(/symbolic link/i);
+    },
+  );
+
+  it("rejects a directory symbolic link or Windows junction with an explicit release error", async () => {
+    const fixture = await createReleaseFixture();
+    const target = join(fixture.root, "linked-sidepanel");
+    const link = join(fixture.dist, "sidepanel");
+    await mkdir(target);
+    await writeFile(join(target, "index.html"), "<!doctype html><main></main>");
+    await writeFile(join(target, "sidebar.css"), ".sidebar { color: #202124; }");
+    await writeFile(join(target, "sidebar.js"), "export const linked = true;");
+    await rm(link, { recursive: true });
+    await symlink(target, link, process.platform === "win32" ? "junction" : "dir");
+    const { assertExactReleaseFiles } = await loadReleaseFiles();
+
+    await expect(assertExactReleaseFiles(fixture.dist)).rejects.toThrow(/symbolic link/i);
   });
 });
 
@@ -244,7 +279,7 @@ describe("dist validation", () => {
     });
   });
 
-  it("builds the real dist with all eleven reviewed files and excludes shortcut PNGs", async () => {
+  it("builds the real dist with all thirteen reviewed files and excludes shortcut PNGs", async () => {
     execFileSync(process.execPath, ["scripts/build.mjs"], { cwd: resolve(".") });
     const { checkDist } = await loadCheckDist();
 
@@ -338,6 +373,43 @@ describe("dist validation", () => {
     const { checkDist } = await loadCheckDist();
 
     await expect(checkDist(fixture.dist)).rejects.toThrow(/css|import|url|reference/i);
+  });
+
+  it.each([
+    ['<?xml version="1.0"?><svg viewBox="0 0 24 24"><path d="M0 0" /></svg>', "XML declaration"],
+    ['<!doctype svg><svg viewBox="0 0 24 24"><path d="M0 0" /></svg>', "doctype"],
+    ['<svg viewBox="0 0 24 24" t="1"><path d="M0 0" /></svg>', "t attribute"],
+    ['<svg viewBox="0 0 24 24" p-id="1"><path d="M0 0" /></svg>', "p-id attribute"],
+    ['<svg viewBox="0 0 24 24" width="24"><path d="M0 0" /></svg>', "width attribute"],
+    ['<svg viewBox="0 0 24 24" width = "24"><path d="M0 0" /></svg>', "spaced width attribute"],
+    ['<svg viewBox="0 0 24 24" height="24"><path d="M0 0" /></svg>', "height attribute"],
+    ['<svg viewBox="0 0 24 24" height\n= "24"><path d="M0 0" /></svg>', "spaced height attribute"],
+    ['<svg viewBox="0 0 24 24" xlink:href="#icon"><path d="M0 0" /></svg>', "xlink reference"],
+    ['<svg viewBox="0 0 24 24"><path href="#icon" d="M0 0" /></svg>', "double-quoted href"],
+    ["<svg viewBox=\"0 0 24 24\"><path href='#icon' d=\"M0 0\" /></svg>", "single-quoted href"],
+    ['<svg viewBox="0 0 24 24"><path href = "#icon" d="M0 0" /></svg>', "spaced href"],
+    ['<svg viewBox="0 0 24 24"><path d="https://example.com/icon.svg" /></svg>', "remote URL"],
+    ['<svg viewBox="0 0 24 24"><script>alert(1)</script></svg>', "script"],
+    ['<svg viewBox="0 0 24 24" onload="alert(1)"><path d="M0 0" /></svg>', "event handler"],
+    ['<svg viewBox="0 0 24 24" onload = "alert(1)"><path d="M0 0" /></svg>', "spaced event handler"],
+  ])("rejects a prohibited SVG construct: %s", async (unsafeSvg) => {
+    const fixture = await createReleaseFixture();
+    await overwrite(fixture.dist, "assets/icons/search.svg", unsafeSvg);
+    const { checkDist } = await loadCheckDist();
+
+    await expect(checkDist(fixture.dist)).rejects.toThrow(/svg|forbidden/i);
+  });
+
+  it("allows longer safe SVG attribute names that contain forbidden-name suffixes", async () => {
+    const fixture = await createReleaseFixture();
+    await overwrite(
+      fixture.dist,
+      "assets/icons/search.svg",
+      '<svg viewBox="0 0 24 24"><path offset="0" stroke-width="2" data-height="24" data-onload="label" d="M0 0" /></svg>',
+    );
+    const { checkDist } = await loadCheckDist();
+
+    await expect(checkDist(fixture.dist)).resolves.toEqual({ totalBytes: expect.any(Number) });
   });
 
   it.each([

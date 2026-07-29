@@ -16,24 +16,50 @@ function parseCsp(value: string): Record<string, string[]> {
 }
 
 describe("extension manifest", () => {
-  it("keeps the npm and extension release versions aligned at 0.6.1", () => {
+  it("keeps the npm and extension release versions aligned at 0.7.0", () => {
     const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
     const packageLock = JSON.parse(readFileSync("package-lock.json", "utf8"));
-    expect(manifest.version).toBe("0.6.1");
-    expect(packageJson.version).toBe("0.6.1");
-    expect(packageLock.version).toBe("0.6.1");
-    expect(packageLock.packages[""].version).toBe("0.6.1");
+    expect(manifest.version).toBe("0.7.0");
+    expect(packageJson.version).toBe("0.7.0");
+    expect(packageLock.version).toBe("0.7.0");
+    expect(packageLock.packages[""].version).toBe("0.7.0");
   });
 
-  it("documents the current release archive", () => {
+  it("documents the current release archive, permissions, and file count", () => {
     const readme = readFileSync("README.md", "utf8");
+    const checklist = readFileSync("docs/chrome-web-store-checklist.md", "utf8");
     expect(readme).toContain(`release/sidetab-lite-${manifest.version}.zip`);
+    for (const permission of ["sidePanel", "tabs", "tabGroups", "storage", "history"]) {
+      expect(readme).toContain(`\`${permission}\``);
+      expect(checklist).toContain(`\`${permission}\``);
+    }
+    expect(checklist).toContain("13 个审核文件");
+  });
+
+  it("documents the 0.7.0 tab-group and middle-click workflows", () => {
+    const readme = readFileSync("README.md", "utf8");
+    const checklist = readFileSync("docs/chrome-web-store-checklist.md", "utf8");
+    for (const document of [readme, checklist]) {
+      expect(document).toContain("添加到分组");
+      expect(document).toContain("新建分组");
+      expect(document).toContain("从分组中移除");
+      expect(document).toContain("折叠");
+      expect(document).toContain("中键");
+    }
+    expect(checklist).not.toContain("右键菜单包含四项");
+    expect(checklist).not.toContain("包含四项的菜单");
   });
 
   it("uses the required restricted MV3 permissions", () => {
     expect(manifest.manifest_version).toBe(3);
     expect(manifest.minimum_chrome_version).toBe("114");
-    expect(manifest.permissions).toEqual(["sidePanel", "tabs", "storage", "history"]);
+    expect(manifest.permissions).toEqual([
+      "sidePanel",
+      "tabs",
+      "tabGroups",
+      "storage",
+      "history",
+    ]);
     expect(manifest).not.toHaveProperty("host_permissions");
     expect(manifest).not.toHaveProperty("content_scripts");
     expect(parseCsp(manifest.content_security_policy.extension_pages)).toEqual({

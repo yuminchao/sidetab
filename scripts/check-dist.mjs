@@ -60,11 +60,26 @@ const pngSizes = new Map([
   ["assets/icons/icon-48.png", 48],
   ["assets/icons/icon-128.png", 128],
 ]);
+const sanitizedSvgPaths = new Set([
+  "assets/icons/search.svg",
+  "assets/icons/settings.svg",
+]);
+const forbiddenSanitizedSvgMarkup = /<\?xml|<!doctype|https?:|<script/i;
+const forbiddenSanitizedSvgAttribute =
+  /(?:^|\s)(?:t|p-id|width|height|href|xmlns:xlink|xlink(?::[\w.-]+)?|on[\w:.-]*)\s*=/i;
 
 function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+function validateSanitizedSvg(svgPath, source) {
+  assert(
+    !forbiddenSanitizedSvgMarkup.test(source) &&
+      !forbiddenSanitizedSvgAttribute.test(source),
+    `forbidden SVG content in ${svgPath}`,
+  );
 }
 
 export function validateExtensionCsp(value) {
@@ -279,8 +294,9 @@ export async function checkDist(distDirectory) {
   );
   assert(manifest.manifest_version === 3, "manifest_version must be 3");
   assert(
-    JSON.stringify(manifest.permissions) === JSON.stringify(["sidePanel", "tabs", "storage", "history"]),
-    "permissions must be exactly sidePanel, tabs, storage, history",
+    JSON.stringify(manifest.permissions) ===
+      JSON.stringify(["sidePanel", "tabs", "tabGroups", "storage", "history"]),
+    "permissions must be exactly sidePanel, tabs, tabGroups, storage, history",
   );
   assert(!Object.hasOwn(manifest, "host_permissions"), "host_permissions must not be present");
   assert(!Object.hasOwn(manifest, "content_scripts"), "content_scripts must not be present");
@@ -309,6 +325,8 @@ export async function checkDist(distDirectory) {
       });
     } else if (path.endsWith(".js")) {
       validateJavaScript(path, await readFile(absolutePath, "utf8"));
+    } else if (sanitizedSvgPaths.has(path)) {
+      validateSanitizedSvg(path, await readFile(absolutePath, "utf8"));
     }
   }
 
