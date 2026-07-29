@@ -283,8 +283,8 @@ describe("tab renderer", () => {
   ] as const)("rejects a duplicate %s ID without replacing the current rows", (_, items, message) => {
     const renderer = createTabRenderer({ list, empty });
     renderer.render([groupItem(), tabItem({ id: 7, groupId: 3 })]);
-    const oldGroup = list.children[0];
-    const oldTab = list.children[1];
+    const oldGroup = list.children[0] as HTMLElement;
+    const oldTab = list.children[1] as HTMLElement;
 
     expect(() => renderer.render(items)).toThrow(message);
     renderer.patchGroup(group({ title: "Patched group" }));
@@ -299,8 +299,8 @@ describe("tab renderer", () => {
   it("keeps the current DOM and indexes when row creation throws", () => {
     const renderer = createTabRenderer({ list, empty });
     renderer.render([groupItem(), tabItem({ id: 7, groupId: 3 })]);
-    const oldGroup = list.children[0];
-    const oldTab = list.children[1];
+    const oldGroup = list.children[0] as HTMLElement;
+    const oldTab = list.children[1] as HTMLElement;
     const createElement = vi.spyOn(document, "createElement").mockImplementationOnce(() => {
       throw new Error("create failed");
     });
@@ -322,8 +322,8 @@ describe("tab renderer", () => {
   it("keeps the current DOM and indexes when replacing children throws", () => {
     const renderer = createTabRenderer({ list, empty });
     renderer.render([groupItem(), tabItem({ id: 7, groupId: 3 })]);
-    const oldGroup = list.children[0];
-    const oldTab = list.children[1];
+    const oldGroup = list.children[0] as HTMLElement;
+    const oldTab = list.children[1] as HTMLElement;
     const replaceChildren = vi.spyOn(list, "replaceChildren").mockImplementationOnce(() => {
       throw new Error("replace failed");
     });
