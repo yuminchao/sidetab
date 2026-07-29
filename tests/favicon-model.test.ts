@@ -17,6 +17,7 @@ function tab(overrides: Partial<TabViewModel> = {}): TabViewModel {
     domain: "example.com",
     active: false,
     pinned: false,
+    groupId: -1,
     ...overrides,
   };
 }
