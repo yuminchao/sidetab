@@ -149,6 +149,35 @@ describe("side panel responsive CSS", () => {
     );
   });
 
+  it("styles compact group rows, controls, and titles", () => {
+    expect(css).toMatch(
+      /\.tab-group-row\s*{[^}]*height:\s*28px[^}]*min-width:\s*0/s,
+    );
+    expect(css).toMatch(
+      /\.tab-group-main\s*{[^}]*grid-template-columns:\s*12px\s+8px\s+minmax\(0,\s*1fr\)[^}]*width:\s*100%[^}]*height:\s*28px[^}]*border:\s*0/s,
+    );
+    expect(css).toMatch(/\.tab-group-chevron\s*{[^}]*width:\s*12px[^}]*height:\s*12px/s);
+    expect(css).toMatch(/\.tab-group-color\s*{[^}]*width:\s*8px[^}]*height:\s*8px/s);
+    expect(css).toMatch(
+      /\.tab-group-title\s*{[^}]*min-width:\s*0[^}]*font-family:\s*"Microsoft YaHei",\s*"微软雅黑",\s*"Segoe UI",\s*system-ui,\s*sans-serif[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s,
+    );
+    expect(css).not.toMatch(/\.tab-group-count\s*{/);
+  });
+
+  it("maps every Chrome group color with dark-theme overrides", () => {
+    const darkMedia = css.match(
+      /@media\s*\(prefers-color-scheme:\s*dark\)\s*\{([\s\S]*?)\n\}/s,
+    )?.[1] ?? "";
+    expect(darkMedia).not.toBe("");
+    for (const color of [
+      "grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange",
+    ]) {
+      const selector = new RegExp(`\\.tab-group-color\\[data-color=["']${color}["']\\]\\s*{[^}]*background:`, "s");
+      expect(css).toMatch(selector);
+      expect(darkMedia).toMatch(selector);
+    }
+  });
+
   it("supports 180px and 240px panels without positive minimum widths", () => {
     expect(css).toContain("@media (max-width: 240px)");
     expect(css).toContain("@media (max-width: 180px)");

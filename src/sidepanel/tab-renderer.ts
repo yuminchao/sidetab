@@ -1,3 +1,5 @@
+import type { TabGroupViewModel } from "./tab-group-model";
+import type { TabListItem } from "./tab-list-model";
 import type { TabViewModel } from "./tab-model";
 import { createFaviconCandidates } from "./favicon-model";
 
@@ -7,15 +9,18 @@ export type TabRendererElements = {
 };
 
 export type TabRenderer = {
-  render(tabs: readonly TabViewModel[]): void;
-  patch(tab: TabViewModel): void;
-  remove(id: number): void;
+  render(items: readonly TabListItem[]): void;
+  patchTab(tab: TabViewModel): void;
+  patchGroup(group: TabGroupViewModel): void;
+  removeTab(id: number): void;
   setDragEnabled(enabled: boolean): void;
   destroy(): void;
 };
 
 export function createTabRenderer({ list, empty }: TabRendererElements): TabRenderer {
   let dragEnabled = true;
+  let tabRows = new Map<number, HTMLElement>();
+  let groupRows = new Map<number, HTMLElement>();
   const onFaviconError = (event: Event) => {
     const target = event.target;
     if (!(target instanceof HTMLImageElement) || !list.contains(target)) {
@@ -43,38 +48,110 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
   list.addEventListener("error", onFaviconError, true);
 
   return {
-    render(tabs) {
+    render(items) {
+      const nextTabRows = new Map<number, HTMLElement>();
+      const nextGroupRows = new Map<number, HTMLElement>();
       const fragment = document.createDocumentFragment();
-      for (const tab of tabs) {
-        fragment.append(createTabRow(tab, dragEnabled));
+      for (const item of items) {
+        if (item.kind === "tab") {
+          if (nextTabRows.has(item.tab.id)) {
+            throw new Error(`重复标签 ID: ${item.tab.id}`);
+          }
+          const row = createTabRow(item.tab, dragEnabled);
+          nextTabRows.set(item.tab.id, row);
+          fragment.append(row);
+        } else {
+          if (nextGroupRows.has(item.group.id)) {
+            throw new Error(`重复分组 ID: ${item.group.id}`);
+          }
+          const row = createGroupRow(item.group);
+          nextGroupRows.set(item.group.id, row);
+          fragment.append(row);
+        }
       }
       list.replaceChildren(fragment);
-      empty.hidden = tabs.length !== 0;
+      tabRows = nextTabRows;
+      groupRows = nextGroupRows;
+      empty.hidden = items.length !== 0;
     },
 
-    patch(tab) {
-      const row = findTabRow(list, tab.id);
+    patchTab(tab) {
+      const row = tabRows.get(tab.id);
       if (row) {
         updateTabRow(row, tab, dragEnabled);
       }
     },
 
-    remove(id) {
-      findTabRow(list, id)?.remove();
+    patchGroup(group) {
+      const row = groupRows.get(group.id);
+      if (row) {
+        updateGroupRow(row, group);
+      }
+    },
+
+    removeTab(id) {
+      const row = tabRows.get(id);
+      tabRows.delete(id);
+      row?.remove();
       empty.hidden = list.childElementCount !== 0;
     },
 
     setDragEnabled(enabled) {
       dragEnabled = enabled;
-      for (const child of Array.from(list.children)) {
-        if (child instanceof HTMLElement) updateRowDragState(child, enabled);
+      for (const row of tabRows.values()) {
+        updateRowDragState(row, enabled);
       }
     },
 
     destroy() {
       list.removeEventListener("error", onFaviconError, true);
+      tabRows.clear();
+      groupRows.clear();
     },
   };
+}
+
+function createGroupRow(group: TabGroupViewModel): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "tab-group-row";
+  row.setAttribute("role", "listitem");
+
+  const main = document.createElement("button");
+  main.className = "tab-group-main";
+  main.type = "button";
+  main.dataset.action = "toggle-group";
+
+  const chevron = document.createElement("span");
+  chevron.className = "tab-group-chevron";
+  chevron.setAttribute("aria-hidden", "true");
+  chevron.textContent = "›";
+
+  const color = document.createElement("span");
+  color.className = "tab-group-color";
+  color.setAttribute("aria-hidden", "true");
+
+  const title = document.createElement("span");
+  title.className = "tab-group-title";
+
+  main.append(chevron, color, title);
+  row.append(main);
+  updateGroupRow(row, group);
+  return row;
+}
+
+function updateGroupRow(row: HTMLElement, group: TabGroupViewModel): void {
+  const main = row.querySelector<HTMLButtonElement>(".tab-group-main");
+  const color = row.querySelector<HTMLElement>(".tab-group-color");
+  const title = row.querySelector<HTMLElement>(".tab-group-title");
+  if (!main || !color || !title) return;
+
+  const displayTitle = group.title || "未命名分组";
+  row.dataset.groupId = String(group.id);
+  row.dataset.collapsed = String(group.collapsed);
+  main.setAttribute("aria-expanded", String(!group.collapsed));
+  main.setAttribute("aria-label", `${displayTitle}，${group.collapsed ? "已折叠" : "已展开"}`);
+  color.dataset.color = group.color;
+  title.textContent = displayTitle;
 }
 
 function createTabRow(tab: TabViewModel, dragEnabled: boolean): HTMLElement {
@@ -203,14 +280,4 @@ function createFaviconFallback(text: string): HTMLElement {
 
 function getFallbackText(title: string): string {
   return Array.from(title.trim())[0]?.toLocaleUpperCase() ?? "";
-}
-
-function findTabRow(list: HTMLElement, id: number): HTMLElement | undefined {
-  const expectedId = String(id);
-  for (const child of Array.from(list.children)) {
-    if (child instanceof HTMLElement && child.dataset.tabId === expectedId) {
-      return child;
-    }
-  }
-  return undefined;
 }

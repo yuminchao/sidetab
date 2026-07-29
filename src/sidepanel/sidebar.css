@@ -298,6 +298,82 @@ input:focus-visible {
   min-width: 0;
 }
 
+.tab-group-row {
+  width: 100%;
+  height: 28px;
+  min-width: 0;
+}
+
+.tab-group-main {
+  display: grid;
+  grid-template-columns: 12px 8px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  height: 28px;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.tab-group-main:hover:not(:disabled) {
+  background: color-mix(in srgb, CanvasText 8%, transparent);
+}
+
+.tab-group-chevron {
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  color: GrayText;
+  font-size: 12px;
+  line-height: 1;
+  transform: rotate(90deg);
+}
+
+.tab-group-row[data-collapsed="true"] .tab-group-chevron {
+  transform: none;
+}
+
+.tab-group-color {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.tab-group-title {
+  min-width: 0;
+  overflow: hidden;
+  font-family: "Microsoft YaHei", "微软雅黑", "Segoe UI", system-ui, sans-serif;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-group-color[data-color="grey"] { background: #80868b; }
+.tab-group-color[data-color="blue"] { background: #1a73e8; }
+.tab-group-color[data-color="red"] { background: #d93025; }
+.tab-group-color[data-color="yellow"] { background: #f9ab00; }
+.tab-group-color[data-color="green"] { background: #188038; }
+.tab-group-color[data-color="pink"] { background: #d01884; }
+.tab-group-color[data-color="purple"] { background: #a142f4; }
+.tab-group-color[data-color="cyan"] { background: #007b83; }
+.tab-group-color[data-color="orange"] { background: #fa7b17; }
+
+@media (prefers-color-scheme: dark) {
+  .tab-group-color[data-color="grey"] { background: #bdc1c6; }
+  .tab-group-color[data-color="blue"] { background: #8ab4f8; }
+  .tab-group-color[data-color="red"] { background: #f28b82; }
+  .tab-group-color[data-color="yellow"] { background: #fdd663; }
+  .tab-group-color[data-color="green"] { background: #81c995; }
+  .tab-group-color[data-color="pink"] { background: #ff8bcb; }
+  .tab-group-color[data-color="purple"] { background: #c58af9; }
+  .tab-group-color[data-color="cyan"] { background: #78d9ec; }
+  .tab-group-color[data-color="orange"] { background: #fcad70; }
+}
+
 .new-tab-button {
   display: grid;
   place-items: center;

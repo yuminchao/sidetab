@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { TabGroupViewModel } from "../src/sidepanel/tab-group-model";
+import type { TabListItem } from "../src/sidepanel/tab-list-model";
 import { createTabRenderer } from "../src/sidepanel/tab-renderer";
 import type { TabViewModel } from "../src/sidepanel/tab-model";
 
@@ -12,8 +14,28 @@ function tab(overrides: Partial<TabViewModel> = {}): TabViewModel {
     domain: "example.com",
     active: false,
     pinned: false,
+    groupId: -1,
     ...overrides,
   };
+}
+
+function tabItem(overrides: Partial<TabViewModel> = {}): TabListItem {
+  return { kind: "tab", tab: tab(overrides) };
+}
+
+function group(overrides: Partial<TabGroupViewModel> = {}): TabGroupViewModel {
+  return {
+    id: 3,
+    windowId: 1,
+    title: "Work",
+    color: "blue",
+    collapsed: false,
+    ...overrides,
+  };
+}
+
+function groupItem(overrides: Partial<TabGroupViewModel> = {}): TabListItem {
+  return { kind: "group", group: group(overrides) };
 }
 
 describe("tab renderer", () => {
@@ -33,8 +55,8 @@ describe("tab renderer", () => {
     const renderer = createTabRenderer({ list, empty });
 
     renderer.render([
-      tab({ active: true, pinned: true, favIconUrl: "data:image/png;base64,abc" }),
-      tab({ id: -4, title: "Other", domain: "other.example" }),
+      tabItem({ active: true, pinned: true, favIconUrl: "data:image/png;base64,abc" }),
+      tabItem({ id: -4, title: "Other", domain: "other.example" }),
     ]);
 
     expect(replaceChildren).toHaveBeenCalledOnce();
@@ -74,9 +96,273 @@ describe("tab renderer", () => {
     expect(pin?.dataset.visible).toBe("true");
   });
 
+  it("renders accessible group rows without a count", () => {
+    const renderer = createTabRenderer({ list, empty });
+
+    renderer.render([
+      groupItem({ id: 3, title: "", color: "purple", collapsed: true }),
+      tabItem({ id: 7, groupId: 3 }),
+    ]);
+
+    const row = list.querySelector<HTMLElement>(".tab-group-row");
+    const button = row?.querySelector<HTMLButtonElement>(".tab-group-main");
+    const chevron = row?.querySelector<HTMLElement>(".tab-group-chevron");
+    const color = row?.querySelector<HTMLElement>(".tab-group-color");
+    expect(row?.getAttribute("role")).toBe("listitem");
+    expect(row?.dataset).toMatchObject({ groupId: "3", collapsed: "true" });
+    expect(button?.dataset.action).toBe("toggle-group");
+    expect(button?.getAttribute("aria-expanded")).toBe("false");
+    expect(button?.ariaLabel).toBe("未命名分组，已折叠");
+    expect(chevron?.getAttribute("aria-hidden")).toBe("true");
+    expect(color?.dataset.color).toBe("purple");
+    expect(color?.getAttribute("aria-hidden")).toBe("true");
+    expect(row?.querySelector(".tab-group-title")?.textContent).toBe("未命名分组");
+    expect(row?.querySelector(".tab-group-count")).toBeNull();
+    expect(row?.draggable).toBe(false);
+  });
+
+  it("patches a group row in place and ignores a missing group", () => {
+    const renderer = createTabRenderer({ list, empty });
+    renderer.render([groupItem(), tabItem({ groupId: 3 })]);
+    const row = list.firstElementChild as HTMLElement;
+    const button = row.querySelector(".tab-group-main");
+    const tabRow = list.lastElementChild;
+
+    renderer.patchGroup(group({ title: "Updated", color: "orange", collapsed: true }));
+    renderer.patchGroup(group({ id: 999, title: "Missing" }));
+
+    expect(list.firstElementChild).toBe(row);
+    expect(row.querySelector(".tab-group-main")).toBe(button);
+    expect(list.lastElementChild).toBe(tabRow);
+    expect(row.dataset.collapsed).toBe("true");
+    expect(row.querySelector(".tab-group-title")?.textContent).toBe("Updated");
+    expect((row.querySelector(".tab-group-color") as HTMLElement).dataset.color).toBe("orange");
+    expect((button as HTMLButtonElement).getAttribute("aria-expanded")).toBe("false");
+    expect((button as HTMLButtonElement).ariaLabel).toBe("Updated，已折叠");
+  });
+
+  it("keeps group rows intact while patching, removing, and toggling tab dragging", () => {
+    const renderer = createTabRenderer({ list, empty });
+    renderer.render([
+      groupItem(),
+      tabItem({ id: 7, groupId: 3, title: "First" }),
+      tabItem({ id: 8, groupId: 3, title: "Second" }),
+    ]);
+    const groupRow = list.children[0] as HTMLElement;
+    const firstTabRow = list.children[1] as HTMLElement;
+    const secondTabRow = list.children[2] as HTMLElement;
+
+    renderer.patchTab(tab({ id: 7, groupId: 3, title: "Updated" }));
+    renderer.removeTab(8);
+    renderer.setDragEnabled(false);
+    renderer.setDragEnabled(true);
+
+    expect(list.children).toHaveLength(2);
+    expect(list.children[0]).toBe(groupRow);
+    expect(list.children[1]).toBe(firstTabRow);
+    expect(secondTabRow.isConnected).toBe(false);
+    expect(groupRow.draggable).toBe(false);
+    expect(groupRow.title).toBe("");
+    expect(firstTabRow.querySelector(".tab-title")?.textContent).toBe("Updated");
+    expect(firstTabRow.draggable).toBe(true);
+  });
+
+  it("patches expanded, empty, and HTML-looking group titles as text", () => {
+    const renderer = createTabRenderer({ list, empty });
+    renderer.render([groupItem({ collapsed: true })]);
+    const row = list.firstElementChild as HTMLElement;
+    const title = row.querySelector<HTMLElement>(".tab-group-title");
+
+    renderer.patchGroup(group({ title: "<img src=x onerror=alert(1)>", collapsed: true }));
+    expect(title?.textContent).toBe("<img src=x onerror=alert(1)>");
+    expect(title?.querySelector("img")).toBeNull();
+
+    renderer.patchGroup(group({ title: "", collapsed: false }));
+    expect(list.firstElementChild).toBe(row);
+    expect(row.querySelector(".tab-group-title")).toBe(title);
+    expect(title?.textContent).toBe("未命名分组");
+    expect(row.dataset.collapsed).toBe("false");
+    expect(row.querySelector(".tab-group-main")?.getAttribute("aria-expanded")).toBe("true");
+    expect((row.querySelector(".tab-group-main") as HTMLButtonElement).ariaLabel).toBe(
+      "未命名分组，已展开",
+    );
+  });
+
+  it("patches only a group row when another row has the same data-group-id", () => {
+    const renderer = createTabRenderer({ list, empty });
+    renderer.render([tabItem({ id: 7, title: "Tab" }), groupItem({ id: 3, title: "Before" })]);
+    const tabRow = list.firstElementChild as HTMLElement;
+    const groupRow = list.lastElementChild as HTMLElement;
+    tabRow.dataset.groupId = "3";
+
+    renderer.patchGroup(group({ id: 3, title: "After" }));
+
+    expect(tabRow.querySelector(".tab-title")?.textContent).toBe("Tab");
+    expect(groupRow.querySelector(".tab-group-title")?.textContent).toBe("After");
+  });
+
+  it("patches and removes indexed rows without reading the list children", () => {
+    const renderer = createTabRenderer({ list, empty });
+    const items = Array.from({ length: 20 }, (_, index) => [
+      groupItem({ id: index, title: `Group ${index}` }),
+      tabItem({ id: 100 + index, groupId: index, title: `Tab ${index}` }),
+    ]).flat();
+    renderer.render(items);
+
+    const nativeChildren = Object.getOwnPropertyDescriptor(Element.prototype, "children")?.get;
+    if (!nativeChildren) throw new Error("missing native children getter");
+    let childrenReads = 0;
+    Object.defineProperty(list, "children", {
+      configurable: true,
+      get() {
+        childrenReads += 1;
+        return nativeChildren.call(list);
+      },
+    });
+    const querySelector = vi.spyOn(list, "querySelector");
+    const querySelectorAll = vi.spyOn(list, "querySelectorAll");
+    const getElementsByClassName = vi.spyOn(list, "getElementsByClassName");
+    const getElementsByTagName = vi.spyOn(list, "getElementsByTagName");
+
+    for (let index = 0; index < 20; index += 1) {
+      renderer.patchTab(tab({ id: 100 + index, groupId: index, title: `Updated ${index}` }));
+      renderer.patchGroup(group({ id: index, title: `Updated group ${index}` }));
+    }
+    for (let index = 0; index < 10; index += 1) {
+      renderer.removeTab(100 + index);
+    }
+
+    expect(childrenReads).toBe(0);
+    expect(querySelector).not.toHaveBeenCalled();
+    expect(querySelectorAll).not.toHaveBeenCalled();
+    expect(getElementsByClassName).not.toHaveBeenCalled();
+    expect(getElementsByTagName).not.toHaveBeenCalled();
+    querySelector.mockRestore();
+    querySelectorAll.mockRestore();
+    getElementsByClassName.mockRestore();
+    getElementsByTagName.mockRestore();
+    Reflect.deleteProperty(list, "children");
+    expect(list.querySelectorAll(".tab-row")).toHaveLength(10);
+    expect(list.querySelectorAll(".tab-group-row")).toHaveLength(20);
+  });
+
+  it("drops stale row indexes before rendering a replacement list", () => {
+    const renderer = createTabRenderer({ list, empty });
+    renderer.render([
+      groupItem({ id: 3, title: "Old group" }),
+      tabItem({ id: 7, groupId: 3, title: "Old tab" }),
+    ]);
+    const oldGroup = list.children[0] as HTMLElement;
+    const oldTab = list.children[1] as HTMLElement;
+
+    renderer.render([
+      groupItem({ id: 4, title: "New group" }),
+      tabItem({ id: 8, groupId: 4, title: "New tab" }),
+    ]);
+    renderer.patchGroup(group({ id: 3, title: "Stale group" }));
+    renderer.patchTab(tab({ id: 7, groupId: 3, title: "Stale tab" }));
+    renderer.removeTab(7);
+
+    expect(oldGroup.querySelector(".tab-group-title")?.textContent).toBe("Old group");
+    expect(oldTab.querySelector(".tab-title")?.textContent).toBe("Old tab");
+    expect(list.querySelector(".tab-group-title")?.textContent).toBe("New group");
+    expect(list.querySelector(".tab-title")?.textContent).toBe("New tab");
+  });
+
+  it.each([
+    [
+      "tab",
+      [tabItem({ id: 8, title: "Duplicate one" }), tabItem({ id: 8, title: "Duplicate two" })],
+      "重复标签 ID: 8",
+    ],
+    [
+      "group",
+      [groupItem({ id: 4, title: "Duplicate one" }), groupItem({ id: 4, title: "Duplicate two" })],
+      "重复分组 ID: 4",
+    ],
+  ] as const)("rejects a duplicate %s ID without replacing the current rows", (_, items, message) => {
+    const renderer = createTabRenderer({ list, empty });
+    renderer.render([groupItem(), tabItem({ id: 7, groupId: 3 })]);
+    const oldGroup = list.children[0];
+    const oldTab = list.children[1];
+
+    expect(() => renderer.render(items)).toThrow(message);
+    renderer.patchGroup(group({ title: "Patched group" }));
+    renderer.patchTab(tab({ id: 7, groupId: 3, title: "Patched tab" }));
+
+    expect(list.children[0]).toBe(oldGroup);
+    expect(list.children[1]).toBe(oldTab);
+    expect(oldGroup.querySelector(".tab-group-title")?.textContent).toBe("Patched group");
+    expect(oldTab.querySelector(".tab-title")?.textContent).toBe("Patched tab");
+  });
+
+  it("keeps the current DOM and indexes when row creation throws", () => {
+    const renderer = createTabRenderer({ list, empty });
+    renderer.render([groupItem(), tabItem({ id: 7, groupId: 3 })]);
+    const oldGroup = list.children[0];
+    const oldTab = list.children[1];
+    const createElement = vi.spyOn(document, "createElement").mockImplementationOnce(() => {
+      throw new Error("create failed");
+    });
+
+    try {
+      expect(() => renderer.render([tabItem({ id: 8 })])).toThrow("create failed");
+    } finally {
+      createElement.mockRestore();
+    }
+    renderer.patchGroup(group({ title: "Patched group" }));
+    renderer.patchTab(tab({ id: 7, groupId: 3, title: "Patched tab" }));
+
+    expect(list.children[0]).toBe(oldGroup);
+    expect(list.children[1]).toBe(oldTab);
+    expect(oldGroup.querySelector(".tab-group-title")?.textContent).toBe("Patched group");
+    expect(oldTab.querySelector(".tab-title")?.textContent).toBe("Patched tab");
+  });
+
+  it("keeps the current DOM and indexes when replacing children throws", () => {
+    const renderer = createTabRenderer({ list, empty });
+    renderer.render([groupItem(), tabItem({ id: 7, groupId: 3 })]);
+    const oldGroup = list.children[0];
+    const oldTab = list.children[1];
+    const replaceChildren = vi.spyOn(list, "replaceChildren").mockImplementationOnce(() => {
+      throw new Error("replace failed");
+    });
+
+    try {
+      expect(() => renderer.render([groupItem({ id: 4 }), tabItem({ id: 8 })])).toThrow(
+        "replace failed",
+      );
+    } finally {
+      replaceChildren.mockRestore();
+    }
+    renderer.patchGroup(group({ title: "Patched group" }));
+    renderer.patchTab(tab({ id: 7, groupId: 3, title: "Patched tab" }));
+
+    expect(list.children[0]).toBe(oldGroup);
+    expect(list.children[1]).toBe(oldTab);
+    expect(oldGroup.querySelector(".tab-group-title")?.textContent).toBe("Patched group");
+    expect(oldTab.querySelector(".tab-title")?.textContent).toBe("Patched tab");
+  });
+
+  it("clears row indexes when destroyed", () => {
+    const renderer = createTabRenderer({ list, empty });
+    renderer.render([groupItem(), tabItem({ id: 7, groupId: 3 })]);
+    const groupTitle = list.querySelector(".tab-group-title");
+    const tabTitle = list.querySelector(".tab-title");
+
+    renderer.destroy();
+    renderer.patchGroup(group({ title: "After destroy" }));
+    renderer.patchTab(tab({ id: 7, groupId: 3, title: "After destroy" }));
+    renderer.removeTab(7);
+
+    expect(groupTitle?.textContent).toBe("Work");
+    expect(tabTitle?.textContent).toBe("Example page");
+    expect(list.querySelectorAll(".tab-row")).toHaveLength(1);
+  });
+
   it("shows the empty state and clears stale rows", () => {
     const renderer = createTabRenderer({ list, empty });
-    renderer.render([tab()]);
+    renderer.render([tabItem()]);
 
     renderer.render([]);
 
@@ -86,12 +372,12 @@ describe("tab renderer", () => {
 
   it("patches an existing row in place without rebuilding the list", () => {
     const renderer = createTabRenderer({ list, empty });
-    renderer.render([tab(), tab({ id: 8, title: "Second" })]);
+    renderer.render([tabItem(), tabItem({ id: 8, title: "Second" })]);
     const row = list.firstElementChild as HTMLElement;
     const second = list.lastElementChild;
     const pin = row.querySelector(".pin-indicator");
 
-    renderer.patch(
+    renderer.patchTab(
       tab({
         title: "Updated",
         domain: "updated.example",
@@ -100,7 +386,7 @@ describe("tab renderer", () => {
         favIconUrl: "data:image/png;base64,updated",
       }),
     );
-    renderer.patch(tab({ id: 999, title: "Missing" }));
+    renderer.patchTab(tab({ id: 999, title: "Missing" }));
 
     expect(list.firstElementChild).toBe(row);
     expect(list.lastElementChild).toBe(second);
@@ -113,7 +399,7 @@ describe("tab renderer", () => {
     expect(row.querySelector(".tab-main")?.firstElementChild?.className).toBe("pin-indicator");
     expect(row.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,updated");
 
-    renderer.patch(tab({ active: false }));
+    renderer.patchTab(tab({ active: false }));
     expect(row.hasAttribute("aria-current")).toBe(false);
     expect(row.dataset.pinned).toBe("false");
     expect(row.dataset.hasPin).toBe("false");
@@ -126,10 +412,10 @@ describe("tab renderer", () => {
 
   it("preserves an image favicon until its URL changes", () => {
     const renderer = createTabRenderer({ list, empty });
-    renderer.render([tab({ favIconUrl: "data:image/png;base64,first" })]);
+    renderer.render([tabItem({ favIconUrl: "data:image/png;base64,first" })]);
     const original = list.querySelector("img");
 
-    renderer.patch(
+    renderer.patchTab(
       tab({
         title: "Updated title",
         active: true,
@@ -143,7 +429,7 @@ describe("tab renderer", () => {
       "Updated title",
     );
 
-    renderer.patch(tab({ favIconUrl: "data:image/png;base64,second" }));
+    renderer.patchTab(tab({ favIconUrl: "data:image/png;base64,second" }));
     expect(list.querySelector("img")).not.toBe(original);
     expect(list.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,second");
   });
@@ -151,10 +437,10 @@ describe("tab renderer", () => {
   it("restarts the favicon chain when the page URL changes its root candidate", () => {
     const renderer = createTabRenderer({ list, empty });
     const item = tab({ favIconUrl: "data:image/png;base64,stable" });
-    renderer.render([item]);
+    renderer.render([{ kind: "tab", tab: item }]);
     const original = list.querySelector("img");
 
-    renderer.patch({ ...item, url: "https://other.example/page" });
+    renderer.patchTab({ ...item, url: "https://other.example/page" });
 
     expect(list.querySelector("img")).not.toBe(original);
     expect(list.querySelector("img")?.getAttribute("src")).toBe(
@@ -169,7 +455,7 @@ describe("tab renderer", () => {
     const renderer = createTabRenderer({ list, empty });
     const faviconUrl = "https://cdn.example.com/icons/page.png?size=16#chrome";
 
-    renderer.render([tab({ title: "Private", favIconUrl: faviconUrl })]);
+    renderer.render([tabItem({ title: "Private", favIconUrl: faviconUrl })]);
 
     expect(list.querySelector("img")?.getAttribute("src")).toBe(faviconUrl);
     expect(list.querySelector(".tab-favicon-fallback")).toBeNull();
@@ -180,7 +466,7 @@ describe("tab renderer", () => {
   it("allows a Chrome-provided HTTP favicon", () => {
     const renderer = createTabRenderer({ list, empty });
 
-    renderer.render([tab({ favIconUrl: "http://cdn.example/icon.png" })]);
+    renderer.render([tabItem({ favIconUrl: "http://cdn.example/icon.png" })]);
 
     expect(list.querySelector("img")?.getAttribute("src")).toBe(
       "http://cdn.example/icon.png",
@@ -192,7 +478,7 @@ describe("tab renderer", () => {
     (favIconUrl) => {
       const renderer = createTabRenderer({ list, empty });
 
-      renderer.render([tab({ favIconUrl })]);
+      renderer.render([tabItem({ favIconUrl })]);
 
       expect(list.querySelector("img")?.getAttribute("src")).toBe(
         "https://example.com/favicon.ico",
@@ -205,7 +491,7 @@ describe("tab renderer", () => {
     (favIconUrl) => {
       const renderer = createTabRenderer({ list, empty });
 
-      renderer.render([tab({ title: "Private", url: "chrome://newtab/", favIconUrl })]);
+      renderer.render([tabItem({ title: "Private", url: "chrome://newtab/", favIconUrl })]);
 
       expect(list.querySelector("img")).toBeNull();
       expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("P");
@@ -214,39 +500,39 @@ describe("tab renderer", () => {
 
   it("preserves a fallback for title changes and replaces it when favicon mode changes", () => {
     const renderer = createTabRenderer({ list, empty });
-    renderer.render([tab({ title: "Alpha", url: "chrome://newtab/" })]);
+    renderer.render([tabItem({ title: "Alpha", url: "chrome://newtab/" })]);
     const originalFallback = list.querySelector(".tab-favicon-fallback");
 
-    renderer.patch(tab({ title: "Beta", active: true, url: "chrome://newtab/" }));
+    renderer.patchTab(tab({ title: "Beta", active: true, url: "chrome://newtab/" }));
     expect(list.querySelector(".tab-favicon-fallback")).toBe(originalFallback);
     expect(originalFallback?.textContent).toBe("B");
 
-    renderer.patch(
+    renderer.patchTab(
       tab({ title: "Beta", url: "chrome://newtab/", favIconUrl: "data:image/png;base64,abc" }),
     );
     expect(list.querySelector(".tab-favicon-fallback")).toBeNull();
     expect(list.querySelector("img")).not.toBeNull();
 
-    renderer.patch(tab({ title: "Gamma", url: "chrome://newtab/" }));
+    renderer.patchTab(tab({ title: "Gamma", url: "chrome://newtab/" }));
     expect(list.querySelector("img")).toBeNull();
     expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("G");
   });
 
   it("removes arbitrary IDs safely and reveals the empty state after the final row", () => {
     const renderer = createTabRenderer({ list, empty });
-    renderer.render([tab({ id: -20 })]);
+    renderer.render([tabItem({ id: -20 })]);
 
-    renderer.remove(999);
+    renderer.removeTab(999);
     expect(list.children).toHaveLength(1);
 
-    renderer.remove(-20);
+    renderer.removeTab(-20);
     expect(list.children).toHaveLength(0);
     expect(empty.hidden).toBe(false);
   });
 
   it("falls back from the primary favicon to the root and then the title letter", () => {
     const renderer = createTabRenderer({ list, empty });
-    renderer.render([tab({ title: "Alpha", favIconUrl: "https://cdn.example/broken.png" })]);
+    renderer.render([tabItem({ title: "Alpha", favIconUrl: "https://cdn.example/broken.png" })]);
     const image = list.querySelector("img");
 
     image?.dispatchEvent(new Event("error"));
@@ -255,7 +541,7 @@ describe("tab renderer", () => {
     expect(image?.getAttribute("src")).toBe("https://example.com/favicon.ico");
     expect(image?.dataset.nextUrl).toBe("");
 
-    renderer.patch(
+    renderer.patchTab(
       tab({
         title: "Beta",
         active: true,
@@ -273,7 +559,7 @@ describe("tab renderer", () => {
 
   it("starts at the root favicon when Chrome provides no primary", () => {
     const renderer = createTabRenderer({ list, empty });
-    renderer.render([tab({ title: "Alpha" })]);
+    renderer.render([tabItem({ title: "Alpha" })]);
     const image = list.querySelector("img");
 
     expect(image?.getAttribute("src")).toBe("https://example.com/favicon.ico");
@@ -286,7 +572,7 @@ describe("tab renderer", () => {
   it("does not retry a root favicon that duplicates the primary", () => {
     const renderer = createTabRenderer({ list, empty });
     renderer.render([
-      tab({ title: "Alpha", favIconUrl: "https://example.com/favicon.ico" }),
+      tabItem({ title: "Alpha", favIconUrl: "https://example.com/favicon.ico" }),
     ]);
     const image = list.querySelector("img");
 
@@ -300,7 +586,7 @@ describe("tab renderer", () => {
   it("treats tab titles as text and never renders model domains", () => {
     const renderer = createTabRenderer({ list, empty });
     renderer.render([
-      tab({
+      tabItem({
         title: "<img src=x onerror=alert(1)>",
         domain: "<script>x</script>",
         url: "chrome://newtab/",
@@ -316,21 +602,21 @@ describe("tab renderer", () => {
   it("adds and removes the pin without replacing an unchanged favicon", () => {
     const renderer = createTabRenderer({ list, empty });
     const item = tab({ favIconUrl: "data:image/png;base64,stable" });
-    renderer.render([item]);
+    renderer.render([{ kind: "tab", tab: item }]);
     const favicon = list.querySelector(".tab-favicon");
     const image = list.querySelector("img");
     const pin = list.querySelector(".pin-indicator");
 
     expect((pin as HTMLElement).dataset.visible).toBe("false");
 
-    renderer.patch({ ...item, pinned: true });
+    renderer.patchTab({ ...item, pinned: true });
     expect(list.querySelector(".pin-indicator")).toBe(pin);
     expect((pin as HTMLElement).dataset.visible).toBe("true");
     expect(list.querySelector(".pin-indicator")).toBe(list.querySelector(".tab-main")?.firstElementChild);
     expect(list.querySelector(".tab-favicon")).toBe(favicon);
     expect(list.querySelector("img")).toBe(image);
 
-    renderer.patch(item);
+    renderer.patchTab(item);
     expect(list.querySelector(".pin-indicator")).toBe(pin);
     expect((pin as HTMLElement).dataset.visible).toBe("false");
     expect(list.querySelector(".tab-favicon")).toBe(favicon);
@@ -339,7 +625,7 @@ describe("tab renderer", () => {
 
   it("removes delegated listeners when destroyed", () => {
     const renderer = createTabRenderer({ list, empty });
-    renderer.render([tab({ favIconUrl: "data:image/png;base64,broken" })]);
+    renderer.render([tabItem({ favIconUrl: "data:image/png;base64,broken" })]);
     const image = list.querySelector("img");
 
     renderer.destroy();
@@ -350,19 +636,19 @@ describe("tab renderer", () => {
 
   it("keeps row drag availability across render and patch", () => {
     const renderer = createTabRenderer({ list, empty });
-    renderer.render([tab()]);
+    renderer.render([tabItem()]);
     const row = list.firstElementChild as HTMLElement;
     expect(row.draggable).toBe(true);
 
     renderer.setDragEnabled(false);
     expect(row.draggable).toBe(false);
     expect(row.title).toBe("清空搜索后可排序");
-    renderer.render([tab({ title: "Again" })]);
+    renderer.render([tabItem({ title: "Again" })]);
     const rerendered = list.firstElementChild as HTMLElement;
     expect(rerendered.draggable).toBe(false);
 
     renderer.setDragEnabled(true);
-    renderer.patch(tab({ title: "Patched" }));
+    renderer.patchTab(tab({ title: "Patched" }));
     expect(rerendered.draggable).toBe(true);
     expect(rerendered.title).toBe("");
   });
@@ -370,7 +656,7 @@ describe("tab renderer", () => {
   it("keeps an emoji intact when deriving a favicon fallback", () => {
     const renderer = createTabRenderer({ list, empty });
 
-    renderer.render([tab({ title: "😀 Tab", url: "chrome://newtab/" })]);
+    renderer.render([tabItem({ title: "😀 Tab", url: "chrome://newtab/" })]);
 
     expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("😀");
   });
@@ -380,11 +666,11 @@ describe("tab renderer", () => {
     const tabs = Array.from({ length: 100 }, (_, index) =>
       tab({ id: index - 50, index, title: `Tab ${index}` }),
     );
-    renderer.render(tabs);
+    renderer.render(tabs.map((tab) => ({ kind: "tab" as const, tab })));
     const rows = Array.from(list.children);
 
     for (const item of tabs) {
-      renderer.patch({ ...item, title: `${item.title} updated`, pinned: true });
+      renderer.patchTab({ ...item, title: `${item.title} updated`, pinned: true });
     }
 
     expect(list.children).toHaveLength(100);
