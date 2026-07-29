@@ -117,7 +117,10 @@ async function createReleaseFixture(): Promise<{ root: string; dist: string; rel
     } else if (path === "assets/icons/pin.svg") {
       await writeFile(target, '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0" /></svg>');
     } else if (path.endsWith(".svg")) {
-      await writeFile(target, '<svg viewBox="0 0 24 24"><path d="M0 0" /></svg>');
+      await writeFile(
+        target,
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0" /></svg>',
+      );
     } else if (path === "THIRD_PARTY_NOTICES.md") {
       await writeFile(target, "Lucide is distributed under the ISC License.\n");
     } else if (path === "manifest.json") {
@@ -376,8 +379,8 @@ describe("dist validation", () => {
   });
 
   it.each([
-    ['<?xml version="1.0"?><svg viewBox="0 0 24 24"><path d="M0 0" /></svg>', "XML declaration"],
-    ['<!doctype svg><svg viewBox="0 0 24 24"><path d="M0 0" /></svg>', "doctype"],
+    ['<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0" /></svg>', "XML declaration"],
+    ['<!doctype svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0" /></svg>', "doctype"],
     ['<svg viewBox="0 0 24 24" t="1"><path d="M0 0" /></svg>', "t attribute"],
     ['<svg viewBox="0 0 24 24" p-id="1"><path d="M0 0" /></svg>', "p-id attribute"],
     ['<svg viewBox="0 0 24 24" width="24"><path d="M0 0" /></svg>', "width attribute"],
@@ -400,16 +403,42 @@ describe("dist validation", () => {
     await expect(checkDist(fixture.dist)).rejects.toThrow(/svg|forbidden/i);
   });
 
-  it("allows longer safe SVG attribute names that contain forbidden-name suffixes", async () => {
+  it("rejects extra SVG attributes outside the sanitized asset schema", async () => {
     const fixture = await createReleaseFixture();
     await overwrite(
       fixture.dist,
       "assets/icons/search.svg",
-      '<svg viewBox="0 0 24 24"><path offset="0" stroke-width="2" data-height="24" data-onload="label" d="M0 0" /></svg>',
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path offset="0" stroke-width="2" data-height="24" data-onload="label" d="M0 0" /></svg>',
     );
     const { checkDist } = await loadCheckDist();
 
-    await expect(checkDist(fixture.dist)).resolves.toEqual({ totalBytes: expect.any(Number) });
+    await expect(checkDist(fixture.dist)).rejects.toThrow(/svg|attribute|content/i);
+  });
+
+  it.each([
+    ['<svg viewBox="0 0 24 24"><path d="M0 0" /></svg>', "missing namespace"],
+    [
+      '<svg XMLNS="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0" /></svg>',
+      "uppercase namespace attribute",
+    ],
+    [
+      '<svg xmlns="HTTP://WWW.W3.ORG/2000/SVG" viewBox="0 0 24 24"><path d="M0 0" /></svg>',
+      "uppercase namespace URI",
+    ],
+    [
+      '<svg xmlns="http://www.w3.org/2000/svg" xmlns:foo="urn:test" viewBox="0 0 24 24"><path d="M0 0" /></svg>',
+      "prefixed namespace",
+    ],
+    [
+      `<svg data-label=' xmlns="http://www.w3.org/2000/svg"' viewBox="0 0 24 24"><path d="M0 0" /></svg>`,
+      "namespace text inside another attribute",
+    ],
+  ])("rejects a sanitized SVG with an invalid namespace: %s", async (unsafeSvg) => {
+    const fixture = await createReleaseFixture();
+    await overwrite(fixture.dist, "assets/icons/search.svg", unsafeSvg);
+    const { checkDist } = await loadCheckDist();
+
+    await expect(checkDist(fixture.dist)).rejects.toThrow(/svg|namespace/i);
   });
 
   it.each([

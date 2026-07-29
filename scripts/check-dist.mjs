@@ -3,6 +3,7 @@ import { posix, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parse as parseJavaScript } from "acorn";
 import { simple as walkJavaScript } from "acorn-walk";
+import { JSDOM } from "jsdom";
 import { parse as parseHtml } from "parse5";
 import sharp from "sharp";
 import { validateCss } from "./release-css.mjs";
@@ -64,9 +65,7 @@ const sanitizedSvgPaths = new Set([
   "assets/icons/search.svg",
   "assets/icons/settings.svg",
 ]);
-const forbiddenSanitizedSvgMarkup = /<\?xml|<!doctype|https?:|<script/i;
-const forbiddenSanitizedSvgAttribute =
-  /(?:^|\s)(?:t|p-id|width|height|href|xmlns:xlink|xlink(?::[\w.-]+)?|on[\w:.-]*)\s*=/i;
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
 function assert(condition, message) {
   if (!condition) {
@@ -75,10 +74,49 @@ function assert(condition, message) {
 }
 
 function validateSanitizedSvg(svgPath, source) {
+  assert(!/^\s*<\?xml\b/.test(source), `forbidden SVG XML declaration in ${svgPath}`);
+
+  let document;
+  try {
+    document = new JSDOM(source, { contentType: "image/svg+xml" }).window.document;
+  } catch (cause) {
+    throw new Error(`invalid SVG content in ${svgPath}`, { cause });
+  }
+
+  const root = document.documentElement;
+  const documentNodes = Array.from(document.childNodes);
   assert(
-    !forbiddenSanitizedSvgMarkup.test(source) &&
-      !forbiddenSanitizedSvgAttribute.test(source),
-    `forbidden SVG content in ${svgPath}`,
+    documentNodes.every(
+      (node) => node === root || (node.nodeType === 3 && !node.textContent?.trim()),
+    ),
+    `forbidden SVG document node in ${svgPath}`,
+  );
+  assert(root.tagName === "svg" && root.namespaceURI === SVG_NAMESPACE, `SVG namespace is missing in ${svgPath}`);
+  assert(
+    JSON.stringify(root.getAttributeNames().sort()) === JSON.stringify(["viewBox", "xmlns"]),
+    `forbidden SVG root attribute in ${svgPath}`,
+  );
+  assert(root.getAttribute("xmlns") === SVG_NAMESPACE, `invalid SVG namespace in ${svgPath}`);
+  assert(Boolean(root.getAttribute("viewBox")?.trim()), `SVG viewBox is missing in ${svgPath}`);
+
+  const elements = Array.from(root.children);
+  const path = elements[0];
+  assert(
+    elements.length === 1 && path?.tagName === "path" && path.namespaceURI === SVG_NAMESPACE,
+    `forbidden SVG child in ${svgPath}`,
+  );
+  assert(
+    Array.from(root.childNodes).every(
+      (node) => node === path || (node.nodeType === 3 && !node.textContent?.trim()),
+    ),
+    `forbidden SVG child node in ${svgPath}`,
+  );
+  assert(
+    JSON.stringify(path.getAttributeNames()) === JSON.stringify(["d"]) &&
+      Boolean(path.getAttribute("d")?.trim()) &&
+      !/https?:/i.test(path.getAttribute("d") ?? "") &&
+      path.childNodes.length === 0,
+    `forbidden SVG path content in ${svgPath}`,
   );
 }
 

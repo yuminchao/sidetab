@@ -37,10 +37,14 @@ describe("local image assets", () => {
 
       expect(document.querySelector("parsererror")).toBeNull();
       expect(root.tagName).toBe("svg");
-      expect(Array.from(root.attributes, ({ name }) => name)).toEqual(["viewBox"]);
+      expect(root.namespaceURI).toBe("http://www.w3.org/2000/svg");
+      expect(Array.from(root.attributes, ({ name }) => name)).toEqual(["xmlns", "viewBox"]);
       expect(Array.from(root.children, ({ tagName }) => tagName)).toEqual(["path"]);
       expect(Array.from(path?.attributes ?? [], ({ name }) => name)).toEqual(["d"]);
-      expect(source).not.toMatch(/<\?xml|<!doctype|t=|p-id|width=|height=|xlink|https?:|<script|\son\w+=/i);
+      const sourceWithoutNamespace = source.replace(' xmlns="http://www.w3.org/2000/svg"', "");
+      expect(sourceWithoutNamespace).not.toMatch(
+        /<\?xml|<!doctype|t=|p-id|width=|height=|xlink|https?:|<script|\son\w+=/i,
+      );
     },
   );
 });
