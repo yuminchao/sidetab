@@ -5,7 +5,7 @@ import {
   type ShortcutSettings,
 } from "../src/sidepanel/shortcut-model";
 import { startSidebar, type SidebarDependencies } from "../src/sidepanel/sidebar";
-import { createFakeChrome, deferred, fakeTab } from "./helpers/fake-chrome";
+import { createFakeChrome, deferred, fakeGroup, fakeTab } from "./helpers/fake-chrome";
 
 function installFixture(): void {
   delete document.documentElement.dataset.ready;
@@ -41,13 +41,25 @@ function installFixture(): void {
         <button id="shortcut-cancel" data-action="cancel" type="button"></button>
         <button id="shortcut-save" type="submit"></button>
       </form>
+    </dialog>
+    <dialog id="tab-group-dialog">
+      <form id="tab-group-form">
+        <input id="tab-group-name" />
+        <input type="radio" name="tab-group-color" value="grey" checked />
+        <input type="radio" name="tab-group-color" value="blue" />
+        <p id="tab-group-error"></p>
+        <button id="tab-group-cancel" type="button"></button>
+        <button id="tab-group-create" type="submit"></button>
+      </form>
     </dialog>`;
-  const dialog = element<HTMLDialogElement>("shortcut-dialog");
-  dialog.showModal = vi.fn(() => dialog.setAttribute("open", ""));
-  dialog.close = vi.fn(() => {
-    dialog.removeAttribute("open");
-    dialog.dispatchEvent(new Event("close"));
-  });
+  for (const id of ["shortcut-dialog", "tab-group-dialog"]) {
+    const dialog = element<HTMLDialogElement>(id);
+    dialog.showModal = vi.fn(() => dialog.setAttribute("open", ""));
+    dialog.close = vi.fn(() => {
+      dialog.removeAttribute("open");
+      dialog.dispatchEvent(new Event("close"));
+    });
+  }
 }
 
 function element<T extends HTMLElement>(id: string): T {
@@ -57,9 +69,17 @@ function element<T extends HTMLElement>(id: string): T {
 }
 
 function rowIds(): number[] {
-  return Array.from(element("tab-list").children, (row) =>
+  return Array.from(element("tab-list").querySelectorAll(".tab-row"), (row) =>
     Number((row as HTMLElement).dataset.tabId),
   );
+}
+
+function groupRow(id: number): HTMLElement {
+  const match = element("tab-list").querySelector<HTMLElement>(
+    `.tab-group-row[data-group-id="${id}"]`,
+  );
+  if (!match) throw new Error(`missing group row ${id}`);
+  return match;
 }
 
 function row(id: number): HTMLElement {
@@ -133,6 +153,113 @@ describe("sidebar lifecycle", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.resetModules();
+  });
+
+  it("subscribes to tab and group events before starting both snapshot queries", async () => {
+    const tabs = deferred<chrome.tabs.Tab[]>();
+    const groups = deferred<chrome.tabGroups.TabGroup[]>();
+    const fake = createFakeChrome();
+    fake.methods.query.mockReturnValueOnce(tabs.promise);
+    fake.methods.groupQuery.mockReturnValueOnce(groups.promise);
+
+    const started = startSidebar(fake);
+    await vi.waitFor(() => {
+      expect(fake.methods.query).toHaveBeenCalledWith({ windowId: 10 });
+      expect(fake.methods.groupQuery).toHaveBeenCalledWith({ windowId: 10 });
+    });
+
+    for (const event of Object.values(fake.events)) expect(event.listenerCount).toBe(1);
+    for (const event of Object.values(fake.groupEvents)) expect(event.listenerCount).toBe(1);
+
+    fake.groupEvents.onCreated.emit(fakeGroup({ id: 7, title: "Buffered" }));
+    fake.events.onCreated.emit(fakeTab({ id: 2, index: 1, groupId: 7 }));
+    fake.groupEvents.onUpdated.emit(fakeGroup({ id: 7, title: "Latest" }));
+    tabs.resolve([fakeTab({ id: 1, index: 0 })]);
+    await flush();
+    expect(document.documentElement.dataset.ready).toBeUndefined();
+    groups.resolve([]);
+
+    const cleanup = await started;
+    expect(rowIds()).toEqual([1, 2]);
+    expect(groupRow(7).querySelector(".tab-group-title")?.textContent).toBe("Latest");
+    cleanup();
+  });
+
+  it("replays buffered tab updates over an older snapshot in receive order", async () => {
+    const tabs = deferred<chrome.tabs.Tab[]>();
+    const groups = deferred<chrome.tabGroups.TabGroup[]>();
+    const fake = createFakeChrome();
+    fake.methods.query.mockReturnValueOnce(tabs.promise);
+    fake.methods.groupQuery.mockReturnValueOnce(groups.promise);
+
+    const started = startSidebar(fake);
+    await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledOnce());
+
+    fake.events.onUpdated.emit(
+      1,
+      { title: "Buffered first" },
+      fakeTab({ id: 1, title: "Buffered first" }),
+    );
+    fake.events.onUpdated.emit(
+      1,
+      { title: "Buffered latest" },
+      fakeTab({ id: 1, title: "Buffered latest" }),
+    );
+    tabs.resolve([fakeTab({ id: 1, title: "Older snapshot" })]);
+    groups.resolve([]);
+
+    const cleanup = await started;
+    expect(row(1).querySelector(".tab-title")?.textContent).toBe("Buffered latest");
+    cleanup();
+  });
+
+  it("replays buffered group moves and removals into the final UI order", async () => {
+    const tabs = deferred<chrome.tabs.Tab[]>();
+    const groups = deferred<chrome.tabGroups.TabGroup[]>();
+    const fake = createFakeChrome();
+    fake.methods.query.mockReturnValueOnce(tabs.promise);
+    fake.methods.groupQuery.mockReturnValueOnce(groups.promise);
+
+    const started = startSidebar(fake);
+    await vi.waitFor(() => expect(fake.methods.groupQuery).toHaveBeenCalledOnce());
+
+    fake.groupEvents.onMoved.emit(fakeGroup({ id: 8, title: "Moved latest" }));
+    fake.events.onMoved.emit(2, { windowId: 10, fromIndex: 1, toIndex: 0 });
+    fake.groupEvents.onRemoved.emit(fakeGroup({ id: 7, title: "Removed" }));
+    tabs.resolve([
+      fakeTab({ id: 1, index: 0, groupId: 7, title: "One" }),
+      fakeTab({ id: 2, index: 1, groupId: 8, title: "Two" }),
+      fakeTab({ id: 3, index: 2, groupId: -1, title: "Three" }),
+    ]);
+    groups.resolve([
+      fakeGroup({ id: 7, title: "Older seven" }),
+      fakeGroup({ id: 8, title: "Older eight" }),
+    ]);
+
+    const cleanup = await started;
+    const itemOrder = Array.from(element("tab-list").children, (item) => {
+      const row = item as HTMLElement;
+      return row.dataset.groupId === undefined
+        ? `tab:${row.dataset.tabId}`
+        : `group:${row.dataset.groupId}`;
+    });
+    expect(itemOrder).toEqual(["group:8", "tab:2", "tab:1", "tab:3"]);
+    expect(groupRow(8).querySelector(".tab-group-title")?.textContent).toBe("Moved latest");
+    expect(document.querySelector(".tab-group-row[data-group-id='7']")).toBeNull();
+    cleanup();
+  });
+
+  it("keeps tabs usable and reports a group snapshot failure", async () => {
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 8 })] });
+    fake.methods.groupQuery.mockRejectedValueOnce(new Error("groups failed"));
+
+    const cleanup = await startSidebar(fake);
+
+    expect(rowIds()).toEqual([8]);
+    expect(element("status-message").textContent).toBe("无法读取当前窗口的标签分组");
+    expect(fake.events.onCreated.listenerCount).toBe(1);
+    expect(fake.groupEvents.onCreated.listenerCount).toBe(1);
+    cleanup();
   });
 
   it("loads the current window and shortcuts with exact arguments and renders initial state", async () => {
@@ -486,6 +613,34 @@ describe("sidebar lifecycle", () => {
     const cleanup = await started;
     expect(rowIds()).toEqual([1, 2]);
     expect(replaceChildren).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it("does not strand a nested microtask event when startup buffering closes", async () => {
+    const tabs = deferred<chrome.tabs.Tab[]>();
+    const groups = deferred<chrome.tabGroups.TabGroup[]>();
+    const attached = deferred<chrome.tabs.Tab>();
+    const fake = createFakeChrome();
+    fake.methods.query.mockReturnValueOnce(tabs.promise);
+    fake.methods.groupQuery.mockReturnValueOnce(groups.promise);
+    fake.methods.get.mockReturnValueOnce(attached.promise);
+
+    const started = startSidebar(fake);
+    await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledOnce());
+    fake.events.onAttached.emit(3, { newWindowId: 10, newPosition: 1 });
+    await vi.waitFor(() => expect(fake.methods.get).toHaveBeenCalledWith(3));
+    void attached.promise.then(() => {
+      queueMicrotask(() => fake.groupEvents.onRemoved.emit(fakeGroup({ id: 7 })));
+    });
+    tabs.resolve([fakeTab({ id: 1, index: 0, groupId: 7 })]);
+    groups.resolve([fakeGroup({ id: 7 })]);
+    await flush();
+    attached.resolve(fakeTab({ id: 3, index: 1, groupId: -1 }));
+
+    const cleanup = await started;
+    await flush();
+    expect(document.querySelector(".tab-group-row[data-group-id='7']")).toBeNull();
+    expect(rowIds()).toEqual([1, 3]);
     cleanup();
   });
 
@@ -1036,6 +1191,406 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
+  it("renders grouped tabs and patches metadata without rebuilding the list", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, groupId: 7, title: "Grouped" }),
+        fakeTab({ id: 2, index: 1, groupId: -1, title: "Loose" }),
+      ],
+      groups: [fakeGroup({ id: 7, title: "Work", color: "blue" })],
+    });
+    const cleanup = await startSidebar(fake);
+    const originalGroup = groupRow(7);
+    const originalGroupedTab = row(1);
+
+    fake.groupEvents.onUpdated.emit(fakeGroup({ id: 7, title: "Renamed", color: "red" }));
+
+    expect(groupRow(7)).toBe(originalGroup);
+    expect(row(1)).toBe(originalGroupedTab);
+    expect(groupRow(7).querySelector(".tab-group-title")?.textContent).toBe("Renamed");
+    expect(groupRow(7).querySelector<HTMLElement>(".tab-group-color")?.dataset.color).toBe("red");
+
+    fake.groupEvents.onUpdated.emit(fakeGroup({ id: 7, title: "Renamed", collapsed: true }));
+    expect(groupRow(7)).not.toBe(originalGroup);
+    expect(rowIds()).toEqual([2]);
+    cleanup();
+  });
+
+  it("opens the group dialog from the context menu and retries only partial metadata creation", async () => {
+    const resyncTabs = deferred<chrome.tabs.Tab[]>();
+    const resyncGroups = deferred<chrome.tabGroups.TabGroup[]>();
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 4, groupId: -1 })] });
+    fake.methods.groupUpdate.mockRejectedValueOnce(new Error("metadata failed"));
+    const cleanup = await startSidebar(fake);
+    fake.methods.query.mockReturnValueOnce(resyncTabs.promise);
+    fake.methods.groupQuery.mockReturnValueOnce(resyncGroups.promise);
+
+    openTabContextMenu(4);
+    click(contextMenuItem("add-to-group"));
+    click(document.querySelector(".tab-context-submenu [data-menu-action='create-group']")!);
+    const dialog = element<HTMLDialogElement>("tab-group-dialog");
+    const form = element<HTMLFormElement>("tab-group-form");
+    element<HTMLInputElement>("tab-group-name").value = "Project";
+    document.querySelector<HTMLInputElement>(
+      "#tab-group-dialog input[name='tab-group-color'][value='blue']",
+    )!.checked = true;
+
+    form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(element("tab-group-error").textContent).toContain("分组已创建"));
+    expect(dialog.open).toBe(true);
+    expect(fake.methods.group).toHaveBeenCalledOnce();
+    expect(fake.methods.query).toHaveBeenCalledTimes(2);
+    expect(fake.methods.groupQuery).toHaveBeenCalledTimes(2);
+
+    form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(dialog.open).toBe(false));
+    expect(fake.methods.group).toHaveBeenCalledOnce();
+    expect(fake.methods.groupUpdate).toHaveBeenCalledTimes(2);
+    expect(fake.methods.groupUpdate).toHaveBeenLastCalledWith(777, {
+      title: "Project",
+      color: "blue",
+    });
+    cleanup();
+  });
+
+  it("keeps live group metadata when a partial-create retry beats an older resync", async () => {
+    const resyncTabs = deferred<chrome.tabs.Tab[]>();
+    const resyncGroups = deferred<chrome.tabGroups.TabGroup[]>();
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 4, groupId: -1 })] });
+    fake.methods.groupUpdate.mockRejectedValueOnce(new Error("metadata failed"));
+    const cleanup = await startSidebar(fake);
+    fake.methods.query.mockReturnValueOnce(resyncTabs.promise);
+    fake.methods.groupQuery.mockReturnValueOnce(resyncGroups.promise);
+
+    openTabContextMenu(4);
+    click(contextMenuItem("add-to-group"));
+    click(document.querySelector(".tab-context-submenu [data-menu-action='create-group']")!);
+    const dialog = element<HTMLDialogElement>("tab-group-dialog");
+    const form = element<HTMLFormElement>("tab-group-form");
+    element<HTMLInputElement>("tab-group-name").value = "Project";
+    document.querySelector<HTMLInputElement>(
+      "#tab-group-dialog input[name='tab-group-color'][value='blue']",
+    )!.checked = true;
+
+    form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => {
+      expect(element("tab-group-error").textContent).toContain("分组已创建");
+      expect(fake.methods.query).toHaveBeenCalledTimes(2);
+      expect(fake.methods.groupQuery).toHaveBeenCalledTimes(2);
+    });
+
+    form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(dialog.open).toBe(false));
+    fake.groupEvents.onUpdated.emit(fakeGroup({ id: 777, title: "Project", color: "blue" }));
+    resyncTabs.resolve([fakeTab({ id: 4, groupId: 777 })]);
+    resyncGroups.resolve([fakeGroup({ id: 777, title: "Older metadata", color: "grey" })]);
+
+    await vi.waitFor(() => expect(groupRow(777).querySelector(".tab-group-title")?.textContent).toBe("Project"));
+    expect(groupRow(777).querySelector<HTMLElement>(".tab-group-color")?.dataset.color).toBe("blue");
+    expect(fake.methods.group).toHaveBeenCalledOnce();
+    expect(fake.methods.groupUpdate).toHaveBeenCalledTimes(2);
+    cleanup();
+  });
+
+  it("replays tab and group events over successful resync snapshots in receive order", async () => {
+    const resyncTabs = deferred<chrome.tabs.Tab[]>();
+    const resyncGroups = deferred<chrome.tabGroups.TabGroup[]>();
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, groupId: -1, title: "One" }),
+        fakeTab({ id: 2, index: 1, groupId: 7, title: "Two" }),
+      ],
+      groups: [fakeGroup({ id: 7, title: "Initial" })],
+    });
+    const cleanup = await startSidebar(fake);
+    const replaceChildren = vi.spyOn(element("tab-list"), "replaceChildren");
+    fake.methods.query.mockReturnValueOnce(resyncTabs.promise);
+    fake.methods.groupQuery.mockReturnValueOnce(resyncGroups.promise);
+    fake.methods.group.mockRejectedValueOnce(new Error("add failed"));
+
+    openTabContextMenu(1);
+    click(contextMenuItem("add-to-group"));
+    click(document.querySelector(".tab-context-submenu [data-group-id='7']")!);
+    await vi.waitFor(() => {
+      expect(fake.methods.query).toHaveBeenCalledTimes(2);
+      expect(fake.methods.groupQuery).toHaveBeenCalledTimes(2);
+    });
+
+    fake.events.onUpdated.emit(
+      2,
+      { title: "Live title" },
+      fakeTab({ id: 2, index: 1, groupId: 7, title: "Live title" }),
+    );
+    fake.groupEvents.onUpdated.emit(fakeGroup({ id: 7, title: "Live first" }));
+    fake.events.onMoved.emit(2, { windowId: 10, fromIndex: 1, toIndex: 0 });
+    fake.groupEvents.onUpdated.emit(fakeGroup({ id: 7, title: "Live latest" }));
+    const rendersBeforeSnapshot = replaceChildren.mock.calls.length;
+    resyncTabs.resolve([
+      fakeTab({ id: 1, index: 0, groupId: -1, title: "One" }),
+      fakeTab({ id: 2, index: 1, groupId: 7, title: "Older title" }),
+    ]);
+    resyncGroups.resolve([fakeGroup({ id: 7, title: "Older group" })]);
+
+    await vi.waitFor(() => {
+      expect(replaceChildren.mock.calls.length).toBeGreaterThan(rendersBeforeSnapshot);
+    });
+    expect(rowIds()).toEqual([2, 1]);
+    expect(row(2).querySelector(".tab-title")?.textContent).toBe("Live title");
+    expect(groupRow(7).querySelector(".tab-group-title")?.textContent).toBe("Live latest");
+    expect(fake.methods.query).toHaveBeenCalledTimes(2);
+    expect(fake.methods.groupQuery).toHaveBeenCalledTimes(2);
+    cleanup();
+  });
+
+  it.each(["success", "failure"] as const)(
+    "does not strand a nested group removal when a %s resync closes buffering",
+    async (result) => {
+      const resyncTabs = deferred<chrome.tabs.Tab[]>();
+      const resyncGroups = deferred<chrome.tabGroups.TabGroup[]>();
+      const attached = deferred<chrome.tabs.Tab>();
+      const fake = createFakeChrome({
+        tabs: [
+          fakeTab({ id: 1, index: 0, groupId: -1 }),
+          fakeTab({ id: 2, index: 1, groupId: 7 }),
+        ],
+        groups: [fakeGroup({ id: 7 })],
+      });
+      const cleanup = await startSidebar(fake);
+      fake.methods.query.mockReturnValueOnce(resyncTabs.promise);
+      fake.methods.groupQuery.mockReturnValueOnce(resyncGroups.promise);
+      fake.methods.get.mockReturnValueOnce(attached.promise);
+      fake.methods.group.mockRejectedValueOnce(new Error("add failed"));
+
+      openTabContextMenu(1);
+      click(contextMenuItem("add-to-group"));
+      click(document.querySelector(".tab-context-submenu [data-group-id='7']")!);
+      await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledTimes(2));
+      fake.events.onAttached.emit(3, { newWindowId: 10, newPosition: 2 });
+      await vi.waitFor(() => expect(fake.methods.get).toHaveBeenCalledWith(3));
+      void attached.promise.then(() => {
+        queueMicrotask(() => fake.groupEvents.onRemoved.emit(fakeGroup({ id: 7 })));
+      });
+
+      if (result === "success") {
+        resyncTabs.resolve([
+          fakeTab({ id: 1, index: 0, groupId: -1 }),
+          fakeTab({ id: 2, index: 1, groupId: 7 }),
+        ]);
+      } else {
+        resyncTabs.reject(new Error("resync failed"));
+      }
+      resyncGroups.resolve([fakeGroup({ id: 7 })]);
+      await flush();
+      attached.resolve(fakeTab({ id: 3, index: 2, groupId: -1 }));
+
+      await vi.waitFor(() => {
+        expect(document.querySelector(".tab-group-row[data-group-id='7']")).toBeNull();
+      });
+      expect(rowIds()).toEqual([1, 2, 3]);
+      cleanup();
+    },
+  );
+
+  it("queues one follow-up resync during replay and merges requests during its query", async () => {
+    const firstTabs = deferred<chrome.tabs.Tab[]>();
+    const firstGroups = deferred<chrome.tabGroups.TabGroup[]>();
+    const secondTabs = deferred<chrome.tabs.Tab[]>();
+    const secondGroups = deferred<chrome.tabGroups.TabGroup[]>();
+    const attached = deferred<chrome.tabs.Tab>();
+    const snapshotRead = vi.fn();
+    const firstSnapshotTab = fakeTab({ id: 1, index: 0, groupId: -1 });
+    Object.defineProperty(firstSnapshotTab, "title", {
+      configurable: true,
+      get() {
+        snapshotRead();
+        return "First snapshot";
+      },
+    });
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, groupId: -1 }),
+        fakeTab({ id: 2, index: 1, groupId: 7 }),
+        fakeTab({ id: 3, index: 2, groupId: 8 }),
+      ],
+      groups: [fakeGroup({ id: 7 }), fakeGroup({ id: 8, title: "Other" })],
+    });
+    const cleanup = await startSidebar(fake);
+    fake.methods.query
+      .mockReturnValueOnce(firstTabs.promise)
+      .mockReturnValueOnce(secondTabs.promise);
+    fake.methods.groupQuery
+      .mockReturnValueOnce(firstGroups.promise)
+      .mockReturnValueOnce(secondGroups.promise);
+    fake.methods.get.mockReturnValueOnce(attached.promise);
+    fake.methods.group.mockRejectedValueOnce(new Error("first failure"));
+    fake.methods.ungroup
+      .mockRejectedValueOnce(new Error("queued failure"))
+      .mockRejectedValueOnce(new Error("merged failure"));
+
+    openTabContextMenu(1);
+    click(contextMenuItem("add-to-group"));
+    click(document.querySelector(".tab-context-submenu [data-group-id='7']")!);
+    await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledTimes(2));
+    fake.events.onAttached.emit(4, { newWindowId: 10, newPosition: 3 });
+    await vi.waitFor(() => expect(fake.methods.get).toHaveBeenCalledWith(4));
+    firstTabs.resolve([
+      firstSnapshotTab,
+      fakeTab({ id: 2, index: 1, groupId: 7 }),
+      fakeTab({ id: 3, index: 2, groupId: 8 }),
+    ]);
+    firstGroups.resolve([fakeGroup({ id: 7 }), fakeGroup({ id: 8, title: "Other" })]);
+    await vi.waitFor(() => expect(snapshotRead).toHaveBeenCalled());
+
+    openTabContextMenu(2);
+    click(contextMenuItem("remove-from-group"));
+    await flush();
+    expect(fake.methods.query).toHaveBeenCalledTimes(2);
+    attached.resolve(fakeTab({ id: 4, index: 3, groupId: -1 }));
+
+    await vi.waitFor(() => {
+      expect(fake.methods.query).toHaveBeenCalledTimes(3);
+      expect(fake.methods.groupQuery).toHaveBeenCalledTimes(3);
+    });
+    openTabContextMenu(3);
+    click(contextMenuItem("remove-from-group"));
+    await flush();
+    expect(fake.methods.query).toHaveBeenCalledTimes(3);
+    expect(fake.methods.groupQuery).toHaveBeenCalledTimes(3);
+
+    secondTabs.resolve([
+      fakeTab({ id: 1, index: 0, groupId: -1, title: "Second snapshot" }),
+      fakeTab({ id: 2, index: 1, groupId: 7 }),
+      fakeTab({ id: 3, index: 2, groupId: 8 }),
+      fakeTab({ id: 4, index: 3, groupId: -1 }),
+    ]);
+    secondGroups.resolve([fakeGroup({ id: 7 }), fakeGroup({ id: 8, title: "Other" })]);
+    await vi.waitFor(() => {
+      expect(row(1).querySelector(".tab-title")?.textContent).toBe("Second snapshot");
+    });
+    expect(fake.methods.query).toHaveBeenCalledTimes(3);
+    expect(fake.methods.groupQuery).toHaveBeenCalledTimes(3);
+    cleanup();
+  });
+
+  it("deduplicates pending group commands and toggles from the latest store state", async () => {
+    const pendingAdd = deferred<number>();
+    const pendingToggle = deferred<chrome.tabGroups.TabGroup | undefined>();
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 5, index: 0, groupId: -1 }),
+        fakeTab({ id: 6, index: 1, groupId: 7 }),
+      ],
+      groups: [fakeGroup({ id: 7, collapsed: false })],
+    });
+    fake.methods.group.mockReturnValueOnce(pendingAdd.promise);
+    fake.methods.groupUpdate.mockReturnValueOnce(pendingToggle.promise);
+    const cleanup = await startSidebar(fake);
+
+    const addToExisting = (): void => {
+      openTabContextMenu(5);
+      click(contextMenuItem("add-to-group"));
+      click(document.querySelector(".tab-context-submenu [data-group-id='7']")!);
+    };
+    addToExisting();
+    addToExisting();
+    expect(fake.methods.group).toHaveBeenCalledOnce();
+
+    click(groupRow(7).querySelector("[data-action='toggle-group']")!);
+    click(groupRow(7).querySelector("[data-action='toggle-group']")!);
+    expect(fake.methods.groupUpdate).toHaveBeenCalledOnce();
+    expect(fake.methods.groupUpdate).toHaveBeenCalledWith(7, { collapsed: true });
+
+    pendingAdd.resolve(7);
+    pendingToggle.resolve(fakeGroup({ id: 7, collapsed: true }));
+    await flush();
+    cleanup();
+  });
+
+  it("uses one resync for concurrent group failures and does not retry a failed resync", async () => {
+    const resyncTabs = deferred<chrome.tabs.Tab[]>();
+    const resyncGroups = deferred<chrome.tabGroups.TabGroup[]>();
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, groupId: -1 }),
+        fakeTab({ id: 2, index: 1, groupId: 7 }),
+      ],
+      groups: [fakeGroup({ id: 7 })],
+    });
+    const cleanup = await startSidebar(fake);
+    fake.methods.query.mockReturnValueOnce(resyncTabs.promise);
+    fake.methods.groupQuery.mockReturnValueOnce(resyncGroups.promise);
+    fake.methods.group.mockRejectedValueOnce(new Error("add failed"));
+    fake.methods.ungroup.mockRejectedValueOnce(new Error("remove failed"));
+
+    openTabContextMenu(1);
+    click(contextMenuItem("add-to-group"));
+    click(document.querySelector(".tab-context-submenu [data-group-id='7']")!);
+    openTabContextMenu(2);
+    click(contextMenuItem("remove-from-group"));
+
+    await vi.waitFor(() => {
+      expect(fake.methods.query).toHaveBeenCalledTimes(2);
+      expect(fake.methods.groupQuery).toHaveBeenCalledTimes(2);
+    });
+    fake.events.onUpdated.emit(
+      1,
+      { title: "Live after failure" },
+      fakeTab({ id: 1, index: 0, groupId: -1, title: "Live after failure" }),
+    );
+    fake.groupEvents.onUpdated.emit(fakeGroup({ id: 7, title: "Live group after failure" }));
+    resyncTabs.reject(new Error("resync failed"));
+    resyncGroups.resolve([fakeGroup({ id: 7 })]);
+    await flush();
+
+    expect(fake.methods.query).toHaveBeenCalledTimes(2);
+    expect(fake.methods.groupQuery).toHaveBeenCalledTimes(2);
+    expect(rowIds()).toEqual([1, 2]);
+    await vi.waitFor(() => {
+      expect(row(1).querySelector(".tab-title")?.textContent).toBe("Live after failure");
+      expect(groupRow(7).querySelector(".tab-group-title")?.textContent).toBe("Live group after failure");
+    });
+    cleanup();
+  });
+
+  it("closes a tab on middle click and removes the handler during cleanup", async () => {
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 12 })] });
+    const cleanup = await startSidebar(fake);
+    const target = row(12).querySelector(".tab-title")!;
+
+    target.dispatchEvent(new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 }));
+    await flush();
+    expect(fake.methods.remove).toHaveBeenCalledOnce();
+    expect(fake.methods.remove).toHaveBeenCalledWith(12);
+
+    cleanup();
+    target.dispatchEvent(new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 }));
+    expect(fake.methods.remove).toHaveBeenCalledOnce();
+  });
+
+  it("resyncs once when a cross-group drag fails", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, groupId: -1 }),
+        fakeTab({ id: 2, index: 1, groupId: 7 }),
+      ],
+      groups: [fakeGroup({ id: 7 })],
+    });
+    const cleanup = await startSidebar(fake);
+    fake.methods.group.mockRejectedValueOnce(new Error("drag group failed"));
+
+    row(1).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
+    groupRow(7).dispatchEvent(new Event("dragover", { bubbles: true, cancelable: true }));
+    groupRow(7).dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(fake.methods.query).toHaveBeenCalledTimes(2);
+      expect(fake.methods.groupQuery).toHaveBeenCalledTimes(2);
+    });
+    expect(fake.methods.group).toHaveBeenCalledOnce();
+    expect(fake.methods.move).not.toHaveBeenCalled();
+    cleanup();
+  });
+
   it("submits one cross-group reorder and keeps dragging enabled during history search", async () => {
     const pendingMove = deferred<chrome.tabs.Tab>();
     const fake = createFakeChrome({
@@ -1253,6 +1808,49 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.remove).not.toHaveBeenCalled();
     expect(fake.methods.historySearch).not.toHaveBeenCalled();
     for (const event of Object.values(fake.events)) expect(event.listenerCount).toBe(0);
+    for (const event of Object.values(fake.groupEvents)) expect(event.listenerCount).toBe(0);
+  });
+
+  it("destroys the context menu, group dialog, and active drag state during cleanup", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, groupId: -1 }),
+        fakeTab({ id: 2, index: 1, groupId: 7 }),
+      ],
+      groups: [fakeGroup({ id: 7 })],
+    });
+    const cleanup = await startSidebar(fake);
+    const form = element<HTMLFormElement>("tab-group-form");
+    const dialog = element<HTMLDialogElement>("tab-group-dialog");
+    const formRemove = vi.spyOn(form, "removeEventListener");
+    const dialogRemove = vi.spyOn(dialog, "removeEventListener");
+
+    openTabContextMenu(1);
+    click(contextMenuItem("add-to-group"));
+    click(document.querySelector(".tab-context-submenu [data-menu-action='create-group']")!);
+    expect(dialog.open).toBe(true);
+
+    const source = row(1);
+    const target = groupRow(7);
+    source.dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
+    target.dispatchEvent(new Event("dragover", { bubbles: true, cancelable: true }));
+    expect(source.dataset.dragSource).toBe("true");
+    expect(target.dataset.dropTarget).toBe("true");
+
+    cleanup();
+
+    expect(document.querySelector(".tab-context-menu")).toBeNull();
+    expect(dialog.open).toBe(false);
+    expect(formRemove).toHaveBeenCalledWith("submit", expect.any(Function));
+    expect(dialogRemove).toHaveBeenCalledWith("cancel", expect.any(Function));
+    expect(dialogRemove).toHaveBeenCalledWith("close", expect.any(Function));
+    expect(source.hasAttribute("data-drag-source")).toBe(false);
+    expect(target.hasAttribute("data-drop-target")).toBe(false);
+
+    source.dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
+    target.dispatchEvent(new Event("dragover", { bubbles: true, cancelable: true }));
+    target.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
+    expect(fake.methods.group).not.toHaveBeenCalled();
   });
 
   it("auto entry invalidates deferred initialization when pagehide happens before startup resolves", async () => {
@@ -1263,6 +1861,7 @@ describe("sidebar lifecycle", () => {
     fake.methods.storageGet.mockReturnValueOnce(storage.promise);
     vi.stubGlobal("chrome", {
       tabs: fake.tabs,
+      tabGroups: fake.tabGroups,
       windows: fake.windows,
       history: fake.history,
       storage: { local: fake.storage },
@@ -1290,6 +1889,7 @@ describe("sidebar lifecycle", () => {
     fake.methods.query.mockReturnValueOnce(query.promise);
     vi.stubGlobal("chrome", {
       tabs: fake.tabs,
+      tabGroups: fake.tabGroups,
       windows: fake.windows,
       history: fake.history,
       storage: { local: fake.storage },
@@ -1315,6 +1915,7 @@ describe("sidebar lifecycle", () => {
     const abort = vi.spyOn(AbortController.prototype, "abort");
     vi.stubGlobal("chrome", {
       tabs: fake.tabs,
+      tabGroups: fake.tabGroups,
       windows: fake.windows,
       history: fake.history,
       storage: { local: fake.storage },
@@ -1339,6 +1940,7 @@ describe("sidebar lifecycle", () => {
     const removeEventListener = vi.spyOn(window, "removeEventListener");
     vi.stubGlobal("chrome", {
       tabs: fake.tabs,
+      tabGroups: fake.tabGroups,
       windows: fake.windows,
       history: fake.history,
       storage: { local: fake.storage },
@@ -1363,6 +1965,12 @@ describe("sidebar lifecycle", () => {
     "shortcut-cancel",
     "shortcut-save",
     "tab-title-font-size",
+    "tab-group-dialog",
+    "tab-group-form",
+    "tab-group-name",
+    "tab-group-error",
+    "tab-group-cancel",
+    "tab-group-create",
   ])("rejects a missing required element with its id: %s", async (id) => {
     element(id).remove();
     const fake = createFakeChrome();
@@ -1373,6 +1981,7 @@ describe("sidebar lifecycle", () => {
   it("accepts the real Chrome API dependency shapes at compile time", () => {
     type RealChromeDependencies = {
       tabs: typeof chrome.tabs;
+      tabGroups: typeof chrome.tabGroups;
       windows: typeof chrome.windows;
       history: typeof chrome.history;
       storage: typeof chrome.storage.local;

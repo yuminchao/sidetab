@@ -12,12 +12,19 @@ import { getClosableTabsBelow } from "./tab-close-model";
 import { createTabContextMenu } from "./tab-context-menu";
 import { createTabDragController } from "./tab-drag-controller";
 import { subscribeToTabEvents } from "./tab-events";
+import { createTabGroupActions } from "./tab-group-actions";
+import { createTabGroupDialog } from "./tab-group-dialog";
+import { subscribeToTabGroupEvents } from "./tab-group-events";
+import { TabGroupStore } from "./tab-group-store";
+import { buildTabListItems } from "./tab-list-model";
+import { createTabMiddleClickController } from "./tab-middle-click";
 import { createTabReorderPlan } from "./tab-reorder-model";
 import { createTabRenderer } from "./tab-renderer";
 import { TabStore } from "./tab-store";
 
 export type SidebarDependencies = {
   tabs: typeof chrome.tabs;
+  tabGroups: typeof chrome.tabGroups;
   windows: Pick<typeof chrome.windows, "getCurrent">;
   storage: StorageArea;
   history: HistorySearchApi;
@@ -47,6 +54,13 @@ type SidebarElements = {
   shortcutReset: HTMLButtonElement;
   shortcutCancel: HTMLButtonElement;
   shortcutSave: HTMLButtonElement;
+  groupDialog: HTMLDialogElement;
+  groupForm: HTMLFormElement;
+  groupName: HTMLInputElement;
+  groupColors: HTMLInputElement[];
+  groupError: HTMLElement;
+  groupCancel: HTMLButtonElement;
+  groupCreate: HTMLButtonElement;
 };
 
 export function startSidebar(deps: SidebarDependencies): Promise<() => void> {
@@ -59,14 +73,18 @@ async function startSidebarInternal(
 ): Promise<() => void> {
   const elements = getSidebarElements(deps.document);
   const tabStore = new TabStore();
+  const groupStore = new TabGroupStore();
   const tabActions = createTabActions(deps.tabs);
+  const groupActions = createTabGroupActions(deps.tabs, deps.tabGroups);
   const shortcutStore = createShortcutStore(deps.storage);
   const shortcutActions = createShortcutActions(deps.tabs);
   const tabRenderer = createTabRenderer({ list: elements.list, empty: elements.empty });
   let active = true;
+  let currentWindowId: number | undefined;
   let unsubscribeTabs: () => void = () => undefined;
-  let bufferingTabEvents = false;
-  const bufferedTabEvents: Array<Promise<() => void>> = [];
+  let unsubscribeGroups: () => void = () => undefined;
+  let bufferingEvents = false;
+  const bufferedEvents: Array<Promise<() => void>> = [];
   type AttachedSlot = { resolve(mutation: () => void): void };
   const attachedSlotsById = new Map<number, AttachedSlot[]>();
   const pendingAttachedSlots = new Set<AttachedSlot>();
@@ -74,10 +92,17 @@ async function startSidebarInternal(
   let shortcutSettingsReady = false;
   let operationGeneration = 0;
   let reorderBusy = false;
+  type ResyncPhase = "idle" | "querying" | "replaying";
+  let resyncPhase: ResyncPhase = "idle";
+  let resyncFollowUpRequested = false;
+  let resyncPromise: Promise<void> | undefined;
   let addShortcutBusy = false;
   let appearanceSettingsBusy = false;
+  const groupTabBusy = new Set<number>();
+  const groupToggleBusy = new Set<number>();
   const statusSlots = {
     tabs: "",
+    groups: "",
     shortcuts: "",
     operation: "",
   };
@@ -87,13 +112,18 @@ async function startSidebarInternal(
       statusSlots[source] = message;
       elements.status.textContent = [
         statusSlots.tabs,
+        statusSlots.groups,
         statusSlots.shortcuts,
         statusSlots.operation,
       ].filter(Boolean).join("；");
     }
   };
 
-  const runTabOperation = (operation: Promise<void>, onSettled?: () => void): void => {
+  const runTabOperation = (
+    operation: Promise<void>,
+    onSettled?: () => void,
+    onRejected?: () => void,
+  ): void => {
     const generation = ++operationGeneration;
     void operation.then(
       () => {
@@ -103,6 +133,7 @@ async function startSidebarInternal(
         if (generation === operationGeneration) {
           setStatus("operation", error instanceof Error ? error.message : "标签页操作失败");
         }
+        onRejected?.();
       },
     ).finally(onSettled);
   };
@@ -122,6 +153,26 @@ async function startSidebarInternal(
     }
     pendingAttachedSlots.clear();
     attachedSlotsById.clear();
+  };
+
+  const finishBufferedEvents = async (): Promise<boolean> => {
+    let replayed = false;
+    while (active) {
+      const pending = bufferedEvents.shift();
+      if (!pending) {
+        bufferingEvents = false;
+        return replayed;
+      }
+      const apply = await pending;
+      if (!active) return replayed;
+      apply();
+      replayed = true;
+    }
+    return replayed;
+  };
+
+  const renderTabList = (): void => {
+    tabRenderer.render(buildTabListItems(tabStore.list(), groupStore.list()));
   };
 
   const shortcutRenderer = createShortcutRenderer(
@@ -186,6 +237,108 @@ async function startSidebarInternal(
     }
   };
 
+  const resyncTabsAndGroups = (): Promise<void> => {
+    if (resyncPromise) {
+      if (resyncPhase === "replaying") {
+        resyncFollowUpRequested = true;
+      }
+      return resyncPromise;
+    }
+    if (!active || currentWindowId === undefined) return Promise.resolve();
+    const windowId = currentWindowId;
+    let operation!: Promise<void>;
+    operation = (async (): Promise<void> => {
+      try {
+        do {
+          resyncFollowUpRequested = false;
+          resyncPhase = "querying";
+          bufferingEvents = true;
+          let snapshotApplied = false;
+          try {
+            const [tabs, groups] = await Promise.all([
+              deps.tabs.query({ windowId }),
+              deps.tabGroups.query({ windowId }),
+            ]);
+            if (!active || currentWindowId !== windowId) break;
+            tabStore.initialize(tabs);
+            groupStore.initialize(groups, windowId);
+            setStatus("groups", "");
+            snapshotApplied = true;
+          } catch {
+            // A resync is best-effort; retaining the last coherent view avoids retry loops.
+          }
+          if (!active || currentWindowId !== windowId) break;
+          resyncPhase = "replaying";
+          const replayed = await finishBufferedEvents();
+          if (!active || currentWindowId !== windowId) break;
+          if (snapshotApplied || replayed) {
+            syncShortcutFavicons();
+            renderTabList();
+          }
+        } while (resyncFollowUpRequested);
+      } finally {
+        resyncPhase = "idle";
+        resyncFollowUpRequested = false;
+        if (resyncPromise === operation) resyncPromise = undefined;
+      }
+    })();
+    resyncPromise = operation;
+    return operation;
+  };
+
+  const runGroupOperation = (tabId: number, start: () => Promise<void>): void => {
+    if (groupTabBusy.has(tabId)) return;
+    groupTabBusy.add(tabId);
+    runTabOperation(
+      start(),
+      () => groupTabBusy.delete(tabId),
+      () => { void resyncTabsAndGroups(); },
+    );
+  };
+
+  const groupDialog = createTabGroupDialog(
+    {
+      dialog: elements.groupDialog,
+      form: elements.groupForm,
+      name: elements.groupName,
+      colors: elements.groupColors,
+      error: elements.groupError,
+      cancel: elements.groupCancel,
+      create: elements.groupCreate,
+    },
+    {
+      async onCreate(draft) {
+        try {
+          const groupId = await groupActions.create(draft);
+          setStatus("operation", "");
+          return groupId;
+        } catch (error) {
+          if (active) {
+            setStatus("operation", error instanceof Error ? error.message : "无法创建标签组");
+            void resyncTabsAndGroups();
+          }
+          throw error;
+        }
+      },
+      async onUpdateCreated(draft) {
+        try {
+          await groupActions.updateCreated(
+            draft.createdGroupId!,
+            draft.title,
+            draft.color,
+          );
+          setStatus("operation", "");
+        } catch (error) {
+          if (active) {
+            setStatus("operation", error instanceof Error ? error.message : "无法更新标签组");
+            void resyncTabsAndGroups();
+          }
+          throw error;
+        }
+      },
+    },
+  );
+
   const addTabShortcut = async (tabId: number): Promise<void> => {
     if (addShortcutBusy) return;
     addShortcutBusy = true;
@@ -224,6 +377,7 @@ async function startSidebarInternal(
     { document: deps.document, list: elements.list, viewport: deps.document.defaultView! },
     {
       getTab: (id) => tabStore.list().find((tab) => tab.id === id),
+      getGroups: () => groupStore.list(),
       canCloseBelow: (id) => getClosableTabsBelow(tabStore.list(), id).length > 0,
       onCommand(command) {
         if (command.action === "add-shortcut") {
@@ -235,10 +389,26 @@ async function startSidebarInternal(
           runTabOperation(tabActions.closeMany(tabIds));
           return;
         }
-        const operation = command.action === "duplicate"
-          ? tabActions.duplicate(command.tabId)
-          : tabActions.setPinned(command.tabId, command.pinned);
-        runTabOperation(operation);
+        if (command.action === "create-group") {
+          if (currentWindowId !== undefined) {
+            groupDialog.open(command.tabId, currentWindowId);
+          }
+          return;
+        }
+        if (command.action === "add-to-group") {
+          runGroupOperation(command.tabId, () =>
+            groupActions.add(command.tabId, command.groupId));
+          return;
+        }
+        if (command.action === "remove-from-group") {
+          runGroupOperation(command.tabId, () => groupActions.remove(command.tabId));
+          return;
+        }
+        if (command.action === "duplicate") {
+          runTabOperation(tabActions.duplicate(command.tabId));
+          return;
+        }
+        runTabOperation(tabActions.setPinned(command.tabId, command.pinned));
       },
     },
   );
@@ -249,18 +419,27 @@ async function startSidebarInternal(
       onDrop(intent) {
         if (reorderBusy) return;
         const plan = createTabReorderPlan(
-          tabStore.list(), intent.sourceId, intent.targetId, intent.placement,
+          tabStore.list(), intent.sourceId, intent.target,
         );
         if (!plan) return;
         reorderBusy = true;
         updateDragEnabled();
-        runTabOperation(tabActions.reorder(plan), () => {
-          if (!active) return;
-          reorderBusy = false;
-          updateDragEnabled();
-        });
+        runTabOperation(
+          tabActions.reorder(plan),
+          () => {
+            if (!active) return;
+            reorderBusy = false;
+            updateDragEnabled();
+          },
+          plan.groupChanged ? () => { void resyncTabsAndGroups(); } : undefined,
+        );
       },
     },
+  );
+
+  const middleClickController = createTabMiddleClickController(
+    { list: elements.list },
+    { onClose: (tabId) => runTabOperation(tabActions.close(tabId)) },
   );
 
   const onNewTabClick = (): void => {
@@ -310,8 +489,9 @@ async function startSidebarInternal(
     }
     active = false;
     unsubscribeTabs();
-    bufferingTabEvents = false;
-    bufferedTabEvents.length = 0;
+    unsubscribeGroups();
+    bufferingEvents = false;
+    bufferedEvents.length = 0;
     discardPendingAttached();
     elements.list.removeEventListener("click", onListClick);
     elements.newTabButton.removeEventListener("click", onNewTabClick);
@@ -323,7 +503,10 @@ async function startSidebarInternal(
     );
     elements.settingsButton.removeEventListener("click", blockPendingSettings, true);
     contextMenu.destroy();
+    groupDialog.close();
+    groupDialog.destroy();
     dragController.destroy();
+    middleClickController.destroy();
     historySearch.destroy();
     tabRenderer.destroy();
     shortcutRenderer.destroy();
@@ -336,6 +519,23 @@ async function startSidebarInternal(
       return;
     }
     const actionElement = target.closest<HTMLElement>("[data-action]");
+    const groupRow = actionElement?.closest<HTMLElement>("[data-group-id]");
+    if (
+      actionElement?.dataset.action === "toggle-group" &&
+      groupRow &&
+      elements.list.contains(groupRow)
+    ) {
+      const groupId = Number(groupRow.dataset.groupId);
+      const group = Number.isInteger(groupId) ? groupStore.get(groupId) : undefined;
+      if (!group || groupToggleBusy.has(group.id)) return;
+      groupToggleBusy.add(group.id);
+      runTabOperation(
+        groupActions.setCollapsed(group.id, !group.collapsed),
+        () => groupToggleBusy.delete(group.id),
+        () => { void resyncTabsAndGroups(); },
+      );
+      return;
+    }
     const row = actionElement?.closest<HTMLElement>("[data-tab-id]");
     if (!actionElement || !row || !elements.list.contains(row)) {
       return;
@@ -371,55 +571,60 @@ async function startSidebarInternal(
     cleanup();
   }
 
-  const applyTabEvent = (mutate: () => void, renderLive: () => void): void => {
+  const applyEvent = (
+    mutate: () => void,
+    renderLive: () => void,
+    syncFavicons = false,
+  ): void => {
     if (!active) {
       return;
     }
-    if (bufferingTabEvents) {
-      bufferedTabEvents.push(Promise.resolve(mutate));
+    if (bufferingEvents) {
+      bufferedEvents.push(Promise.resolve(mutate));
       return;
     }
     mutate();
-    syncShortcutFavicons();
+    if (syncFavicons) syncShortcutFavicons();
     renderLive();
   };
 
   const removeTab = (tabId: number): void => {
     contextMenu.closeForTab(tabId);
-    applyTabEvent(
+    applyEvent(
       () => {
         tabStore.remove(tabId);
       },
-      () => {
-        tabRenderer.remove(tabId);
-      },
+      renderTabList,
+      true,
     );
   };
 
   const tabEventHandlers = {
     created(tab: chrome.tabs.Tab) {
-      applyTabEvent(
+      applyEvent(
         () => {
           tabStore.add(tab);
         },
-        () => tabRenderer.render(tabStore.list()),
+        renderTabList,
+        true,
       );
     },
     attached(tab: chrome.tabs.Tab) {
       if (bufferedAttachedTabs.delete(tab)) {
         return;
       }
-      applyTabEvent(
+      applyEvent(
         () => {
           tabStore.add(tab);
         },
-        () => tabRenderer.render(tabStore.list()),
+        renderTabList,
+        true,
       );
     },
     updated(tab: chrome.tabs.Tab) {
       let previous: ReturnType<TabStore["list"]>[number] | undefined;
       let model: ReturnType<TabStore["replace"]>;
-      applyTabEvent(
+      applyEvent(
         () => {
           const tabs = tabStore.list();
           previous = tab.id === undefined
@@ -433,18 +638,25 @@ async function startSidebarInternal(
         () => {
           if (!model) return;
           const rowExists = findTabRow(elements.list, model.id) !== undefined;
-          if (!previous || !rowExists || previous.index !== model.index) {
-            tabRenderer.render(tabStore.list());
+          if (
+            !previous ||
+            !rowExists ||
+            previous.index !== model.index ||
+            previous.groupId !== model.groupId ||
+            previous.pinned !== model.pinned
+          ) {
+            renderTabList();
           } else {
-            tabRenderer.patch(model);
+            tabRenderer.patchTab(model);
           }
         },
+        true,
       );
     },
     activated(tabId: number) {
       let affected = new Set<number>();
       let tabs: ReturnType<TabStore["list"]> = [];
-      applyTabEvent(
+      applyEvent(
         () => {
           const before = tabStore.list();
           affected = new Set([
@@ -457,20 +669,67 @@ async function startSidebarInternal(
         () => {
           for (const tab of tabs) {
             if (affected.has(tab.id)) {
-              tabRenderer.patch(tab);
+              tabRenderer.patchTab(tab);
             }
           }
         },
+        true,
       );
     },
     removed: removeTab,
     detached: removeTab,
     moved(tabId: number, index: number) {
-      applyTabEvent(
+      applyEvent(
         () => {
           tabStore.move(tabId, index);
         },
-        () => tabRenderer.render(tabStore.list()),
+        renderTabList,
+        true,
+      );
+    },
+  };
+
+  const groupEventHandlers = {
+    created(group: chrome.tabGroups.TabGroup) {
+      applyEvent(
+        () => {
+          if (currentWindowId !== undefined) groupStore.put(group, currentWindowId);
+        },
+        renderTabList,
+      );
+    },
+    updated(group: chrome.tabGroups.TabGroup) {
+      let previous: ReturnType<TabGroupStore["get"]>;
+      let model: ReturnType<TabGroupStore["put"]>;
+      applyEvent(
+        () => {
+          previous = groupStore.get(group.id);
+          if (currentWindowId !== undefined) model = groupStore.put(group, currentWindowId);
+        },
+        () => {
+          if (!model) return;
+          if (!previous || previous.collapsed !== model.collapsed) {
+            renderTabList();
+          } else {
+            tabRenderer.patchGroup(model);
+          }
+        },
+      );
+    },
+    moved(group: chrome.tabGroups.TabGroup) {
+      applyEvent(
+        () => {
+          if (currentWindowId !== undefined) groupStore.put(group, currentWindowId);
+        },
+        renderTabList,
+      );
+    },
+    removed(groupId: number) {
+      applyEvent(
+        () => {
+          groupStore.remove(groupId);
+        },
+        renderTabList,
       );
     },
   };
@@ -481,7 +740,7 @@ async function startSidebarInternal(
     const wrappedOnAttached = {
       addListener(listener: AttachedListener): void {
         const wrapped: AttachedListener = (tabId, attachInfo) => {
-          if (active && bufferingTabEvents && attachInfo.newWindowId === windowId) {
+          if (active && bufferingEvents && attachInfo.newWindowId === windowId) {
             let resolve!: (mutation: () => void) => void;
             const promise = new Promise<() => void>((resolvePromise) => {
               resolve = resolvePromise;
@@ -491,7 +750,7 @@ async function startSidebarInternal(
             slots.push(slot);
             attachedSlotsById.set(tabId, slots);
             pendingAttachedSlots.add(slot);
-            bufferedTabEvents.push(promise);
+            bufferedEvents.push(promise);
           }
           listener(tabId, attachInfo);
         };
@@ -569,7 +828,7 @@ async function startSidebarInternal(
     },
   );
 
-  const loadTabs = (async () => {
+  const loadTabsAndGroups = (async () => {
     try {
       const currentWindow = await deps.windows.getCurrent();
       if (!active) return;
@@ -582,18 +841,27 @@ async function startSidebarInternal(
         throw new Error("当前窗口缺少有效 ID");
       }
 
-      bufferingTabEvents = true;
+      currentWindowId = windowId;
+      bufferingEvents = true;
       unsubscribeTabs = subscribeWithBufferedAttachments(windowId);
+      unsubscribeGroups = subscribeToTabGroupEvents(
+        deps.tabGroups,
+        windowId,
+        groupEventHandlers,
+      );
 
-      let snapshot: chrome.tabs.Tab[];
-      try {
-        snapshot = await deps.tabs.query({ windowId });
-      } catch {
+      const [tabsResult, groupsResult] = await Promise.allSettled([
+        deps.tabs.query({ windowId }),
+        deps.tabGroups.query({ windowId }),
+      ]);
+      if (tabsResult.status === "rejected") {
         if (active) {
           unsubscribeTabs();
+          unsubscribeGroups();
           unsubscribeTabs = () => undefined;
-          bufferingTabEvents = false;
-          bufferedTabEvents.length = 0;
+          unsubscribeGroups = () => undefined;
+          bufferingEvents = false;
+          bufferedEvents.length = 0;
           discardPendingAttached();
           setStatus("tabs", "无法读取当前窗口的标签页");
         }
@@ -601,23 +869,24 @@ async function startSidebarInternal(
       }
       if (!active) return;
 
-      tabStore.initialize(snapshot);
-      while (bufferedTabEvents.length > 0) {
-        const pending = bufferedTabEvents.shift();
-        if (!pending) break;
-        const apply = await pending;
-        if (!active) return;
-        apply();
+      tabStore.initialize(tabsResult.value);
+      if (groupsResult.status === "fulfilled") {
+        groupStore.initialize(groupsResult.value, windowId);
+        setStatus("groups", "");
+      } else {
+        groupStore.initialize([], windowId);
+        setStatus("groups", "无法读取当前窗口的标签分组");
       }
-      bufferingTabEvents = false;
+      await finishBufferedEvents();
+      if (!active) return;
       syncShortcutFavicons();
-      tabRenderer.render(tabStore.list());
+      renderTabList();
     } catch {
       setStatus("tabs", "无法读取当前窗口的标签页");
     }
   })();
 
-  await Promise.all([loadShortcuts, loadTabs]);
+  await Promise.all([loadShortcuts, loadTabsAndGroups]);
   if (active) {
     deps.document.documentElement.dataset.ready = "true";
   }
@@ -653,6 +922,15 @@ function getSidebarElements(document: Document): SidebarElements {
     shortcutReset: requireElement(document, "shortcut-reset", HTMLButtonElement),
     shortcutCancel: requireElement(document, "shortcut-cancel", HTMLButtonElement),
     shortcutSave: requireElement(document, "shortcut-save", HTMLButtonElement),
+    groupDialog: requireElement(document, "tab-group-dialog", HTMLDialogElement),
+    groupForm: requireElement(document, "tab-group-form", HTMLFormElement),
+    groupName: requireElement(document, "tab-group-name", HTMLInputElement),
+    groupColors: Array.from(document.querySelectorAll<HTMLInputElement>(
+      "#tab-group-dialog input[type='radio'][name='tab-group-color']",
+    )),
+    groupError: requireElement(document, "tab-group-error", HTMLElement),
+    groupCancel: requireElement(document, "tab-group-cancel", HTMLButtonElement),
+    groupCreate: requireElement(document, "tab-group-create", HTMLButtonElement),
   };
 }
 
@@ -726,6 +1004,7 @@ function reportStartupError(document: Document, error: unknown): void {
 if (typeof chrome !== "undefined" && typeof document !== "undefined") {
   void bootstrapSidebar({
     tabs: chrome.tabs,
+    tabGroups: chrome.tabGroups,
     windows: chrome.windows,
     history: chrome.history,
     storage: chrome.storage.local,
