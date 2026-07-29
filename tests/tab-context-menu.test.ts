@@ -1,11 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  TAB_GROUP_COLORS,
+  type TabGroupViewModel,
+} from "../src/sidepanel/tab-group-model";
 import { createTabContextMenu } from "../src/sidepanel/tab-context-menu";
 import type { TabViewModel } from "../src/sidepanel/tab-model";
 
 const tabs: TabViewModel[] = [
-  { id: 1, windowId: 10, index: 0, title: "One", url: "https://one.example/", domain: "one.example", active: false, pinned: false },
-  { id: 2, windowId: 10, index: 1, title: "Two", url: "https://two.example/", domain: "two.example", active: false, pinned: true },
+  { id: 1, windowId: 10, index: 0, title: "One", url: "https://one.example/", domain: "one.example", active: false, pinned: false, groupId: -1 },
+  { id: 2, windowId: 10, index: 1, title: "Two", url: "https://two.example/", domain: "two.example", active: false, pinned: true, groupId: 3 },
 ];
+
+const longGroupTitle = "这是一个用于验证二级菜单文本省略行为的很长分组标题";
+
+const groups: TabGroupViewModel[] = TAB_GROUP_COLORS.map((color, index) => ({
+  id: index + 3,
+  windowId: 10,
+  title: index === 1 ? "" : index === 2 ? longGroupTitle : `Group ${index + 1}`,
+  color,
+  collapsed: false,
+}));
 
 function row(id: number): HTMLElement {
   return document.querySelector(`[data-tab-id='${id}']`)!;
@@ -25,11 +39,11 @@ describe("tab context menu", () => {
     list = document.querySelector("#list")!;
   });
 
-  it("opens one bounded menu and dispatches duplicate", () => {
+  it("opens one bounded main menu and dispatches duplicate", () => {
     const onCommand = vi.fn();
     const menu = createTabContextMenu(
       { document, list, viewport: window },
-      { getTab: (id) => tabs.find((tab) => tab.id === id), onCommand },
+      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => [], onCommand },
     );
     const popup = document.querySelector<HTMLElement>(".tab-context-menu")!;
     vi.spyOn(popup, "getBoundingClientRect").mockReturnValue({ top: 0, left: 0, right: 120, bottom: 90, width: 120, height: 90, x: 0, y: 0, toJSON: () => ({}) });
@@ -39,10 +53,14 @@ describe("tab context menu", () => {
     expect(popup.hidden).toBe(false);
     expect(popup.style.left).toBe(`${window.innerWidth - 120}px`);
     expect(popup.style.top).toBe(`${window.innerHeight - 90}px`);
-    expect(document.querySelectorAll(".tab-context-menu")).toHaveLength(1);
+    expect(document.querySelectorAll(".tab-context-menu:not(.tab-context-submenu)")).toHaveLength(1);
+    expect(document.querySelectorAll(".tab-context-submenu")).toHaveLength(1);
     expect(
-      Array.from(popup.querySelectorAll("[role='menuitem']"), (item) => item.textContent),
-    ).toEqual(["复制标签页", "固定标签", "设为快捷网站", "关闭下方标签页"]);
+      Array.from(
+        popup.querySelectorAll<HTMLButtonElement>("[role='menuitem']"),
+        (item) => item.hidden ? null : item.textContent,
+      ).filter(Boolean),
+    ).toEqual(["复制标签页", "固定标签", "设为快捷网站", "添加到分组", "关闭下方标签页"]);
     expect(document.activeElement).toBe(popup.querySelector("[data-menu-action='duplicate']"));
 
     (popup.querySelector("[data-menu-action='duplicate']") as HTMLElement).click();
@@ -55,7 +73,7 @@ describe("tab context menu", () => {
     const onCommand = vi.fn();
     const menu = createTabContextMenu(
       { document, list, viewport: window },
-      { getTab: (id) => tabs.find((tab) => tab.id === id), onCommand },
+      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => [], onCommand },
     );
     const popup = document.querySelector<HTMLElement>(".tab-context-menu")!;
 
@@ -80,6 +98,7 @@ describe("tab context menu", () => {
       { document, list, viewport: window },
       {
         getTab: (id) => tabs.find((tab) => tab.id === id),
+        getGroups: () => [],
         canCloseBelow: (id) => id === 1,
         onCommand,
       },
@@ -102,6 +121,7 @@ describe("tab context menu", () => {
       { document, list, viewport: window },
       {
         getTab: (id) => tabs.find((tab) => tab.id === id),
+        getGroups: () => [],
         canCloseBelow: () => false,
         onCommand,
       },
@@ -119,9 +139,11 @@ describe("tab context menu", () => {
     const addShortcut = popup.querySelector<HTMLButtonElement>("[data-menu-action='add-shortcut']")!;
     addShortcut.focus();
     popup.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(document.activeElement).toBe(popup.querySelector("[data-menu-action='add-to-group']"));
+    popup.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
     expect(document.activeElement).toBe(popup.querySelector("[data-menu-action='duplicate']"));
     popup.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
-    expect(document.activeElement).toBe(addShortcut);
+    expect(document.activeElement).toBe(popup.querySelector("[data-menu-action='add-to-group']"));
     menu.destroy();
   });
 
@@ -131,6 +153,7 @@ describe("tab context menu", () => {
       { document, list, viewport: window },
       {
         getTab: (id) => tabs.find((tab) => tab.id === id),
+        getGroups: () => [],
         canCloseBelow: () => true,
         onCommand,
       },
@@ -138,9 +161,9 @@ describe("tab context menu", () => {
     const popup = document.querySelector<HTMLElement>(".tab-context-menu")!;
 
     context(row(1));
-    popup.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-    popup.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-    popup.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    for (let index = 0; index < 4; index += 1) {
+      popup.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    }
     expect(document.activeElement).toBe(popup.querySelector("[data-menu-action='close-below']"));
     popup.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(onCommand).toHaveBeenCalledWith({ action: "close-below", tabId: 1 });
@@ -153,7 +176,7 @@ describe("tab context menu", () => {
       const onCommand = vi.fn();
       const menu = createTabContextMenu(
         { document, list, viewport: window },
-        { getTab: (tabId) => tabs.find((tab) => tab.id === tabId), onCommand },
+        { getTab: (tabId) => tabs.find((tab) => tab.id === tabId), getGroups: () => [], onCommand },
       );
       context(row(id));
       const button = document.querySelector<HTMLElement>("[data-menu-action='set-pinned']")!;
@@ -168,7 +191,7 @@ describe("tab context menu", () => {
     const onCommand = vi.fn();
     const menu = createTabContextMenu(
       { document, list, viewport: window },
-      { getTab: (id) => tabs.find((tab) => tab.id === id), onCommand },
+      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => [], onCommand },
     );
     row(1).dispatchEvent(new KeyboardEvent("keydown", { key: "F10", shiftKey: true, bubbles: true, cancelable: true }));
     const popup = document.querySelector<HTMLElement>(".tab-context-menu")!;
@@ -185,7 +208,7 @@ describe("tab context menu", () => {
   it("closes on outside input, scroll, resize, target removal, and destroy", () => {
     const menu = createTabContextMenu(
       { document, list, viewport: window },
-      { getTab: (id) => tabs.find((tab) => tab.id === id), onCommand: vi.fn() },
+      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => [], onCommand: vi.fn() },
     );
     const popup = document.querySelector<HTMLElement>(".tab-context-menu")!;
     const reopen = () => { context(row(1)); expect(popup.hidden).toBe(false); };
@@ -195,5 +218,155 @@ describe("tab context menu", () => {
     reopen(); menu.closeForTab(1); expect(popup.hidden).toBe(true);
     reopen(); menu.destroy(); expect(document.querySelector(".tab-context-menu")).toBeNull();
     context(row(1)); expect(document.querySelector(".tab-context-menu")).toBeNull();
+  });
+
+  it("builds a dynamic group submenu with colors, unnamed fallback, and current selection", () => {
+    const onCommand = vi.fn();
+    createTabContextMenu(
+      { document, list, viewport: window },
+      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => groups, onCommand },
+    );
+
+    context(row(2));
+    const popup = document.querySelector<HTMLElement>(".tab-context-menu:not(.tab-context-submenu)")!;
+    const trigger = popup.querySelector<HTMLButtonElement>("[data-menu-action='add-to-group']")!;
+    expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(popup.querySelector("[data-menu-action='remove-from-group']")?.hasAttribute("hidden")).toBe(false);
+
+    trigger.click();
+    const submenu = document.querySelector<HTMLElement>(".tab-context-submenu")!;
+    expect(submenu.classList.contains("tab-context-menu")).toBe(true);
+    expect(submenu.hidden).toBe(false);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(submenu.querySelector("[data-menu-action='create-group']")?.textContent).toBe("新建分组");
+    const groupItems = Array.from(submenu.querySelectorAll<HTMLButtonElement>("[data-group-id]"));
+    expect(groupItems).toHaveLength(9);
+    expect(groupItems.map((item) => item.querySelector<HTMLElement>(".group-menu-color")?.dataset.color)).toEqual(TAB_GROUP_COLORS);
+    expect(groupItems.every((item) => item.querySelector(".group-menu-title"))).toBe(true);
+    expect(groupItems[2]?.querySelector(".group-menu-title")?.textContent).toBe(longGroupTitle);
+    expect(groupItems[1]?.textContent).toContain("未命名分组");
+    expect(groupItems[0]?.getAttribute("aria-checked")).toBe("true");
+    expect(groupItems[0]?.disabled).toBe(true);
+
+    groupItems[2]?.click();
+    expect(onCommand).toHaveBeenCalledWith({ action: "add-to-group", tabId: 2, groupId: 5 });
+    expect(popup.hidden).toBe(true);
+    expect(submenu.hidden).toBe(true);
+  });
+
+  it("rebuilds groups on each open and dispatches create and remove commands", () => {
+    const onCommand = vi.fn();
+    let availableGroups = groups.slice(0, 1);
+    const menu = createTabContextMenu(
+      { document, list, viewport: window },
+      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => availableGroups, onCommand },
+    );
+    const popup = document.querySelector<HTMLElement>(".tab-context-menu:not(.tab-context-submenu)")!;
+    const submenu = document.querySelector<HTMLElement>(".tab-context-submenu")!;
+
+    context(row(1));
+    expect(popup.querySelector("[data-menu-action='remove-from-group']")?.hasAttribute("hidden")).toBe(true);
+    (popup.querySelector("[data-menu-action='add-to-group']") as HTMLButtonElement).click();
+    expect(submenu.querySelectorAll("[data-group-id]")).toHaveLength(1);
+    (submenu.querySelector("[data-menu-action='create-group']") as HTMLButtonElement).click();
+    expect(onCommand).toHaveBeenLastCalledWith({ action: "create-group", tabId: 1 });
+
+    availableGroups = groups.slice(0, 3);
+    context(row(2));
+    (popup.querySelector("[data-menu-action='add-to-group']") as HTMLButtonElement).click();
+    expect(submenu.querySelectorAll("[data-group-id]")).toHaveLength(3);
+    (popup.querySelector("[data-menu-action='remove-from-group']") as HTMLButtonElement).click();
+    expect(onCommand).toHaveBeenLastCalledWith({ action: "remove-from-group", tabId: 2 });
+    menu.destroy();
+  });
+
+  it("opens the submenu on hover and flips it left and upward when space is constrained", () => {
+    createTabContextMenu(
+      { document, list, viewport: window },
+      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => groups.slice(0, 2), onCommand: vi.fn() },
+    );
+    context(row(1));
+    const popup = document.querySelector<HTMLElement>(".tab-context-menu:not(.tab-context-submenu)")!;
+    const submenu = document.querySelector<HTMLElement>(".tab-context-submenu")!;
+    const trigger = popup.querySelector<HTMLButtonElement>("[data-menu-action='add-to-group']")!;
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({ top: window.innerHeight - 20, left: window.innerWidth - 80, right: window.innerWidth - 10, bottom: window.innerHeight, width: 70, height: 20, x: 0, y: 0, toJSON: () => ({}) });
+    vi.spyOn(submenu, "getBoundingClientRect").mockReturnValue({ top: 0, left: 0, right: 120, bottom: 100, width: 120, height: 100, x: 0, y: 0, toJSON: () => ({}) });
+
+    trigger.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+
+    expect(submenu.hidden).toBe(false);
+    expect(submenu.style.left).toBe(`${window.innerWidth - 200}px`);
+    expect(submenu.style.top).toBe(`${window.innerHeight - 100}px`);
+  });
+
+  it("supports right, left, vertical navigation, activation, and Escape across both levels", () => {
+    const onCommand = vi.fn();
+    createTabContextMenu(
+      { document, list, viewport: window },
+      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => groups.slice(0, 3), onCommand },
+    );
+    context(row(2));
+    const popup = document.querySelector<HTMLElement>(".tab-context-menu:not(.tab-context-submenu)")!;
+    const submenu = document.querySelector<HTMLElement>(".tab-context-submenu")!;
+    const trigger = popup.querySelector<HTMLButtonElement>("[data-menu-action='add-to-group']")!;
+    trigger.focus();
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    const create = submenu.querySelector<HTMLButtonElement>("[data-menu-action='create-group']")!;
+    expect(document.activeElement).toBe(create);
+
+    submenu.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    expect(document.activeElement).toBe(submenu.querySelector("[data-group-id='5']"));
+    submenu.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(document.activeElement).toBe(create);
+    submenu.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    expect(submenu.hidden).toBe(true);
+    expect(document.activeElement).toBe(trigger);
+
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    submenu.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(onCommand).toHaveBeenCalledWith({ action: "create-group", tabId: 2 });
+
+    context(row(2));
+    trigger.focus();
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    submenu.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    submenu.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    expect(onCommand).toHaveBeenCalledWith({ action: "add-to-group", tabId: 2, groupId: 4 });
+
+    context(row(2));
+    trigger.focus();
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    submenu.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(popup.hidden).toBe(true);
+    expect(submenu.hidden).toBe(true);
+    expect(document.activeElement).toBe(row(2));
+  });
+
+  it("closes both menu levels on outside input, scroll, resize, target removal, and destroy", () => {
+    const menu = createTabContextMenu(
+      { document, list, viewport: window },
+      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => groups, onCommand: vi.fn() },
+    );
+    const popup = document.querySelector<HTMLElement>(".tab-context-menu:not(.tab-context-submenu)")!;
+    const submenu = document.querySelector<HTMLElement>(".tab-context-submenu")!;
+    const reopen = () => {
+      context(row(1));
+      (popup.querySelector("[data-menu-action='add-to-group']") as HTMLButtonElement).click();
+      expect(popup.hidden).toBe(false);
+      expect(submenu.hidden).toBe(false);
+    };
+    const expectClosed = () => {
+      expect(popup.hidden).toBe(true);
+      expect(submenu.hidden).toBe(true);
+    };
+
+    reopen(); document.body.dispatchEvent(new Event("pointerdown", { bubbles: true })); expectClosed();
+    reopen(); list.dispatchEvent(new Event("scroll")); expectClosed();
+    reopen(); window.dispatchEvent(new Event("resize")); expectClosed();
+    reopen(); menu.closeForTab(1); expectClosed();
+    reopen(); menu.destroy();
+    expect(document.querySelector(".tab-context-menu")).toBeNull();
+    expect(document.querySelector(".tab-context-submenu")).toBeNull();
   });
 });
