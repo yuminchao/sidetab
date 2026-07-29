@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getClosableTabsBelow } from "../src/sidepanel/tab-close-model";
+import { buildTabListItems } from "../src/sidepanel/tab-list-model";
 import type { TabViewModel } from "../src/sidepanel/tab-model";
 
 function fakeTabModel(overrides: Partial<TabViewModel> = {}): TabViewModel {
@@ -12,6 +13,7 @@ function fakeTabModel(overrides: Partial<TabViewModel> = {}): TabViewModel {
     domain: "example.com",
     active: false,
     pinned: false,
+    groupId: -1,
     ...overrides,
   };
 }
@@ -46,5 +48,26 @@ describe("getClosableTabsBelow", () => {
     getClosableTabsBelow(tabs, 2);
 
     expect(tabs).toEqual(original);
+  });
+
+  it("includes tabs hidden by a collapsed group when given the full tab snapshot", () => {
+    const fullTabs = [
+      fakeTabModel({ id: 2, index: 1 }),
+      fakeTabModel({ id: 3, index: 2, groupId: 7 }),
+      fakeTabModel({ id: 4, index: 3, groupId: 7 }),
+      fakeTabModel({ id: 5, index: 4 }),
+    ];
+    const visibleItems = buildTabListItems(fullTabs, [{
+      id: 7,
+      windowId: 10,
+      title: "Collapsed",
+      color: "blue",
+      collapsed: true,
+    }]);
+
+    expect(
+      visibleItems.flatMap((item) => item.kind === "tab" ? [item.tab.id] : []),
+    ).toEqual([2, 5]);
+    expect(getClosableTabsBelow(fullTabs, 2)).toEqual([3, 4, 5]);
   });
 });

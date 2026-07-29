@@ -163,7 +163,7 @@ export function buildTabListItems(
 ): TabListItem[];
 ```
 
-算法只做一次 `groups` 映射和一次 tabs 遍历，时间复杂度为 O(T + G)。固定标签先输出；普通标签按 index；第一次遇到有效 groupId 时输出标题；折叠组跳过标签。
+算法先复制并按 `pinned → index → id` 稳定排序，再做一次 `groups` 映射和一次 tabs 遍历，时间复杂度为 O(T log T + G)。联合列表仅在分组、归属、折叠或 index 等结构变化时重建；普通标题、favicon 和 active 更新继续走节点 patch。固定标签先输出；普通标签按 index；第一次遇到有效 groupId 时输出标题；折叠组跳过标签。
 
 - [ ] **Step 4: 锁定关闭下方使用真实标签列表**
 

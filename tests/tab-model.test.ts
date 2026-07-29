@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { getTabDomain, toTabViewModel } from "../src/sidepanel/tab-model";
+import {
+  TAB_GROUP_ID_NONE,
+  getTabDomain,
+  toTabViewModel,
+} from "../src/sidepanel/tab-model";
 
 function tab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
   return {
@@ -31,7 +35,24 @@ describe("tab model", () => {
       domain: "example.com",
       active: false,
       pinned: false,
+      groupId: TAB_GROUP_ID_NONE,
     });
+  });
+
+  it("preserves a Chrome group ID and falls back to the official ungrouped sentinel", () => {
+    expect(toTabViewModel(tab({ groupId: 7 })).groupId).toBe(7);
+    expect(toTabViewModel(tab({ groupId: undefined })).groupId).toBe(TAB_GROUP_ID_NONE);
+    expect(TAB_GROUP_ID_NONE).toBe(-1);
+  });
+
+  it.each([
+    -2,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    1.5,
+    Number.MAX_SAFE_INTEGER + 1,
+  ])("normalizes invalid tab group ID %s to the ungrouped sentinel", (groupId) => {
+    expect(toTabViewModel(tab({ groupId })).groupId).toBe(TAB_GROUP_ID_NONE);
   });
 
   it("uses the protocol for parsable URLs without a hostname", () => {

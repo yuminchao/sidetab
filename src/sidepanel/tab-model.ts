@@ -1,3 +1,10 @@
+import {
+  normalizeTabGroupId,
+  TAB_GROUP_ID_NONE,
+} from "./tab-group-model";
+
+export { TAB_GROUP_ID_NONE } from "./tab-group-model";
+
 export type TabViewModel = {
   id: number;
   windowId: number;
@@ -8,6 +15,7 @@ export type TabViewModel = {
   favIconUrl?: string;
   active: boolean;
   pinned: boolean;
+  groupId: number;
 };
 
 export function toTabViewModel(tab: chrome.tabs.Tab): TabViewModel {
@@ -26,6 +34,7 @@ export function toTabViewModel(tab: chrome.tabs.Tab): TabViewModel {
     domain: getTabDomain(url),
     active: tab.active,
     pinned: tab.pinned,
+    groupId: normalizeTabGroupId(tab.groupId),
   };
 
   if (tab.favIconUrl) {

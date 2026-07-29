@@ -149,6 +149,7 @@ describe("TabStore", () => {
       domain: 12,
       active: "yes",
       pinned: 0,
+      groupId: Number.NaN,
     } as unknown as Partial<import("../src/sidepanel/tab-model").TabViewModel>;
     store.update(1, invalid);
     store.update(1, { title: "  ", url: "https://updated.example/path", domain: "override", favIconUrl: undefined });
@@ -161,9 +162,39 @@ describe("TabStore", () => {
       domain: "updated.example",
       active: false,
       pinned: false,
+      groupId: -1,
     });
     expect(store.list()[0]).not.toHaveProperty("favIconUrl");
     expect(store.filter("updated.example").map((item) => item.id)).toEqual([1]);
+  });
+
+  it("updates group membership only for integer group IDs", () => {
+    const store = new TabStore();
+    store.initialize([tab({ id: 1, groupId: 7 })]);
+
+    expect(store.update(1, { groupId: 8 })).toMatchObject({ groupId: 8 });
+    store.update(1, { groupId: 1.5 });
+    store.update(1, { groupId: Number.POSITIVE_INFINITY });
+
+    expect(store.list()[0]).toMatchObject({ groupId: 8 });
+  });
+
+  it("keeps group membership for invalid IDs and accepts the ungrouped sentinel", () => {
+    const store = new TabStore();
+    store.initialize([tab({ id: 1, groupId: 7 })]);
+
+    for (const groupId of [
+      -2,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      1.5,
+      Number.MAX_SAFE_INTEGER + 1,
+    ]) {
+      store.update(1, { groupId });
+      expect(store.list()[0]).toMatchObject({ groupId: 7 });
+    }
+
+    expect(store.update(1, { groupId: -1 })).toMatchObject({ groupId: -1 });
   });
 
   it("uses move semantics for a valid updated index and rejects invalid index values", () => {

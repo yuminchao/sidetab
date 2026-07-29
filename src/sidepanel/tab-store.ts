@@ -1,3 +1,4 @@
+import { isValidTabGroupMembershipId } from "./tab-group-model";
 import { getTabDomain, toTabViewModel, type TabViewModel } from "./tab-model";
 
 export class TabStore {
@@ -60,6 +61,9 @@ export class TabStore {
     }
     if (typeof patch.pinned === "boolean") {
       updated.pinned = patch.pinned;
+    }
+    if (isValidTabGroupMembershipId(patch.groupId)) {
+      updated.groupId = patch.groupId;
     }
     if (Object.hasOwn(patch, "favIconUrl")) {
       if (typeof patch.favIconUrl === "string") {
