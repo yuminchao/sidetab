@@ -115,6 +115,65 @@
       </form>
     </dialog>
 
+    <dialog id="tab-group-dialog" aria-labelledby="tab-group-dialog-title">
+      <form id="tab-group-form" method="dialog" novalidate>
+        <header class="dialog-header">
+          <h2 id="tab-group-dialog-title">新建分组</h2>
+        </header>
+
+        <label for="tab-group-name">
+          <span>名称</span>
+          <input id="tab-group-name" type="text" autocomplete="off" />
+        </label>
+
+        <fieldset class="tab-group-colors">
+          <legend>颜色</legend>
+          <label class="tab-group-color-option" title="灰色">
+            <input type="radio" name="tab-group-color" value="grey" aria-label="灰色" checked />
+            <span class="tab-group-color-swatch" data-color="grey" aria-hidden="true"></span>
+          </label>
+          <label class="tab-group-color-option" title="蓝色">
+            <input type="radio" name="tab-group-color" value="blue" aria-label="蓝色" />
+            <span class="tab-group-color-swatch" data-color="blue" aria-hidden="true"></span>
+          </label>
+          <label class="tab-group-color-option" title="红色">
+            <input type="radio" name="tab-group-color" value="red" aria-label="红色" />
+            <span class="tab-group-color-swatch" data-color="red" aria-hidden="true"></span>
+          </label>
+          <label class="tab-group-color-option" title="黄色">
+            <input type="radio" name="tab-group-color" value="yellow" aria-label="黄色" />
+            <span class="tab-group-color-swatch" data-color="yellow" aria-hidden="true"></span>
+          </label>
+          <label class="tab-group-color-option" title="绿色">
+            <input type="radio" name="tab-group-color" value="green" aria-label="绿色" />
+            <span class="tab-group-color-swatch" data-color="green" aria-hidden="true"></span>
+          </label>
+          <label class="tab-group-color-option" title="粉色">
+            <input type="radio" name="tab-group-color" value="pink" aria-label="粉色" />
+            <span class="tab-group-color-swatch" data-color="pink" aria-hidden="true"></span>
+          </label>
+          <label class="tab-group-color-option" title="紫色">
+            <input type="radio" name="tab-group-color" value="purple" aria-label="紫色" />
+            <span class="tab-group-color-swatch" data-color="purple" aria-hidden="true"></span>
+          </label>
+          <label class="tab-group-color-option" title="青色">
+            <input type="radio" name="tab-group-color" value="cyan" aria-label="青色" />
+            <span class="tab-group-color-swatch" data-color="cyan" aria-hidden="true"></span>
+          </label>
+          <label class="tab-group-color-option" title="橙色">
+            <input type="radio" name="tab-group-color" value="orange" aria-label="橙色" />
+            <span class="tab-group-color-swatch" data-color="orange" aria-hidden="true"></span>
+          </label>
+        </fieldset>
+
+        <p id="tab-group-error" class="tab-group-error" role="alert"></p>
+        <div class="dialog-actions dialog-actions-primary">
+          <button id="tab-group-cancel" type="button">取消</button>
+          <button id="tab-group-create" class="primary-button" type="submit">创建</button>
+        </div>
+      </form>
+    </dialog>
+
     <script type="module" src="./sidebar.js"></script>
   </body>
 </html>
