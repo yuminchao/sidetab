@@ -21,11 +21,15 @@ describe("side panel settings markup", () => {
   });
 
   it("keeps the bottom settings control as an accessible icon button", () => {
+    const shell = document.querySelector<HTMLElement>(".search-shell");
+    const input = document.querySelector<HTMLInputElement>("#tab-search");
     const button = document.querySelector<HTMLButtonElement>("#shortcut-settings");
 
+    expect(shell?.parentElement?.classList.contains("bottom-toolbar")).toBe(true);
+    expect(Array.from(shell?.children ?? [])).toEqual([input, button]);
     expect(button?.tagName).toBe("BUTTON");
     expect(button?.title).toBe("设置");
     expect(button?.getAttribute("aria-label")).toBe("设置");
-    expect(button?.textContent?.trim()).toBe("⚙");
+    expect(button?.textContent?.trim()).toBe("");
   });
 });

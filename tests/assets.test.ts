@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const pngAssets = [
@@ -21,4 +22,25 @@ describe("local image assets", () => {
     expect(metadata.height).toBe(size);
     expect(contents.byteLength).toBeGreaterThan(0);
   });
+
+  it.each(["search.svg", "settings.svg"])(
+    "provides a sanitized %s mask asset",
+    (name) => {
+      const assetPath = `assets/icons/${name}`;
+      expect(existsSync(assetPath)).toBe(true);
+      if (!existsSync(assetPath)) return;
+
+      const source = readFileSync(assetPath, "utf8");
+      const document = new DOMParser().parseFromString(source, "image/svg+xml");
+      const root = document.documentElement;
+      const path = root.firstElementChild;
+
+      expect(document.querySelector("parsererror")).toBeNull();
+      expect(root.tagName).toBe("svg");
+      expect(Array.from(root.attributes, ({ name }) => name)).toEqual(["viewBox"]);
+      expect(Array.from(root.children, ({ tagName }) => tagName)).toEqual(["path"]);
+      expect(Array.from(path?.attributes ?? [], ({ name }) => name)).toEqual(["d"]);
+      expect(source).not.toMatch(/<\?xml|<!doctype|t=|p-id|width=|height=|xlink|https?:|<script|\son\w+=/i);
+    },
+  );
 });

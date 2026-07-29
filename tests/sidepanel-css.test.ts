@@ -77,14 +77,17 @@ describe("side panel responsive CSS", () => {
     );
     expect(css).not.toMatch(/\.bottom-toolbar\s*{[^}]*border-top/s);
     expect(css).toMatch(
-      /#tab-search\s*{[^}]*height:\s*32px[^}]*border-radius:\s*16px/s,
+      /#tab-search\s*{[^}]*width:\s*100%[^}]*height:\s*32px[^}]*padding-inline:\s*32px\s+38px[^}]*border-radius:\s*16px/s,
+    );
+    expect(css).toMatch(
+      /#tab-search::-webkit-search-cancel-button\s*{[^}]*-webkit-appearance:\s*none[^}]*display:\s*none/s,
     );
   });
 
   it("positions compact history results above the fixed bottom toolbar", () => {
     expect(css).toMatch(/\.bottom-toolbar\s*{[^}]*position:\s*relative/s);
     expect(css).toMatch(
-      /#history-search-results\s*{[^}]*position:\s*absolute[^}]*bottom:\s*100%[^}]*max-height:\s*360px[^}]*overflow-y:\s*auto/s,
+      /#history-search-results\s*{[^}]*position:\s*absolute[^}]*right:\s*6px[^}]*bottom:\s*100%[^}]*left:\s*6px[^}]*max-height:\s*360px[^}]*overflow-y:\s*auto/s,
     );
     expect(css).toMatch(
       /\.history-search-option\s*{[^}]*grid-template-columns:\s*16px\s+minmax\(0,\s*1fr\)[^}]*height:\s*30px/s,
@@ -96,7 +99,8 @@ describe("side panel responsive CSS", () => {
   });
 
   it("uses a compact bottom toolbar and reveals close controls accessibly", () => {
-    expect(css).toMatch(/\.bottom-toolbar\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+32px[^}]*padding:\s*6px/s);
+    expect(css).toMatch(/\.bottom-toolbar\s*{[^}]*min-width:\s*0[^}]*padding:\s*6px/s);
+    expect(css).toMatch(/\.search-shell\s*{[^}]*position:\s*relative[^}]*width:\s*100%[^}]*min-width:\s*0/s);
     expect(css).toMatch(/\.tab-close\s*{[^}]*width:\s*26px[^}]*height:\s*26px[^}]*opacity:\s*0/s);
     expect(css).toMatch(/\.tab-row:(?:hover|focus-within)[^}]*\.tab-close[^}]*opacity:\s*1/s);
     expect(css).toMatch(
@@ -126,9 +130,14 @@ describe("side panel responsive CSS", () => {
       /\.appearance-setting-hint\s*{[^}]*min-width:\s*0[^}]*overflow-wrap:\s*anywhere/s,
     );
     expect(css).toMatch(
-      /#shortcut-settings\s*{[^}]*border-color:\s*transparent[^}]*background:\s*transparent[^}]*box-shadow:\s*none/s,
+      /#shortcut-settings\s*{[^}]*position:\s*absolute[^}]*right:\s*0[^}]*width:\s*32px[^}]*height:\s*32px[^}]*border-color:\s*transparent[^}]*background:\s*transparent[^}]*box-shadow:\s*none/s,
     );
-    expect(css).toMatch(/#shortcut-settings\s*{[^}]*font-size:\s*18px/s);
+    expect(css).toMatch(
+      /#shortcut-settings::before\s*{[^}]*width:\s*18px[^}]*height:\s*18px[^}]*mask:\s*url\("\.\.\/assets\/icons\/settings\.svg"\)[^}]*no-repeat/s,
+    );
+    expect(css).toMatch(
+      /\.search-shell::before\s*{[^}]*width:\s*16px[^}]*height:\s*16px[^}]*mask:\s*url\("\.\.\/assets\/icons\/search\.svg"\)[^}]*no-repeat/s,
+    );
     expect(css).toMatch(
       /#shortcut-settings:hover:not\(:disabled\)\s*{[^}]*background:\s*transparent/s,
     );
@@ -145,6 +154,36 @@ describe("side panel responsive CSS", () => {
     expect(css).toContain("@media (max-width: 180px)");
     expect(css).not.toMatch(/min-width:\s*(?!0(?:px|rem|em|%)?\s*[;}])(?:[1-9]|0?\.[0-9]*[1-9])/);
     expect(css).toMatch(/#shortcut-dialog\s*{[^}]*max-width:\s*calc\(100vw\s*-\s*8px\)[^}]*overflow-y:\s*auto/s);
+  });
+
+  it("locks the full-width search shell to shrinkable narrow-panel constraints", () => {
+    expect(css).toMatch(/\*\s*{[^}]*box-sizing:\s*border-box/s);
+    expect(css).toMatch(/button,\s*input\s*{[^}]*min-width:\s*0/s);
+    expect(css).toMatch(
+      /\.search-shell\s*{[^}]*width:\s*100%[^}]*min-width:\s*0/s,
+    );
+
+    const searchRule = css.match(/#tab-search\s*{[^}]*}/s)?.[0] ?? "";
+    expect(searchRule).toMatch(/width:\s*100%/);
+    expect(searchRule).not.toMatch(/min-width:\s*(?!0(?:px|rem|em|%)?\s*[;}])(?:[1-9]|0?\.[0-9]*[1-9])/);
+    expect(css).toMatch(
+      /#shortcut-settings\s*{[^}]*position:\s*absolute[^}]*right:\s*0[^}]*width:\s*32px[^}]*height:\s*32px/s,
+    );
+    expect(css).toMatch(
+      /#history-search-results\s*{[^}]*right:\s*6px[^}]*left:\s*6px/s,
+    );
+
+    const narrow240 = css.slice(
+      css.indexOf("@media (max-width: 240px)"),
+      css.indexOf("@media (max-width: 180px)"),
+    );
+    const narrow180 = css.slice(
+      css.indexOf("@media (max-width: 180px)"),
+      css.indexOf("@media (pointer: coarse)"),
+    );
+    for (const narrowRules of [narrow240, narrow180]) {
+      expect(narrowRules).not.toMatch(/(?:^|[;{])\s*(?:min-)?width:\s*(?:[1-9]|0?\.[0-9]*[1-9])/m);
+    }
   });
 
   it("styles the shortcut divider, context menu, and zero-shift drag indicators", () => {
