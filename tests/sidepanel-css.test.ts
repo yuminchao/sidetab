@@ -175,7 +175,128 @@ describe("side panel responsive CSS", () => {
       const selector = new RegExp(`\\.tab-group-color\\[data-color=["']${color}["']\\]\\s*{[^}]*background:`, "s");
       expect(css).toMatch(selector);
       expect(darkMedia).toMatch(selector);
+      expect(darkMedia).toMatch(
+        new RegExp(`\\.group-menu-color\\[data-color=["']${color}["']\\]\\s*{[^}]*background:`, "s"),
+      );
+      expect(darkMedia).toMatch(
+        new RegExp(`#tab-group-dialog\\s+input\\[type=["']radio["']\\]\\[name=["']tab-group-color["']\\]\\[value=["']${color}["']\\]\\s*{[^}]*background:`, "s"),
+      );
     }
+  });
+
+  it("shares bounded menu foundations while keeping submenu rules differential", () => {
+    const menuRule = css.match(/\.tab-context-menu\s*{[^}]*}/s)?.[0] ?? "";
+    expect(menuRule).toMatch(/position:\s*fixed/);
+    expect(menuRule).toMatch(/max-height:\s*calc\(100vh\s*-\s*8px\)/);
+    expect(menuRule).toMatch(/overflow-y:\s*auto/);
+    expect(menuRule).toMatch(
+      /font-family:\s*"Microsoft YaHei",\s*"微软雅黑",\s*"Segoe UI",\s*system-ui,\s*sans-serif/,
+    );
+
+    const submenuRule = css.match(/\.tab-context-submenu\s*{[^}]*}/s)?.[0] ?? "";
+    expect(submenuRule).toMatch(/z-index:\s*21/);
+    expect(submenuRule).toMatch(/min-width:\s*min\(152px,\s*100vw\)/);
+    expect(submenuRule).not.toMatch(
+      /(?:position|display|padding|border|background|box-shadow|font-family|max-height|overflow-y):/,
+    );
+
+    const submenuButtonRule = css.match(/\.tab-context-submenu\s*>\s*button\s*{[^}]*}/s)?.[0] ?? "";
+    expect(submenuButtonRule).toMatch(/display:\s*flex/);
+    expect(submenuButtonRule).toMatch(/gap:\s*6px/);
+    expect(submenuButtonRule).toMatch(/align-items:\s*center/);
+    expect(submenuButtonRule).not.toMatch(
+      /(?:min-height|padding|border|background|text-align|white-space):/,
+    );
+    expect(css).not.toMatch(/\.tab-context-submenu\s*>\s*button:(?:hover|focus-visible|active|disabled)/);
+  });
+
+  it("styles submenu group colors, checked markers, and the expansion arrow", () => {
+    expect(css).toMatch(
+      /\.group-menu-color\s*{[^}]*flex:\s*0\s+0\s+8px[^}]*width:\s*8px[^}]*height:\s*8px[^}]*border-radius:\s*50%/s,
+    );
+    for (const color of [
+      "grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange",
+    ]) {
+      expect(css).toMatch(
+        new RegExp(`\\.group-menu-color\\[data-color=["']${color}["']\\]\\s*{[^}]*background:`, "s"),
+      );
+    }
+    expect(css).toMatch(
+      /\.tab-context-menu\s*>\s*button\[aria-haspopup=["']menu["']\]::after\s*{[^}]*content:\s*["']›["'][^}]*margin-inline-start:\s*auto/s,
+    );
+    expect(css).toMatch(
+      /\.tab-context-submenu\s*>\s*button\[aria-checked=["']true["']\]::after\s*{[^}]*content:\s*["']✓["'][^}]*margin-inline-start:\s*auto/s,
+    );
+    expect(css).toMatch(
+      /\.group-menu-title\s*{[^}]*min-width:\s*0[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s,
+    );
+  });
+
+  it("styles a compact standalone tab-group dialog without nested card sections", () => {
+    expect(css).toMatch(
+      /#tab-group-dialog\s*{[^}]*width:\s*min\(300px,\s*calc\(100vw\s*-\s*8px\)\)[^}]*max-width:\s*300px[^}]*padding:\s*0[^}]*overflow-[xy]:\s*(?:auto|hidden)[^}]*font-family:\s*"Microsoft YaHei",\s*"微软雅黑",\s*"Segoe UI",\s*system-ui,\s*sans-serif/s,
+    );
+    expect(css).toMatch(
+      /#tab-group-dialog\s+form\s*{[^}]*display:\s*grid[^}]*gap:\s*10px[^}]*min-width:\s*0[^}]*padding:\s*12px/s,
+    );
+    expect(css).toMatch(
+      /#tab-group-dialog\s+fieldset\s*{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap[^}]*gap:\s*6px[^}]*min-width:\s*0[^}]*margin:\s*0[^}]*padding:\s*0[^}]*border:\s*0[^}]*background:\s*transparent/s,
+    );
+    expect(css).toMatch(
+      /#tab-group-name\s*{[^}]*width:\s*100%[^}]*height:\s*32px[^}]*padding:\s*0\s+7px/s,
+    );
+    expect(css).toMatch(
+      /#tab-group-error\s*{[^}]*margin:\s*0[^}]*color:\s*MarkText[^}]*background:\s*Mark[^}]*overflow-wrap:\s*anywhere/s,
+    );
+    expect(css).toMatch(/#tab-group-error:empty\s*{[^}]*display:\s*none/s);
+  });
+
+  it("renders all nine color choices as visible native radio controls", () => {
+    expect(css).toMatch(
+      /#tab-group-dialog\s+input\[type=["']radio["']\]\[name=["']tab-group-color["']\]\s*{[^}]*-webkit-appearance:\s*none[^}]*appearance:\s*none[^}]*width:\s*20px[^}]*height:\s*20px[^}]*margin:\s*0[^}]*border-radius:\s*50%[^}]*cursor:\s*pointer/s,
+    );
+    expect(css).toMatch(
+      /#tab-group-dialog\s+input\[type=["']radio["']\]\[name=["']tab-group-color["']\]:checked\s*{[^}]*box-shadow:/s,
+    );
+    expect(css).toMatch(
+      /#tab-group-dialog\s+input\[type=["']radio["']\]\[name=["']tab-group-color["']\]:focus-visible\s*{[^}]*outline:\s*2px\s+solid\s+AccentColor/s,
+    );
+    expect(css).toMatch(
+      /#tab-group-dialog\s+input\[type=["']radio["']\]\[name=["']tab-group-color["']\]:disabled\s*{[^}]*cursor:\s*default/s,
+    );
+    for (const color of [
+      "grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange",
+    ]) {
+      expect(css).toMatch(
+        new RegExp(`#tab-group-dialog\\s+input\\[type=["']radio["']\\]\\[name=["']tab-group-color["']\\]\\[value=["']${color}["']\\]\\s*{[^}]*background:`, "s"),
+      );
+    }
+  });
+
+  it("restores native radio state and distinguishes group dots in forced colors", () => {
+    const forcedStart = css.indexOf("@media (forced-colors: active)");
+    expect(forcedStart).toBeGreaterThan(-1);
+    const forcedColors = css.slice(forcedStart);
+    expect(forcedColors).toMatch(
+      /#tab-group-dialog\s+input\[type=["']radio["']\]\[name=["']tab-group-color["']\]\s*{[^}]*-webkit-appearance:\s*auto[^}]*appearance:\s*auto[^}]*forced-color-adjust:\s*auto/s,
+    );
+    expect(forcedColors).toMatch(
+      /#tab-group-dialog\s+input\[type=["']radio["']\]\[name=["']tab-group-color["']\]:checked\s*{[^}]*outline:\s*2px\s+solid\s+Highlight/s,
+    );
+    expect(forcedColors).toMatch(
+      /\.group-menu-color\s*{[^}]*border:\s*2px\s+solid\s+ButtonText[^}]*forced-color-adjust:\s*auto/s,
+    );
+  });
+
+  it("fits the tab-group dialog within a 180px panel", () => {
+    const narrow180 = css.slice(
+      css.indexOf("@media (max-width: 180px)"),
+      css.indexOf("@media (pointer: coarse)"),
+    );
+    expect(narrow180).toMatch(
+      /#tab-group-dialog\s*{[^}]*width:\s*calc\(100vw\s*-\s*8px\)[^}]*max-width:\s*calc\(100vw\s*-\s*8px\)/s,
+    );
+    expect(narrow180).toMatch(/#tab-group-dialog\s+form\s*{[^}]*padding:\s*8px/s);
   });
 
   it("supports 180px and 240px panels without positive minimum widths", () => {
