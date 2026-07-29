@@ -9,12 +9,38 @@ const sameGroupPlan: TabReorderPlan = {
   targetIndex: 2,
   targetPinned: false,
   pinnedChanged: false,
+  sourceGroupId: 4,
+  targetGroupId: 4,
+  groupChanged: false,
 };
 const crossGroupPlan: TabReorderPlan = {
   tabId: 7,
   targetIndex: 0,
+  targetPinned: false,
+  pinnedChanged: false,
+  sourceGroupId: 4,
+  targetGroupId: 9,
+  groupChanged: true,
+};
+
+const pinnedToGroupPlan: TabReorderPlan = {
+  ...crossGroupPlan,
+  sourceGroupId: -1,
+  pinnedChanged: true,
+};
+
+const groupToPinnedPlan: TabReorderPlan = {
+  ...crossGroupPlan,
   targetPinned: true,
   pinnedChanged: true,
+  sourceGroupId: 4,
+  targetGroupId: -1,
+};
+
+const removeFromGroupPlan: TabReorderPlan = {
+  ...crossGroupPlan,
+  sourceGroupId: 4,
+  targetGroupId: -1,
 };
 
 function tabApi(overrides: Partial<Parameters<typeof createTabActions>[0]> = {}) {
@@ -24,6 +50,8 @@ function tabApi(overrides: Partial<Parameters<typeof createTabActions>[0]> = {})
     remove: vi.fn().mockResolvedValue(undefined),
     duplicate: vi.fn().mockResolvedValue(tab),
     move: vi.fn().mockResolvedValue(tab),
+    group: vi.fn().mockResolvedValue(9),
+    ungroup: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -159,65 +187,110 @@ describe("tab actions", () => {
     );
   });
 
-  it("moves within a group without changing pinned state", async () => {
+  it("moves within a group without changing pinned state or membership", async () => {
     const update = vi.fn().mockResolvedValue(tab);
     const move = vi.fn().mockResolvedValue(tab);
+    const group = vi.fn().mockResolvedValue(9);
+    const ungroup = vi.fn().mockResolvedValue(undefined);
 
-    await createTabActions(tabApi({ update, move })).reorder(sameGroupPlan);
+    await createTabActions(tabApi({ update, move, group, ungroup })).reorder(sameGroupPlan);
 
     expect(update).not.toHaveBeenCalled();
+    expect(group).not.toHaveBeenCalled();
+    expect(ungroup).not.toHaveBeenCalled();
     expect(move).toHaveBeenCalledOnce();
     expect(move).toHaveBeenCalledWith(7, { index: 2 });
   });
 
-  it("updates pinned state before moving across groups", async () => {
+  it("groups before moving across groups", async () => {
     const update = vi.fn().mockResolvedValue(tab);
     const move = vi.fn().mockResolvedValue(tab);
+    const group = vi.fn().mockResolvedValue(9);
 
-    await createTabActions(tabApi({ update, move })).reorder(crossGroupPlan);
+    await createTabActions(tabApi({ update, move, group })).reorder(crossGroupPlan);
 
-    expect(update).toHaveBeenCalledOnce();
-    expect(update).toHaveBeenCalledWith(7, { pinned: true });
+    expect(update).not.toHaveBeenCalled();
+    expect(group).toHaveBeenCalledWith({ tabIds: 7, groupId: 9 });
     expect(move).toHaveBeenCalledOnce();
     expect(move).toHaveBeenCalledWith(7, { index: 0 });
+    expect(group.mock.invocationCallOrder[0]!).toBeLessThan(move.mock.invocationCallOrder[0]!);
+  });
+
+  it("unpins, groups, then moves a pinned tab into a group", async () => {
+    const update = vi.fn().mockResolvedValue(tab);
+    const move = vi.fn().mockResolvedValue(tab);
+    const group = vi.fn().mockResolvedValue(9);
+
+    await createTabActions(tabApi({ update, move, group })).reorder(pinnedToGroupPlan);
+
+    expect(update).toHaveBeenCalledWith(7, { pinned: false });
+    expect(group).toHaveBeenCalledWith({ tabIds: 7, groupId: 9 });
+    expect(update.mock.invocationCallOrder[0]!).toBeLessThan(group.mock.invocationCallOrder[0]!);
+    expect(group.mock.invocationCallOrder[0]!).toBeLessThan(move.mock.invocationCallOrder[0]!);
+  });
+
+  it("ungroups, pins, then moves a grouped tab into pinned tabs", async () => {
+    const update = vi.fn().mockResolvedValue(tab);
+    const move = vi.fn().mockResolvedValue(tab);
+    const ungroup = vi.fn().mockResolvedValue(undefined);
+
+    await createTabActions(tabApi({ update, move, ungroup })).reorder(groupToPinnedPlan);
+
+    expect(ungroup).toHaveBeenCalledWith(7);
+    expect(update).toHaveBeenCalledWith(7, { pinned: true });
+    expect(ungroup.mock.invocationCallOrder[0]!).toBeLessThan(update.mock.invocationCallOrder[0]!);
     expect(update.mock.invocationCallOrder[0]!).toBeLessThan(move.mock.invocationCallOrder[0]!);
   });
 
-  it("reorders across groups when the action is called without its owner object", async () => {
-    const update = vi.fn().mockResolvedValue(tab);
+  it("ungroups before moving a tab out of a group", async () => {
     const move = vi.fn().mockResolvedValue(tab);
-    const { reorder } = createTabActions(tabApi({ update, move }));
+    const ungroup = vi.fn().mockResolvedValue(undefined);
+
+    await createTabActions(tabApi({ move, ungroup })).reorder(removeFromGroupPlan);
+
+    expect(ungroup).toHaveBeenCalledWith(7);
+    expect(ungroup.mock.invocationCallOrder[0]!).toBeLessThan(move.mock.invocationCallOrder[0]!);
+  });
+
+  it("reorders across groups when called without its owner object", async () => {
+    const group = vi.fn().mockResolvedValue(9);
+    const move = vi.fn().mockResolvedValue(tab);
+    const { reorder } = createTabActions(tabApi({ group, move }));
 
     await reorder(crossGroupPlan);
 
-    expect(update).toHaveBeenCalledWith(7, { pinned: true });
+    expect(group).toHaveBeenCalledWith({ tabIds: 7, groupId: 9 });
     expect(move).toHaveBeenCalledWith(7, { index: 0 });
   });
 
   it.each([
-    ["synchronous throw", () => vi.fn(() => { throw new Error("chrome failed"); })],
-    ["promise rejection", () => vi.fn().mockRejectedValue(new Error("chrome failed"))],
-  ])("does not move across groups after a pinning %s", async (_case, makeUpdate) => {
-    const update = makeUpdate();
-    const move = vi.fn().mockResolvedValue(tab);
+    ["unpin", pinnedToGroupPlan, "update", ["group", "move"]],
+    ["group", crossGroupPlan, "group", ["move"]],
+    ["ungroup", groupToPinnedPlan, "ungroup", ["update", "move"]],
+    ["pin", groupToPinnedPlan, "update", ["move"]],
+    ["move", sameGroupPlan, "move", []],
+  ] as const)(
+    "preserves the cause and stops after a %s failure",
+    async (step, plan, failingMethod, laterMethods) => {
+      const cause = new Error(`${step} failed`);
+      const failingCall = vi.fn().mockRejectedValue(cause);
+      const api = tabApi({ [failingMethod]: failingCall });
 
-    await expect(createTabActions(tabApi({ update, move })).reorder(crossGroupPlan)).rejects.toThrow(
-      "无法更新标签固定状态",
-    );
-    expect(move).not.toHaveBeenCalled();
-  });
+      let received: unknown;
+      try {
+        await createTabActions(api).reorder(plan);
+      } catch (error) {
+        received = error;
+      }
 
-  it.each([
-    ["same group synchronous throw", sameGroupPlan, () => vi.fn(() => { throw new Error("chrome failed"); })],
-    ["same group promise rejection", sameGroupPlan, () => vi.fn().mockRejectedValue(new Error("chrome failed"))],
-    ["across groups synchronous throw", crossGroupPlan, () => vi.fn(() => { throw new Error("chrome failed"); })],
-    ["across groups promise rejection", crossGroupPlan, () => vi.fn().mockRejectedValue(new Error("chrome failed"))],
-  ])("maps a %s to the user-facing error", async (_case, plan, makeMove) => {
-    const move = makeMove();
-    await expect(
-      createTabActions(tabApi({ move })).reorder(plan),
-    ).rejects.toThrow("无法移动该标签页");
-  });
+      expect(received).toBeInstanceOf(Error);
+      expect(received).toMatchObject({ message: "无法移动该标签页", cause });
+      expect(failingCall).toHaveBeenCalledOnce();
+      for (const method of laterMethods) {
+        expect(api[method]).not.toHaveBeenCalled();
+      }
+    },
+  );
 });
 
 describe("shortcut actions", () => {

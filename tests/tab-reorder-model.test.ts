@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createTabReorderPlan } from "../src/sidepanel/tab-reorder-model";
+import {
+  createTabReorderPlan,
+  type TabDropTarget,
+} from "../src/sidepanel/tab-reorder-model";
 import type { TabViewModel } from "../src/sidepanel/tab-model";
 
 function fakeTabModel(overrides: Partial<TabViewModel> = {}): TabViewModel {
@@ -12,9 +15,18 @@ function fakeTabModel(overrides: Partial<TabViewModel> = {}): TabViewModel {
     domain: "example.com",
     active: false,
     pinned: false,
+    groupId: -1,
     ...overrides,
   };
 }
+
+const tabTarget = (tabId: number, placement: "before" | "after"): TabDropTarget => ({
+  kind: "tab",
+  tabId,
+  placement,
+});
+
+const groupTarget = (groupId: number): TabDropTarget => ({ kind: "group", groupId });
 
 describe("createTabReorderPlan", () => {
   it("uses the Chrome-index-sorted snapshot when indexes are non-contiguous", () => {
@@ -25,11 +37,14 @@ describe("createTabReorderPlan", () => {
       fakeTabModel({ id: 4, index: 5, pinned: true }),
     ];
 
-    expect(createTabReorderPlan(tabs, 3, 4, "before")).toEqual({
+    expect(createTabReorderPlan(tabs, 3, tabTarget(4, "before"))).toEqual({
       tabId: 3,
       targetIndex: 1,
       targetPinned: true,
       pinnedChanged: true,
+      sourceGroupId: -1,
+      targetGroupId: -1,
+      groupChanged: false,
     });
   });
 
@@ -40,11 +55,14 @@ describe("createTabReorderPlan", () => {
       fakeTabModel({ id: 1, index: 1 }),
     ];
 
-    expect(createTabReorderPlan(tabs, 1, 2, "before")).toEqual({
+    expect(createTabReorderPlan(tabs, 1, tabTarget(2, "before"))).toEqual({
       tabId: 1,
       targetIndex: 0,
       targetPinned: false,
       pinnedChanged: false,
+      sourceGroupId: -1,
+      targetGroupId: -1,
+      groupChanged: false,
     });
   });
 
@@ -53,16 +71,19 @@ describe("createTabReorderPlan", () => {
     ["upward", 3, 2, "before", 1],
   ] as const)("reorders within an unpinned group moving %s", (_direction, sourceId, targetId, placement, targetIndex) => {
     const tabs = [
-      fakeTabModel({ id: 1, index: 0 }),
-      fakeTabModel({ id: 2, index: 1 }),
-      fakeTabModel({ id: 3, index: 2 }),
+      fakeTabModel({ id: 1, index: 0, groupId: 7 }),
+      fakeTabModel({ id: 2, index: 1, groupId: 7 }),
+      fakeTabModel({ id: 3, index: 2, groupId: 7 }),
     ];
 
-    expect(createTabReorderPlan(tabs, sourceId, targetId, placement)).toEqual({
+    expect(createTabReorderPlan(tabs, sourceId, tabTarget(targetId, placement))).toEqual({
       tabId: sourceId,
       targetIndex,
       targetPinned: false,
       pinnedChanged: false,
+      sourceGroupId: 7,
+      targetGroupId: 7,
+      groupChanged: false,
     });
   });
 
@@ -76,11 +97,14 @@ describe("createTabReorderPlan", () => {
       fakeTabModel({ id: 3, index: 2 }),
     ];
 
-    expect(createTabReorderPlan(tabs, sourceId, targetId, placement)).toEqual({
+    expect(createTabReorderPlan(tabs, sourceId, tabTarget(targetId, placement))).toEqual({
       tabId: sourceId,
       targetIndex,
       targetPinned: false,
       pinnedChanged: false,
+      sourceGroupId: -1,
+      targetGroupId: -1,
+      groupChanged: false,
     });
   });
 
@@ -91,11 +115,14 @@ describe("createTabReorderPlan", () => {
       fakeTabModel({ id: 3, index: 2 }),
     ];
 
-    expect(createTabReorderPlan(tabs, 1, 2, "after")).toEqual({
+    expect(createTabReorderPlan(tabs, 1, tabTarget(2, "after"))).toEqual({
       tabId: 1,
       targetIndex: 1,
       targetPinned: true,
       pinnedChanged: false,
+      sourceGroupId: -1,
+      targetGroupId: -1,
+      groupChanged: false,
     });
   });
 
@@ -106,11 +133,68 @@ describe("createTabReorderPlan", () => {
       fakeTabModel({ id: 3, index: 2 }),
     ];
 
-    expect(createTabReorderPlan(tabs, 1, 2, "before")).toEqual({
+    expect(createTabReorderPlan(tabs, 1, tabTarget(2, "before"))).toEqual({
       tabId: 1,
       targetIndex: 0,
       targetPinned: false,
       pinnedChanged: true,
+      sourceGroupId: -1,
+      targetGroupId: -1,
+      groupChanged: false,
+    });
+  });
+
+  it("changes membership when a tab is moved across groups", () => {
+    const tabs = [
+      fakeTabModel({ id: 1, index: 0, groupId: 7 }),
+      fakeTabModel({ id: 2, index: 1, groupId: 8 }),
+      fakeTabModel({ id: 3, index: 2, groupId: 8 }),
+    ];
+
+    expect(createTabReorderPlan(tabs, 1, tabTarget(3, "after"))).toEqual({
+      tabId: 1,
+      targetIndex: 2,
+      targetPinned: false,
+      pinnedChanged: false,
+      sourceGroupId: 7,
+      targetGroupId: 8,
+      groupChanged: true,
+    });
+  });
+
+  it("places a tab at the end of a group using the full Chrome tab order", () => {
+    const tabs = [
+      fakeTabModel({ id: 1, index: 0 }),
+      fakeTabModel({ id: 2, index: 1 }),
+      fakeTabModel({ id: 3, index: 2, groupId: 7 }),
+      fakeTabModel({ id: 4, index: 3, groupId: 7 }),
+    ];
+
+    expect(createTabReorderPlan(tabs, 1, groupTarget(7))).toEqual({
+      tabId: 1,
+      targetIndex: 3,
+      targetPinned: false,
+      pinnedChanged: false,
+      sourceGroupId: -1,
+      targetGroupId: 7,
+      groupChanged: true,
+    });
+  });
+
+  it.each([
+    ["removes a grouped tab", fakeTabModel({ id: 1, index: 0, groupId: 7 }), fakeTabModel({ id: 2, index: 1 }), false, -1],
+    ["moves a pinned tab into a group", fakeTabModel({ id: 1, index: 0, pinned: true }), fakeTabModel({ id: 2, index: 1, groupId: 7 }), false, 7],
+    ["moves a grouped tab into pinned tabs", fakeTabModel({ id: 1, index: 1, groupId: 7 }), fakeTabModel({ id: 2, index: 0, pinned: true }), true, -1],
+  ] as const)("%s", (_name, source, target, targetPinned, targetGroupId) => {
+    const plan = createTabReorderPlan([source, target], source.id, tabTarget(target.id, "after"));
+
+    expect(plan).toMatchObject({
+      tabId: source.id,
+      targetPinned,
+      pinnedChanged: source.pinned !== targetPinned,
+      sourceGroupId: source.groupId,
+      targetGroupId,
+      groupChanged: source.groupId !== targetGroupId,
     });
   });
 
@@ -122,24 +206,25 @@ describe("createTabReorderPlan", () => {
     ];
     const original = structuredClone(tabs);
 
-    createTabReorderPlan(tabs, 3, 1, "before");
+    createTabReorderPlan(tabs, 3, tabTarget(1, "before"));
 
     expect(tabs).toEqual(original);
   });
 
   it.each([
-    ["source and target match", 1, 1, "before"],
-    ["source is missing", 99, 1, "before"],
-    ["target is missing", 1, 99, "before"],
-    ["before the directly following tab", 1, 2, "before"],
-    ["after the directly preceding tab", 2, 1, "after"],
-  ] as const)("returns undefined when %s", (_reason, sourceId, targetId, placement) => {
+    ["source and target match", 1, tabTarget(1, "before")],
+    ["source is missing", 99, tabTarget(1, "before")],
+    ["target is missing", 1, tabTarget(99, "before")],
+    ["target group is missing", 1, groupTarget(99)],
+    ["before the directly following tab", 1, tabTarget(2, "before")],
+    ["after the directly preceding tab", 2, tabTarget(1, "after")],
+  ] as const)("returns undefined when %s", (_reason, sourceId, target) => {
     const tabs = [
       fakeTabModel({ id: 1, index: 0 }),
       fakeTabModel({ id: 2, index: 1 }),
       fakeTabModel({ id: 3, index: 2 }),
     ];
 
-    expect(createTabReorderPlan(tabs, sourceId, targetId, placement)).toBeUndefined();
+    expect(createTabReorderPlan(tabs, sourceId, target)).toBeUndefined();
   });
 });

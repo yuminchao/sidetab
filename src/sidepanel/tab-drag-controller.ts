@@ -1,9 +1,8 @@
-import type { DropPlacement } from "./tab-reorder-model";
+import type { TabDropTarget } from "./tab-reorder-model";
 
 export type TabDropIntent = {
   sourceId: number;
-  targetId: number;
-  placement: DropPlacement;
+  target: TabDropTarget;
 };
 
 export function createTabDragController(
@@ -12,7 +11,7 @@ export function createTabDragController(
 ) {
   let sourceId: number | undefined;
   let sourceRow: HTMLElement | undefined;
-  let targetRow: HTMLElement | undefined;
+  let targetElement: HTMLElement | undefined;
 
   const rowFrom = (target: EventTarget | null): HTMLElement | undefined => {
     if (!(target instanceof Element)) return undefined;
@@ -25,9 +24,21 @@ export function createTabDragController(
     return Number.isInteger(id) ? id : undefined;
   };
 
+  const groupFrom = (target: EventTarget | null): HTMLElement | undefined => {
+    if (!(target instanceof Element)) return undefined;
+    const row = target.closest<HTMLElement>(".tab-group-row[data-group-id]");
+    return row && list.contains(row) ? row : undefined;
+  };
+
+  const groupIdFrom = (row: HTMLElement): number | undefined => {
+    const groupId = Number(row.dataset.groupId);
+    return Number.isSafeInteger(groupId) && groupId >= 0 ? groupId : undefined;
+  };
+
   const clearTarget = (): void => {
-    targetRow?.removeAttribute("data-drop-placement");
-    targetRow = undefined;
+    targetElement?.removeAttribute("data-drop-placement");
+    targetElement?.removeAttribute("data-drop-target");
+    targetElement = undefined;
   };
 
   const clear = (): void => {
@@ -67,30 +78,43 @@ export function createTabDragController(
     }
     const row = rowFrom(event.target);
     const targetId = row ? idFrom(row) : undefined;
-    if (sourceId === undefined || !row || targetId === undefined || targetId === sourceId) {
+    const group = groupFrom(event.target);
+    const groupId = group ? groupIdFrom(group) : undefined;
+    if (sourceId === undefined || (targetId === sourceId) || (!row && !group)) {
+      clearTarget();
+      return;
+    }
+    if ((row && targetId === undefined) || (group && groupId === undefined)) {
       clearTarget();
       return;
     }
     event.preventDefault();
-    if (targetRow !== row) clearTarget();
-    targetRow = row;
-    const bounds = row.getBoundingClientRect();
-    row.dataset.dropPlacement = event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+    const nextTarget = row ?? group!;
+    if (targetElement !== nextTarget) clearTarget();
+    targetElement = nextTarget;
+    if (row) {
+      const bounds = row.getBoundingClientRect();
+      row.dataset.dropPlacement = event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+    } else {
+      group!.dataset.dropTarget = "true";
+    }
   };
 
   const onDropEvent = (event: DragEvent): void => {
     const row = rowFrom(event.target);
     const targetId = row ? idFrom(row) : undefined;
     const placement = row?.dataset.dropPlacement;
-    if (
-      hasActiveSource() &&
-      sourceId !== undefined &&
-      targetId !== undefined &&
-      sourceId !== targetId &&
-      (placement === "before" || placement === "after")
-    ) {
+    const group = groupFrom(event.target);
+    const groupId = group ? groupIdFrom(group) : undefined;
+    let target: TabDropTarget | undefined;
+    if (targetId !== undefined && sourceId !== targetId && (placement === "before" || placement === "after")) {
+      target = { kind: "tab", tabId: targetId, placement };
+    } else if (groupId !== undefined && group?.dataset.dropTarget === "true") {
+      target = { kind: "group", groupId };
+    }
+    if (hasActiveSource() && sourceId !== undefined && target) {
       event.preventDefault();
-      onDrop({ sourceId, targetId, placement });
+      onDrop({ sourceId, target });
     }
     clear();
   };

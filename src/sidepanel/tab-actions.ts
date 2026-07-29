@@ -1,6 +1,9 @@
 import type { TabReorderPlan } from "./tab-reorder-model";
 
-export type TabsActionApi = Pick<typeof chrome.tabs, "create" | "duplicate" | "move" | "remove" | "update">;
+export type TabsActionApi = Pick<
+  typeof chrome.tabs,
+  "create" | "duplicate" | "group" | "move" | "remove" | "ungroup" | "update"
+>;
 
 export function createTabActions(api: TabsActionApi) {
   const setPinned = async (tabId: number, pinned: boolean): Promise<void> => {
@@ -59,14 +62,26 @@ export function createTabActions(api: TabsActionApi) {
     setPinned,
 
     async reorder(plan: TabReorderPlan): Promise<void> {
-      if (plan.pinnedChanged) {
-        await setPinned(plan.tabId, plan.targetPinned);
-      }
-
       try {
+        if (plan.pinnedChanged && !plan.targetPinned) {
+          await api.update(plan.tabId, { pinned: false });
+        }
+
+        if (plan.groupChanged) {
+          if (plan.targetGroupId >= 0) {
+            await api.group({ tabIds: plan.tabId, groupId: plan.targetGroupId });
+          } else {
+            await api.ungroup(plan.tabId);
+          }
+        }
+
+        if (plan.pinnedChanged && plan.targetPinned) {
+          await api.update(plan.tabId, { pinned: true });
+        }
+
         await api.move(plan.tabId, { index: plan.targetIndex });
-      } catch {
-        throw new Error("无法移动该标签页");
+      } catch (cause) {
+        throw new Error("无法移动该标签页", { cause });
       }
     },
   };
