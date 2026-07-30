@@ -13,6 +13,7 @@ export const EXPECTED_FILES = Object.freeze(
     "assets/icons/icon-32.png",
     "assets/icons/icon-48.png",
     "assets/icons/icon-128.png",
+    "assets/icons/network.svg",
     "assets/icons/pin.svg",
     "assets/icons/search.svg",
     "assets/icons/settings.svg",

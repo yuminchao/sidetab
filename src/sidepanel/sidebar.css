@@ -144,12 +144,24 @@ input:focus-visible {
   object-fit: contain;
 }
 
-.shortcut-letter {
-  overflow: hidden;
-  max-width: 24px;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.site-favicon-fallback {
+  display: block;
+  flex: 0 0 auto;
+  color: GrayText;
+  -webkit-mask-image: url("../assets/icons/network.svg");
+  mask-image: url("../assets/icons/network.svg");
+  background-color: currentColor;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+
+.shortcut-favicon-fallback {
+  width: 20px;
+  height: 20px;
 }
 
 .bottom-toolbar {
@@ -222,17 +234,6 @@ input:focus-visible {
 .history-favicon-image {
   display: block;
   object-fit: contain;
-}
-
-.history-favicon-fallback {
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  border: 1px solid ButtonBorder;
-  border-radius: 3px;
-  color: GrayText;
-  font-size: 10px;
-  line-height: 1;
 }
 
 .history-search-title {
@@ -473,16 +474,8 @@ input:focus-visible {
 }
 
 .tab-favicon-fallback {
-  display: grid;
-  place-items: center;
   width: 16px;
   height: 16px;
-  overflow: hidden;
-  border: 1px solid ButtonBorder;
-  border-radius: 3px;
-  color: GrayText;
-  font-size: 10px;
-  line-height: 1;
 }
 
 .tab-title {

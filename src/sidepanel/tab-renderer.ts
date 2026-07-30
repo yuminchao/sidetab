@@ -42,7 +42,7 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
       return;
     }
 
-    container.replaceChildren(createFaviconFallback(target.dataset.fallback ?? ""));
+    container.replaceChildren(createFaviconFallback());
   };
 
   list.addEventListener("error", onFaviconError, true);
@@ -256,31 +256,18 @@ function updatePin(main: HTMLElement, pinned: boolean): void {
 function updateFavicon(container: HTMLElement, tab: TabViewModel): void {
   const candidates = createFaviconCandidates(tab.favIconUrl, tab.url);
   const candidatesKey = JSON.stringify(candidates);
-  const fallbackText = getFallbackText(tab.title);
   const sourceChanged = container.dataset.candidatesKey !== candidatesKey;
 
   if (sourceChanged) {
-    container.replaceChildren(createFavicon(candidates, fallbackText));
+    container.replaceChildren(createFavicon(candidates));
     container.dataset.candidatesKey = candidatesKey;
-    return;
-  }
-
-  const image = container.querySelector<HTMLImageElement>(".tab-favicon-image");
-  if (image) {
-    image.dataset.fallback = fallbackText;
-    return;
-  }
-
-  const fallback = container.querySelector<HTMLElement>(".tab-favicon-fallback");
-  if (fallback) {
-    fallback.textContent = fallbackText || "·";
   }
 }
 
-function createFavicon(candidates: readonly string[], fallback: string): HTMLElement {
+function createFavicon(candidates: readonly string[]): HTMLElement {
   const [faviconUrl, nextUrl = ""] = candidates;
   if (!faviconUrl) {
-    return createFaviconFallback(fallback);
+    return createFaviconFallback();
   }
 
   const image = document.createElement("img");
@@ -290,18 +277,13 @@ function createFavicon(candidates: readonly string[], fallback: string): HTMLEle
   image.width = 16;
   image.height = 16;
   image.alt = "";
-  image.dataset.fallback = fallback;
   image.dataset.nextUrl = nextUrl;
   return image;
 }
 
-function createFaviconFallback(text: string): HTMLElement {
+function createFaviconFallback(): HTMLElement {
   const fallback = document.createElement("span");
-  fallback.className = "tab-favicon-fallback";
-  fallback.textContent = text || "·";
+  fallback.className = "site-favicon-fallback tab-favicon-fallback";
+  fallback.setAttribute("aria-hidden", "true");
   return fallback;
-}
-
-function getFallbackText(title: string): string {
-  return Array.from(title.trim())[0]?.toLocaleUpperCase() ?? "";
 }

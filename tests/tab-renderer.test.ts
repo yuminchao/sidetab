@@ -410,7 +410,7 @@ describe("tab renderer", () => {
     );
 
     expect(list.querySelector("img")).toBe(original);
-    expect(original?.dataset.fallback).toBe("U");
+    expect(original?.dataset.fallback).toBeUndefined();
     expect(list.querySelector<HTMLButtonElement>(".tab-main")?.ariaLabel).toBe(
       "Updated title",
     );
@@ -473,14 +473,16 @@ describe("tab renderer", () => {
   );
 
   it.each(["javascript:alert(1)", "file:///tmp/icon.png", "chrome://favicon/"])(
-    "uses a letter when a non-HTTP page has no safe primary: %s",
+    "uses the network fallback when a non-HTTP page has no safe primary: %s",
     (favIconUrl) => {
       const renderer = createTabRenderer({ list, empty });
 
       renderer.render([tabItem({ title: "Private", url: "chrome://newtab/", favIconUrl })]);
 
       expect(list.querySelector("img")).toBeNull();
-      expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("P");
+      const fallback = list.querySelector(".site-favicon-fallback.tab-favicon-fallback");
+      expect(fallback?.textContent).toBe("");
+      expect(fallback?.getAttribute("aria-hidden")).toBe("true");
     },
   );
 
@@ -491,7 +493,7 @@ describe("tab renderer", () => {
 
     renderer.patchTab(tab({ title: "Beta", active: true, url: "chrome://newtab/" }));
     expect(list.querySelector(".tab-favicon-fallback")).toBe(originalFallback);
-    expect(originalFallback?.textContent).toBe("B");
+    expect(originalFallback?.textContent).toBe("");
 
     renderer.patchTab(
       tab({ title: "Beta", url: "chrome://newtab/", favIconUrl: "data:image/png;base64,abc" }),
@@ -501,7 +503,7 @@ describe("tab renderer", () => {
 
     renderer.patchTab(tab({ title: "Gamma", url: "chrome://newtab/" }));
     expect(list.querySelector("img")).toBeNull();
-    expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("G");
+    expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("");
   });
 
   it("removes arbitrary IDs safely and reveals the empty state after the final row", () => {
@@ -516,7 +518,7 @@ describe("tab renderer", () => {
     expect(empty.hidden).toBe(false);
   });
 
-  it("falls back from the primary favicon to the root and then the title letter", () => {
+  it("falls back from the primary favicon to the root and then the network icon", () => {
     const renderer = createTabRenderer({ list, empty });
     renderer.render([tabItem({ title: "Alpha", favIconUrl: "https://cdn.example/broken.png" })]);
     const image = list.querySelector("img");
@@ -535,12 +537,12 @@ describe("tab renderer", () => {
       }),
     );
     expect(list.querySelector("img")).toBe(image);
-    expect(image?.dataset.fallback).toBe("B");
+    expect(image?.dataset.fallback).toBeUndefined();
 
     image?.dispatchEvent(new Event("error"));
 
     expect(list.querySelector("img")).toBeNull();
-    expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("B");
+    expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("");
   });
 
   it("starts at the root favicon when Chrome provides no primary", () => {
@@ -552,7 +554,7 @@ describe("tab renderer", () => {
     expect(image?.dataset.nextUrl).toBe("");
 
     image?.dispatchEvent(new Event("error"));
-    expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("A");
+    expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("");
   });
 
   it("does not retry a root favicon that duplicates the primary", () => {
@@ -566,7 +568,7 @@ describe("tab renderer", () => {
     image?.dispatchEvent(new Event("error"));
 
     expect(list.querySelector("img")).toBeNull();
-    expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("A");
+    expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("");
   });
 
   it("treats tab titles as text and never renders model domains", () => {
@@ -639,12 +641,12 @@ describe("tab renderer", () => {
     expect(rerendered.title).toBe("");
   });
 
-  it("keeps an emoji intact when deriving a favicon fallback", () => {
+  it("does not expose tab title text in the favicon fallback", () => {
     const renderer = createTabRenderer({ list, empty });
 
     renderer.render([tabItem({ title: "😀 Tab", url: "chrome://newtab/" })]);
 
-    expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("😀");
+    expect(list.querySelector(".tab-favicon-fallback")?.textContent).toBe("");
   });
 
   it("renders and patches one hundred rows without replacing their nodes", () => {

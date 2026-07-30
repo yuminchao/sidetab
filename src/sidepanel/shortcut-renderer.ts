@@ -215,7 +215,7 @@ export function createShortcutRenderer(
       target.src = nextCandidate.url;
       return;
     }
-    target.replaceWith(createShortcutLetter(target.dataset.fallback ?? ""));
+    target.replaceWith(createShortcutFallback());
   };
 
   const onShortcutIconLoad = (event: Event) => {
@@ -512,7 +512,6 @@ function updateShortcutButton(
   button.dataset.shortcutId = shortcut.id;
   button.title = shortcut.name;
   button.setAttribute("aria-label", shortcut.name);
-  const fallback = getFirstCharacter(shortcut.name);
   const origin = getHttpOrigin(shortcut.url);
   const candidates = createShortcutFaviconCandidates(
     faviconsByOrigin.get(origin),
@@ -523,13 +522,8 @@ function updateShortcutButton(
 
   if (button.dataset.candidatesKey !== candidatesKey) {
     button.dataset.candidatesKey = candidatesKey;
-    button.replaceChildren(createShortcutFavicon(candidates, origin, fallback));
-    return;
+    button.replaceChildren(createShortcutFavicon(candidates, origin));
   }
-  const image = button.querySelector<HTMLImageElement>("img");
-  if (image) image.dataset.fallback = fallback;
-  const letter = button.querySelector<HTMLElement>(".shortcut-letter");
-  if (letter) letter.textContent = fallback || "·";
 }
 
 type ShortcutFaviconCandidate = {
@@ -561,10 +555,9 @@ function createShortcutFaviconCandidates(
 function createShortcutFavicon(
   candidates: readonly ShortcutFaviconCandidate[],
   origin: string,
-  fallback: string,
 ): HTMLElement {
   const first = candidates[0];
-  if (!first) return createShortcutLetter(fallback);
+  if (!first) return createShortcutFallback();
   const image = document.createElement("img");
   image.src = first.url;
   image.width = 20;
@@ -574,7 +567,6 @@ function createShortcutFavicon(
   image.dataset.candidateIndex = "0";
   image.dataset.nextUrl = candidates[1]?.url ?? "";
   image.dataset.origin = origin;
-  image.dataset.fallback = fallback;
   return image;
 }
 
@@ -594,11 +586,11 @@ function readFaviconCandidates(image: HTMLImageElement): ShortcutFaviconCandidat
   }
 }
 
-function createShortcutLetter(text: string): HTMLElement {
-  const letter = document.createElement("span");
-  letter.className = "shortcut-letter";
-  letter.textContent = text || "·";
-  return letter;
+function createShortcutFallback(): HTMLElement {
+  const fallback = document.createElement("span");
+  fallback.className = "site-favicon-fallback shortcut-favicon-fallback";
+  fallback.setAttribute("aria-hidden", "true");
+  return fallback;
 }
 
 function createEditorRow(shortcut: Shortcut, index: number, total: number): HTMLElement {
@@ -675,10 +667,6 @@ function focusEditorAction(editor: HTMLElement, itemId: string, action: string):
   }
 
   row.querySelector<HTMLInputElement>(".shortcut-name")?.focus();
-}
-
-function getFirstCharacter(value: string): string {
-  return Array.from(value.trim())[0]?.toLocaleUpperCase() ?? "";
 }
 
 function copySettings(settings: ShortcutSettings): ShortcutSettings {

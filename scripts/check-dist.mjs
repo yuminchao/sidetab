@@ -62,6 +62,7 @@ const pngSizes = new Map([
   ["assets/icons/icon-128.png", 128],
 ]);
 const sanitizedSvgPaths = new Set([
+  "assets/icons/network.svg",
   "assets/icons/search.svg",
   "assets/icons/settings.svg",
 ]);

@@ -122,6 +122,15 @@ describe("side panel responsive CSS", () => {
     );
   });
 
+  it("uses the local network mask for every final favicon fallback", () => {
+    expect(css).toMatch(
+      /\.site-favicon-fallback\s*{[^}]*mask-image:\s*url\("\.\.\/assets\/icons\/network\.svg"\)[^}]*background-color:\s*currentColor/s,
+    );
+    expect(css).toMatch(/\.tab-favicon-fallback\s*{[^}]*width:\s*16px[^}]*height:\s*16px/s);
+    expect(css).toMatch(/\.history-favicon-fallback\s*{[^}]*width:\s*16px[^}]*height:\s*16px/s);
+    expect(css).toMatch(/\.shortcut-favicon-fallback\s*{[^}]*width:\s*20px[^}]*height:\s*20px/s);
+  });
+
   it("styles the appearance entry and settings gear without button chrome", () => {
     expect(css).toMatch(
       /\.appearance-setting\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)\s+32px[^}]*min-width:\s*0/s,

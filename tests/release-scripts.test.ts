@@ -14,6 +14,7 @@ const expectedFiles = [
   "assets/icons/icon-16.png",
   "assets/icons/icon-32.png",
   "assets/icons/icon-48.png",
+  "assets/icons/network.svg",
   "assets/icons/pin.svg",
   "assets/icons/search.svg",
   "assets/icons/settings.svg",
@@ -148,7 +149,7 @@ describe("release file contract", () => {
     const { EXPECTED_FILES } = await loadReleaseFiles();
 
     expect(EXPECTED_FILES).toEqual(expectedFiles);
-    expect(EXPECTED_FILES).toHaveLength(13);
+    expect(EXPECTED_FILES).toHaveLength(14);
     expect(EXPECTED_FILES).toEqual([...EXPECTED_FILES].sort());
   });
 

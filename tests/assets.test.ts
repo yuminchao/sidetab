@@ -23,7 +23,7 @@ describe("local image assets", () => {
     expect(contents.byteLength).toBeGreaterThan(0);
   });
 
-  it.each(["search.svg", "settings.svg"])(
+  it.each(["search.svg", "settings.svg", "network.svg"])(
     "provides a sanitized %s mask asset",
     (name) => {
       const assetPath = `assets/icons/${name}`;

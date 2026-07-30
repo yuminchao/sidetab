@@ -166,6 +166,29 @@ describe("history search controller", () => {
     controller.destroy();
   });
 
+  it("uses a text-free network fallback after history favicon candidates fail", async () => {
+    const search = vi.fn(async () => [
+      historyItem("1", "https://docs.example/page", "Documentation"),
+    ]);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      { history: { search }, onOpen: vi.fn(async () => undefined) },
+    );
+    input.focus();
+    await flush();
+    const image = results.querySelector<HTMLImageElement>("img")!;
+
+    image.dispatchEvent(new Event("error"));
+
+    const fallback = results.querySelector<HTMLElement>(
+      ".site-favicon-fallback.history-favicon-fallback",
+    );
+    expect(fallback?.textContent).toBe("");
+    expect(fallback?.getAttribute("aria-hidden")).toBe("true");
+    expect(results.querySelector("img")).toBeNull();
+    controller.destroy();
+  });
+
   it("debounces input by 100ms and uses only the latest value", async () => {
     vi.useFakeTimers();
     const pending = deferred<chrome.history.HistoryItem[]>();

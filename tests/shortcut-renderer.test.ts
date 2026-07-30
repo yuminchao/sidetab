@@ -179,7 +179,7 @@ describe("shortcut renderer", () => {
       const image = elements.strip.querySelector("img");
       expect(image?.getAttribute("src")).toBe("https://cdn.example/icon.png");
       expect(image?.dataset.nextUrl).toBe("https://example.com/favicon.ico");
-      expect(image?.dataset.fallback).toBe("E");
+      expect(image?.dataset.fallback).toBeUndefined();
       expect(image?.width).toBe(20);
       expect(image?.height).toBe(20);
       expect(image?.alt).toBe("");
@@ -336,7 +336,9 @@ describe("shortcut renderer", () => {
 
     const firstButton = elements.strip.querySelector(".shortcut-button");
     expect(firstButton?.querySelector("img")).toBeNull();
-    expect(firstButton?.querySelector(".shortcut-letter")?.textContent).toBe("E");
+    const fallback = firstButton?.querySelector(".site-favicon-fallback.shortcut-favicon-fallback");
+    expect(fallback?.textContent).toBe("");
+    expect(fallback?.getAttribute("aria-hidden")).toBe("true");
 
     renderer.render(settings());
     const imageAfterRender = elements.strip.querySelector("img");
@@ -444,14 +446,14 @@ describe("shortcut renderer", () => {
     expect(onCachedFaviconFailed).not.toHaveBeenCalled();
   });
 
-  it("keeps an emoji intact when deriving a letter icon", () => {
+  it("does not expose shortcut title text in the fallback icon", () => {
     const renderer = createShortcutRenderer(elements, { onOpen, onSave });
 
     renderer.render(settings({ items: [shortcut({ name: "😀 Site" })] }));
 
     elements.strip.querySelector("img")?.dispatchEvent(new Event("error"));
 
-    expect(elements.strip.querySelector(".shortcut-letter")?.textContent).toBe("😀");
+    expect(elements.strip.querySelector(".site-favicon-fallback")?.textContent).toBe("");
   });
 
   it("opens settings from the gear with an isolated current-settings draft", () => {
@@ -762,7 +764,7 @@ describe("shortcut renderer", () => {
 
     expect(document.querySelector("script")).toBeNull();
     expect(elements.strip.querySelector("img")).toBeNull();
-    expect(elements.strip.querySelector(".shortcut-letter")?.textContent).toBe("<");
+    expect(elements.strip.querySelector(".site-favicon-fallback")?.textContent).toBe("");
     expect(elements.editor.querySelector<HTMLInputElement>(".shortcut-name")?.value).toBe(
       "<img src=x onerror=alert(1)>",
     );

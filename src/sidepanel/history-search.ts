@@ -113,10 +113,10 @@ export function createHistorySearchController(
     }
   };
 
-  const createFallback = (text: string): HTMLElement => {
+  const createFallback = (): HTMLElement => {
     const fallback = elements.document.createElement("span");
-    fallback.className = "history-favicon-fallback";
-    fallback.textContent = text || "·";
+    fallback.className = "site-favicon-fallback history-favicon-fallback";
+    fallback.setAttribute("aria-hidden", "true");
     return fallback;
   };
 
@@ -128,7 +128,6 @@ export function createHistorySearchController(
     option.dataset.historyIndex = String(index);
     option.setAttribute("role", "option");
 
-    const fallback = Array.from(item.title.trim())[0]?.toLocaleUpperCase() ?? "";
     const origin = getHttpOrigin(item.url);
     const candidates = createFaviconCandidates(faviconsByOrigin.get(origin), item.url);
     if (candidates.length > 0) {
@@ -139,10 +138,9 @@ export function createHistorySearchController(
       image.width = 16;
       image.height = 16;
       image.dataset.nextUrl = candidates[1] ?? "";
-      image.dataset.fallback = fallback;
       option.append(image);
     } else {
-      option.append(createFallback(fallback));
+      option.append(createFallback());
     }
 
     const title = elements.document.createElement("span");
@@ -257,7 +255,7 @@ export function createHistorySearchController(
       image.dataset.nextUrl = "";
       image.src = nextUrl;
     } else {
-      image.replaceWith(createFallback(image.dataset.fallback ?? ""));
+      image.replaceWith(createFallback());
     }
   };
 
