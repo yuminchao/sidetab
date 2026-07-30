@@ -551,6 +551,37 @@ describe("release packaging", () => {
 });
 
 describe("Node dependency contract", () => {
+  it("provides an observational tab renderer benchmark outside the release package", async () => {
+    const packageJson = JSON.parse(await readFile(resolve("package.json"), "utf8"));
+
+    expect(packageJson.scripts["benchmark:tabs"]).toBe(
+      "node scripts/benchmark-tab-renderer.mjs",
+    );
+    const source = await readFile(resolve("scripts/benchmark-tab-renderer.mjs"), "utf8");
+    expect(source).not.toMatch(/process\.exit(?:Code)?\s*=|process\.exit\s*\(/);
+    expect(expectedFiles).not.toContain("scripts/benchmark-tab-renderer.mjs");
+
+    const output = execFileSync(process.execPath, ["scripts/benchmark-tab-renderer.mjs"], {
+      cwd: resolve("."),
+      encoding: "utf8",
+    });
+    const metrics = output.trim().split(/\r?\n/).map((line) => JSON.parse(line));
+    expect(metrics.map((metric) => metric.count)).toEqual([100, 500]);
+    for (const metric of metrics) {
+      expect(metric).toEqual({
+        count: expect.any(Number),
+        medianMs: expect.any(Number),
+        p95Ms: expect.any(Number),
+        domNodes: expect.any(Number),
+        heapUsedMb: expect.any(Number),
+      });
+      expect(metric.medianMs).toBeGreaterThanOrEqual(0);
+      expect(metric.p95Ms).toBeGreaterThanOrEqual(metric.medianMs);
+      expect(metric.domNodes).toBeGreaterThan(metric.count);
+      expect(metric.heapUsedMb).toBeGreaterThan(0);
+    }
+  });
+
   it("pins Vite 6 with an engine range that includes Node 20.11", async () => {
     const packageJson = JSON.parse(await readFile(resolve("package.json"), "utf8"));
     const vitePackage = JSON.parse(

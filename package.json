@@ -7,6 +7,7 @@
     "node": ">=20.11"
   },
   "scripts": {
+    "benchmark:tabs": "node scripts/benchmark-tab-renderer.mjs",
     "build": "node scripts/build.mjs",
     "check": "npm run typecheck && npm test -- --run && npm run build && node scripts/check-dist.mjs",
     "generate:icons": "node scripts/generate-icons.mjs",
