@@ -10,7 +10,7 @@ SideTab Lite 是一个 Chrome 侧边栏标签页管理扩展。它支持切换�
 4. 点击“加载已解压的扩展程序”，选择本项目的 `dist` 目录。
 5. 点击工具栏中的 SideTab Lite 图标打开侧边栏。
 
-`release/sidetab-lite-0.7.0.zip` 用于上传 Chrome Web Store 或传递构建产物。Chrome 通常不能直接双击 ZIP 安装扩展；本地测试请加载已解压的 `dist` 目录。
+`release/sidetab-lite-0.8.0.zip` 用于上传 Chrome Web Store 或传递构建产物。Chrome 通常不能直接双击 ZIP 安装扩展；本地测试请加载已解压的 `dist` 目录。
 
 ## 开发与打包
 
@@ -22,7 +22,7 @@ npm test -- --run
 npm run package
 ```
 
-`npm run package` 会依次执行类型检查、测试、构建和发布检查，再按固定文件顺序与时间戳生成并自验 ZIP。重复打包会覆盖目标 ZIP，但不会删除 `release/` 中的其他文件。`npm run generate:icons` 可重新生成仓库中的图标资源；发布产物只包含四个扩展 PNG 图标和固定、搜索、设置入口使用的三个 SVG，不包含兼容保留的快捷网站 PNG。
+`npm run package` 会依次执行类型检查、测试、构建和发布检查，再按固定文件顺序与时间戳生成并自验 ZIP。重复打包会覆盖目标 ZIP，但不会删除 `release/` 中的其他文件。`npm run generate:icons` 可重新生成仓库中的图标资源；发布产物只包含四个扩展 PNG 图标和固定、搜索、设置、网络兜底使用的四个 SVG，不包含兼容保留的快捷网站 PNG。
 
 ## 使用说明
 

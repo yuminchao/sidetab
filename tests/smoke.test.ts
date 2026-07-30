@@ -16,13 +16,13 @@ function parseCsp(value: string): Record<string, string[]> {
 }
 
 describe("extension manifest", () => {
-  it("keeps the npm and extension release versions aligned at 0.7.0", () => {
+  it("keeps the npm and extension release versions aligned at 0.8.0", () => {
     const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
     const packageLock = JSON.parse(readFileSync("package-lock.json", "utf8"));
-    expect(manifest.version).toBe("0.7.0");
-    expect(packageJson.version).toBe("0.7.0");
-    expect(packageLock.version).toBe("0.7.0");
-    expect(packageLock.packages[""].version).toBe("0.7.0");
+    expect(manifest.version).toBe("0.8.0");
+    expect(packageJson.version).toBe("0.8.0");
+    expect(packageLock.version).toBe("0.8.0");
+    expect(packageLock.packages[""].version).toBe("0.8.0");
   });
 
   it("documents the current release archive, permissions, and file count", () => {
@@ -33,7 +33,21 @@ describe("extension manifest", () => {
       expect(readme).toContain(`\`${permission}\``);
       expect(checklist).toContain(`\`${permission}\``);
     }
-    expect(checklist).toContain("13 个审核文件");
+    expect(checklist).toContain("14 个审核文件");
+  });
+
+  it("documents the 0.8.0 performance and consistency changes", () => {
+    const updateLog = readFileSync("update.log", "utf8");
+    for (const detail of [
+      "0.8.0",
+      "tabs.onReplaced",
+      "增量 DOM",
+      "快捷网站图标缓存",
+      "统一网络兜底",
+      "历史记录按完整 URL 去重",
+    ]) {
+      expect(updateLog).toContain(detail);
+    }
   });
 
   it("documents the 0.7.0 tab-group and middle-click workflows", () => {

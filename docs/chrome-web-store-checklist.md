@@ -34,8 +34,8 @@
 ## 隐私、安全与权限
 
 - [ ] 标签页图标优先使用 Chrome 提供的 `favIconUrl`。
-- [ ] 快捷入口优先使用当前窗口内同源标签页的 `favIconUrl`；没有可用图标时尝试站点的 `origin/favicon.ico`，加载失败后显示名称首字符。
-- [ ] 历史记录图标优先使用当前窗口内同源标签页的 `favIconUrl`；没有可用图标时尝试站点的 `origin/favicon.ico`，加载失败后显示名称首字符。
+- [ ] 快捷入口优先使用当前窗口内同源标签页的 `favIconUrl`；没有可用图标时尝试已缓存地址和站点的 `origin/favicon.ico`，加载失败后显示本地网络兜底图标，兜底图标不进入缓存。
+- [ ] 历史记录图标优先使用当前窗口内同源标签页的 `favIconUrl`；没有可用图标时尝试站点的 `origin/favicon.ico`，加载失败后显示本地网络兜底图标。
 - [ ] DevTools Network 记录符合披露：浏览器可能读取缓存，也可能请求 HTTP/HTTPS `favIconUrl`；必要时还可能请求 HTTP/HTTPS 站点的 `origin/favicon.ico`。
 - [ ] 确认扩展没有使用 `fetch`、`XMLHttpRequest` 或第三方 favicon 服务，没有脚本网络连接，也没有远程代码。
 - [ ] 权限精确为 `sidePanel`、`tabs`、`tabGroups`、`storage`、`history`，没有 host permission 和 content script。
@@ -59,7 +59,7 @@
 ## 构建产物
 
 - [ ] `npm run package` 完整通过。
-- [ ] `dist` 和 ZIP 精确包含 13 个审核文件，不包含 `assets/shortcuts/openai.png`、`google.png`、`github.png`。
+- [ ] `dist` 和 ZIP 精确包含 14 个审核文件，不包含 `assets/shortcuts/openai.png`、`google.png`、`github.png`。
 - [ ] ZIP 根目录直接包含 `manifest.json`，不包含 `dist/` 顶层目录。
 - [ ] ZIP 不包含源码、source map、测试、项目文档或 `node_modules`。
 - [ ] 在全新目录解压 ZIP 后重新执行一次“加载已解压”检查。

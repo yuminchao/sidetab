@@ -283,7 +283,7 @@ describe("dist validation", () => {
     });
   });
 
-  it("builds the real dist with all thirteen reviewed files and excludes shortcut PNGs", async () => {
+  it("builds the real dist with all fourteen reviewed files and excludes shortcut PNGs", async () => {
     execFileSync(process.execPath, ["scripts/build.mjs"], { cwd: resolve(".") });
     const { checkDist } = await loadCheckDist();
 
