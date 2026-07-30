@@ -50,7 +50,7 @@ describe("tab renderer", () => {
     document.body.append(list, empty);
   });
 
-  it("renders rows through a fragment with active state and accessible actions", () => {
+  it("renders rows incrementally with active state and accessible actions", () => {
     const replaceChildren = vi.spyOn(list, "replaceChildren");
     const renderer = createTabRenderer({ list, empty });
 
@@ -59,8 +59,7 @@ describe("tab renderer", () => {
       tabItem({ id: -4, title: "Other", domain: "other.example" }),
     ]);
 
-    expect(replaceChildren).toHaveBeenCalledOnce();
-    expect(replaceChildren.mock.calls[0]?.[0]).toBeInstanceOf(DocumentFragment);
+    expect(replaceChildren).not.toHaveBeenCalled();
     expect(empty.hidden).toBe(true);
     expect(list.children).toHaveLength(2);
 
@@ -319,29 +318,16 @@ describe("tab renderer", () => {
     expect(oldTab.querySelector(".tab-title")?.textContent).toBe("Patched tab");
   });
 
-  it("keeps the current DOM and indexes when replacing children throws", () => {
+  it("never replaces all children when rendering a new list", () => {
     const renderer = createTabRenderer({ list, empty });
     renderer.render([groupItem(), tabItem({ id: 7, groupId: 3 })]);
-    const oldGroup = list.children[0] as HTMLElement;
-    const oldTab = list.children[1] as HTMLElement;
-    const replaceChildren = vi.spyOn(list, "replaceChildren").mockImplementationOnce(() => {
-      throw new Error("replace failed");
-    });
+    const replaceChildren = vi.spyOn(list, "replaceChildren");
 
-    try {
-      expect(() => renderer.render([groupItem({ id: 4 }), tabItem({ id: 8 })])).toThrow(
-        "replace failed",
-      );
-    } finally {
-      replaceChildren.mockRestore();
-    }
-    renderer.patchGroup(group({ title: "Patched group" }));
-    renderer.patchTab(tab({ id: 7, groupId: 3, title: "Patched tab" }));
+    renderer.render([groupItem({ id: 4 }), tabItem({ id: 8 })]);
 
-    expect(list.children[0]).toBe(oldGroup);
-    expect(list.children[1]).toBe(oldTab);
-    expect(oldGroup.querySelector(".tab-group-title")?.textContent).toBe("Patched group");
-    expect(oldTab.querySelector(".tab-title")?.textContent).toBe("Patched tab");
+    expect(replaceChildren).not.toHaveBeenCalled();
+    expect(list.querySelector<HTMLElement>(".tab-group-row")?.dataset.groupId).toBe("4");
+    expect(list.querySelector<HTMLElement>(".tab-row")?.dataset.tabId).toBe("8");
   });
 
   it("clears row indexes when destroyed", () => {
@@ -678,5 +664,59 @@ describe("tab renderer", () => {
     expect(list.lastElementChild?.querySelector(".tab-title")?.textContent).toBe(
       "Tab 99 updated",
     );
+  });
+
+  it("reorders five hundred rows while preserving every keyed node", () => {
+    const renderer = createTabRenderer({ list, empty });
+    const tabs = Array.from({ length: 500 }, (_, index) =>
+      tab({ id: index + 1, index, title: `Tab ${index}` }),
+    );
+    renderer.render(tabs.map((item) => ({ kind: "tab" as const, tab: item })));
+    const original = new Map(
+      Array.from(list.querySelectorAll<HTMLElement>(".tab-row"), (row) => [
+        row.dataset.tabId,
+        row,
+      ]),
+    );
+    const reordered = [...tabs];
+    [reordered[0], reordered[499]] = [reordered[499]!, reordered[0]!];
+
+    renderer.render(reordered.map((item) => ({ kind: "tab" as const, tab: item })));
+
+    expect(list.firstElementChild).toBe(original.get("500"));
+    expect(list.lastElementChild).toBe(original.get("1"));
+    for (const row of list.querySelectorAll<HTMLElement>(".tab-row")) {
+      expect(row).toBe(original.get(row.dataset.tabId));
+    }
+  });
+
+  it("adds and removes only the changed keyed rows", () => {
+    const replaceChildren = vi.spyOn(list, "replaceChildren");
+    const renderer = createTabRenderer({ list, empty });
+    renderer.render([
+      tabItem({ id: 1, favIconUrl: "data:image/png;base64,one" }),
+      tabItem({ id: 2, favIconUrl: "data:image/png;base64,two" }),
+    ]);
+    const first = list.children[0] as HTMLElement;
+    const second = list.children[1] as HTMLElement;
+    const firstImage = first.querySelector("img");
+
+    renderer.render([
+      tabItem({ id: 1, favIconUrl: "data:image/png;base64,one" }),
+      tabItem({ id: 2, favIconUrl: "data:image/png;base64,two" }),
+      tabItem({ id: 3, favIconUrl: "data:image/png;base64,three" }),
+    ]);
+    const third = list.children[2] as HTMLElement;
+    renderer.render([
+      tabItem({ id: 1, favIconUrl: "data:image/png;base64,one" }),
+      tabItem({ id: 3, favIconUrl: "data:image/png;base64,three" }),
+    ]);
+
+    expect(replaceChildren).not.toHaveBeenCalled();
+    expect(list.children).toHaveLength(2);
+    expect(list.children[0]).toBe(first);
+    expect(list.children[1]).toBe(third);
+    expect(first.querySelector("img")).toBe(firstImage);
+    expect(second.isConnected).toBe(false);
   });
 });

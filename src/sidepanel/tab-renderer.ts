@@ -49,27 +49,51 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
 
   return {
     render(items) {
+      type PreparedRow = {
+        node: HTMLElement;
+        item: TabListItem;
+      };
+
+      const prepared: PreparedRow[] = [];
       const nextTabRows = new Map<number, HTMLElement>();
       const nextGroupRows = new Map<number, HTMLElement>();
-      const fragment = document.createDocumentFragment();
       for (const item of items) {
         if (item.kind === "tab") {
           if (nextTabRows.has(item.tab.id)) {
             throw new Error(`重复标签 ID: ${item.tab.id}`);
           }
-          const row = createTabRow(item.tab, dragEnabled);
+          const row = tabRows.get(item.tab.id) ?? createTabRow(item.tab, dragEnabled);
           nextTabRows.set(item.tab.id, row);
-          fragment.append(row);
+          prepared.push({ node: row, item });
         } else {
           if (nextGroupRows.has(item.group.id)) {
             throw new Error(`重复分组 ID: ${item.group.id}`);
           }
-          const row = createGroupRow(item.group);
+          const row = groupRows.get(item.group.id) ?? createGroupRow(item.group);
           nextGroupRows.set(item.group.id, row);
-          fragment.append(row);
+          prepared.push({ node: row, item });
         }
       }
-      list.replaceChildren(fragment);
+
+      for (const [index, preparedRow] of prepared.entries()) {
+        const current = list.children[index] ?? null;
+        if (current !== preparedRow.node) {
+          list.insertBefore(preparedRow.node, current);
+        }
+      }
+      for (const [id, row] of tabRows) {
+        if (!nextTabRows.has(id)) row.remove();
+      }
+      for (const [id, row] of groupRows) {
+        if (!nextGroupRows.has(id)) row.remove();
+      }
+      for (const preparedRow of prepared) {
+        if (preparedRow.item.kind === "tab") {
+          updateTabRow(preparedRow.node, preparedRow.item.tab, dragEnabled);
+        } else {
+          updateGroupRow(preparedRow.node, preparedRow.item.group);
+        }
+      }
       tabRows = nextTabRows;
       groupRows = nextGroupRows;
       empty.hidden = items.length !== 0;

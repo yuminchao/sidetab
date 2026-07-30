@@ -585,7 +585,7 @@ describe("sidebar lifecycle", () => {
     expect(rowIds()).toEqual([3, 2]);
     expect(row(3).dataset.active).toBe("true");
     expect(row(2).dataset.active).toBe("false");
-    expect(replaceChildren).toHaveBeenCalledOnce();
+    expect(replaceChildren).not.toHaveBeenCalled();
     cleanup();
   });
 
@@ -612,7 +612,7 @@ describe("sidebar lifecycle", () => {
     attached.resolve(fakeTab({ id: 4, index: 2, title: "Attached" }));
     const cleanup = await started;
     expect(rowIds()).toEqual([1, 2]);
-    expect(replaceChildren).toHaveBeenCalledOnce();
+    expect(replaceChildren).not.toHaveBeenCalled();
     cleanup();
   });
 
@@ -687,7 +687,7 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.historySearch).toHaveBeenCalledWith({
       text: "",
       startTime: 0,
-      maxResults: 20,
+      maxResults: 200,
     });
     expect(element("history-search-results").textContent).toContain("History");
     fake.methods.historySearch.mockClear();
@@ -700,7 +700,7 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.historySearch).toHaveBeenCalledWith({
       text: "beta",
       startTime: 0,
-      maxResults: 20,
+      maxResults: 200,
     });
     expect(rowIds()).toEqual([1, 2]);
     cleanup();
@@ -1211,7 +1211,7 @@ describe("sidebar lifecycle", () => {
     expect(groupRow(7).querySelector<HTMLElement>(".tab-group-color")?.dataset.color).toBe("red");
 
     fake.groupEvents.onUpdated.emit(fakeGroup({ id: 7, title: "Renamed", collapsed: true }));
-    expect(groupRow(7)).not.toBe(originalGroup);
+    expect(groupRow(7)).toBe(originalGroup);
     expect(rowIds()).toEqual([2]);
     cleanup();
   });
@@ -1303,7 +1303,6 @@ describe("sidebar lifecycle", () => {
       groups: [fakeGroup({ id: 7, title: "Initial" })],
     });
     const cleanup = await startSidebar(fake);
-    const replaceChildren = vi.spyOn(element("tab-list"), "replaceChildren");
     fake.methods.query.mockReturnValueOnce(resyncTabs.promise);
     fake.methods.groupQuery.mockReturnValueOnce(resyncGroups.promise);
     fake.methods.group.mockRejectedValueOnce(new Error("add failed"));
@@ -1324,7 +1323,6 @@ describe("sidebar lifecycle", () => {
     fake.groupEvents.onUpdated.emit(fakeGroup({ id: 7, title: "Live first" }));
     fake.events.onMoved.emit(2, { windowId: 10, fromIndex: 1, toIndex: 0 });
     fake.groupEvents.onUpdated.emit(fakeGroup({ id: 7, title: "Live latest" }));
-    const rendersBeforeSnapshot = replaceChildren.mock.calls.length;
     resyncTabs.resolve([
       fakeTab({ id: 1, index: 0, groupId: -1, title: "One" }),
       fakeTab({ id: 2, index: 1, groupId: 7, title: "Older title" }),
@@ -1332,7 +1330,9 @@ describe("sidebar lifecycle", () => {
     resyncGroups.resolve([fakeGroup({ id: 7, title: "Older group" })]);
 
     await vi.waitFor(() => {
-      expect(replaceChildren.mock.calls.length).toBeGreaterThan(rendersBeforeSnapshot);
+      expect(rowIds()).toEqual([2, 1]);
+      expect(row(2).querySelector(".tab-title")?.textContent).toBe("Live title");
+      expect(groupRow(7).querySelector(".tab-group-title")?.textContent).toBe("Live latest");
     });
     expect(rowIds()).toEqual([2, 1]);
     expect(row(2).querySelector(".tab-title")?.textContent).toBe("Live title");
