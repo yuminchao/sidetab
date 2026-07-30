@@ -319,6 +319,97 @@ describe("sidebar lifecycle", () => {
     },
   );
 
+  it("prefers live shortcut favicons and otherwise restores persisted cached URLs", async () => {
+    const fake = createFakeChrome({
+      stored: {
+        ...enabledShortcuts([
+          { id: "docs", name: "Docs", url: "https://docs.example/", icon: "letter" },
+          { id: "wiki", name: "Wiki", url: "https://wiki.example/", icon: "letter" },
+        ]),
+        shortcutFaviconCacheV1: {
+          "https://docs.example": "https://cache.example/docs.png",
+          "https://wiki.example": "https://cache.example/wiki.png",
+        },
+      },
+      tabs: [
+        fakeTab({
+          url: "https://docs.example/page",
+          favIconUrl: "https://live.example/docs.png",
+        }),
+      ],
+    });
+
+    const cleanup = await startSidebar(fake);
+
+    expect(shortcutImage("docs")?.getAttribute("src")).toBe(
+      "https://live.example/docs.png",
+    );
+    expect(shortcutImage("wiki")?.getAttribute("src")).toBe(
+      "https://cache.example/wiki.png",
+    );
+    cleanup();
+  });
+
+  it("learns loaded shortcut favicons in one coalesced cache snapshot", async () => {
+    const fake = createFakeChrome({
+      stored: enabledShortcuts([
+        { id: "docs", name: "Docs", url: "https://docs.example/", icon: "letter" },
+        { id: "wiki", name: "Wiki", url: "https://wiki.example/", icon: "letter" },
+      ]),
+    });
+    const cleanup = await startSidebar(fake);
+    shortcutImage("docs")?.dispatchEvent(new Event("load"));
+    shortcutImage("wiki")?.dispatchEvent(new Event("load"));
+
+    await vi.waitFor(() => expect(fake.methods.storageSet).toHaveBeenCalledOnce());
+    expect(fake.methods.storageSet).toHaveBeenCalledWith({
+      shortcutFaviconCacheV1: {
+        "https://docs.example": "https://docs.example/favicon.ico",
+        "https://wiki.example": "https://wiki.example/favicon.ico",
+      },
+    });
+    cleanup();
+  });
+
+  it("evicts a failed cached shortcut favicon and continues with the root candidate", async () => {
+    const fake = createFakeChrome({
+      stored: {
+        ...enabledShortcuts([
+          { id: "docs", name: "Docs", url: "https://docs.example/", icon: "letter" },
+        ]),
+        shortcutFaviconCacheV1: {
+          "https://docs.example": "https://cache.example/docs.png",
+        },
+      },
+    });
+    const cleanup = await startSidebar(fake);
+    const image = shortcutImage("docs")!;
+
+    image.dispatchEvent(new Event("error"));
+
+    expect(image.getAttribute("src")).toBe("https://docs.example/favicon.ico");
+    await vi.waitFor(() => expect(fake.methods.storageSet).toHaveBeenCalledOnce());
+    expect(fake.methods.storageSet).toHaveBeenCalledWith({ shortcutFaviconCacheV1: {} });
+    cleanup();
+  });
+
+  it("continues startup when the favicon cache cannot be read", async () => {
+    const fake = createFakeChrome({ stored: enabledShortcuts() });
+    fake.methods.storageGet.mockImplementation(async (key: string) => {
+      if (key === "shortcutFaviconCacheV1") throw new Error("cache unavailable");
+      return enabledShortcuts();
+    });
+
+    const cleanup = await startSidebar(fake);
+
+    expect(document.documentElement.dataset.ready).toBe("true");
+    expect(shortcutImage("docs")?.getAttribute("src")).toBe(
+      "https://docs.example/favicon.ico",
+    );
+    expect(element("status-message").textContent).toContain("无法读取快捷网站图标缓存");
+    cleanup();
+  });
+
   it("resyncs shortcut favicons from the complete tab store after live mutations", async () => {
     vi.useFakeTimers();
     const fake = createFakeChrome({
@@ -1703,6 +1794,32 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
+  it("prunes cached favicon URLs after shortcut origins change", async () => {
+    const fake = createFakeChrome({
+      stored: {
+        ...enabledShortcuts(),
+        shortcutFaviconCacheV1: {
+          "https://docs.example": "https://cache.example/docs.png",
+        },
+      },
+    });
+    const cleanup = await startSidebar(fake);
+    click(element("shortcut-settings"));
+    const url = element("shortcut-editor-list").querySelector<HTMLInputElement>(
+      ".shortcut-url",
+    )!;
+    url.value = "https://new.example/";
+    url.dispatchEvent(new Event("input", { bubbles: true }));
+
+    element<HTMLFormElement>("shortcut-form").dispatchEvent(
+      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+    );
+
+    await vi.waitFor(() => expect(fake.methods.storageSet).toHaveBeenCalledTimes(2));
+    expect(fake.methods.storageSet).toHaveBeenCalledWith({ shortcutFaviconCacheV1: {} });
+    cleanup();
+  });
+
   it("updates the DOM for all current-window events and ignores other windows", async () => {
     const fake = createFakeChrome({
       tabs: [
@@ -2015,7 +2132,9 @@ describe("sidebar lifecycle", () => {
     const sidebarModule = await import("../src/sidepanel/sidebar");
     expect(sidebarModule).not.toHaveProperty("bootstrapSidebar");
     expect(fake.methods.getCurrent).toHaveBeenCalledOnce();
-    expect(fake.methods.storageGet).toHaveBeenCalledOnce();
+    expect(fake.methods.storageGet).toHaveBeenCalledTimes(2);
+    expect(fake.methods.storageGet).toHaveBeenCalledWith("shortcutSettings");
+    expect(fake.methods.storageGet).toHaveBeenCalledWith("shortcutFaviconCacheV1");
     window.dispatchEvent(new Event("pagehide"));
     currentWindow.resolve({ id: 10 } as chrome.windows.Window);
     storage.resolve({});

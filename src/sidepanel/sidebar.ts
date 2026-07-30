@@ -2,7 +2,8 @@ import { appendTabShortcut, createDefaultShortcutSettings } from "./shortcut-mod
 import { createShortcutActions } from "./shortcut-actions";
 import { createShortcutRenderer } from "./shortcut-renderer";
 import { createShortcutStore, type StorageArea } from "./shortcut-store";
-import { createOriginFaviconMap } from "./favicon-model";
+import { createShortcutFaviconCacheStore } from "./shortcut-favicon-cache";
+import { createOriginFaviconMap, getHttpOrigin } from "./favicon-model";
 import {
   createHistorySearchController,
   type HistorySearchApi,
@@ -77,6 +78,7 @@ async function startSidebarInternal(
   const tabActions = createTabActions(deps.tabs);
   const groupActions = createTabGroupActions(deps.tabs, deps.tabGroups);
   const shortcutStore = createShortcutStore(deps.storage);
+  const faviconCacheStore = createShortcutFaviconCacheStore(deps.storage);
   const shortcutActions = createShortcutActions(deps.tabs);
   const tabRenderer = createTabRenderer({ list: elements.list, empty: elements.empty });
   let active = true;
@@ -181,7 +183,17 @@ async function startSidebarInternal(
     tabRenderer.render(buildTabListItems(tabStore.list(), groupStore.list()));
   };
 
-  const shortcutRenderer = createShortcutRenderer(
+  const flushFaviconCache = (): void => {
+    void faviconCacheStore.flush().catch((error: unknown) => {
+      setStatus(
+        "shortcuts",
+        error instanceof Error ? error.message : "无法保存快捷网站图标缓存",
+      );
+    });
+  };
+
+  let shortcutRenderer: ReturnType<typeof createShortcutRenderer>;
+  shortcutRenderer = createShortcutRenderer(
     {
       strip: elements.shortcutStrip,
       dialog: elements.dialog,
@@ -212,7 +224,27 @@ async function startSidebarInternal(
       onFontSizePreview: (size) => {
         deps.document.documentElement.style.setProperty("--tab-title-font-size", `${size}px`);
       },
-      onSave: (settings) => shortcutStore.save(settings),
+      onFaviconLoaded(origin, url) {
+        faviconCacheStore.update(origin, url);
+        flushFaviconCache();
+      },
+      onCachedFaviconFailed(origin, url) {
+        if (faviconCacheStore.snapshot().get(origin) !== url) return;
+        faviconCacheStore.update(origin, undefined);
+        queueMicrotask(() => {
+          if (active) {
+            shortcutRenderer.setCachedFaviconsByOrigin(faviconCacheStore.snapshot());
+          }
+        });
+        flushFaviconCache();
+      },
+      async onSave(settings) {
+        const saved = await shortcutStore.save(settings);
+        faviconCacheStore.prune(createShortcutOrigins(saved));
+        shortcutRenderer.setCachedFaviconsByOrigin(faviconCacheStore.snapshot());
+        flushFaviconCache();
+        return saved;
+      },
     },
   );
 
@@ -362,6 +394,9 @@ async function startSidebarInternal(
       });
       const saved = await shortcutStore.save(next);
       if (!active) return;
+      faviconCacheStore.prune(createShortcutOrigins(saved));
+      shortcutRenderer.setCachedFaviconsByOrigin(faviconCacheStore.snapshot());
+      flushFaviconCache();
       shortcutRenderer.render(saved);
       syncShortcutFavicons();
       setStatus("shortcuts", "已添加到快捷网站");
@@ -518,6 +553,7 @@ async function startSidebarInternal(
     historySearch.destroy();
     tabRenderer.destroy();
     shortcutRenderer.destroy();
+    faviconCacheStore.destroy();
     signal?.removeEventListener("abort", cleanup);
   };
 
@@ -870,26 +906,35 @@ async function startSidebarInternal(
 
   const finishShortcutLoad = (
     settings: ReturnType<typeof createDefaultShortcutSettings>,
+    cachedFavicons: ReadonlyMap<string, string>,
   ): void => {
     if (!active) {
       return;
     }
+    shortcutRenderer.setCachedFaviconsByOrigin(cachedFavicons);
     shortcutRenderer.render(settings);
     shortcutSettingsReady = true;
     elements.settingsButton.disabled = false;
   };
 
-  const loadShortcuts = shortcutStore.load().then(
-    (settings) => {
-      finishShortcutLoad(settings);
-    },
-    () => {
-      if (active) {
-        finishShortcutLoad(createDefaultShortcutSettings());
-        setStatus("shortcuts", "无法读取快捷网站设置");
-      }
-    },
-  );
+  const loadShortcuts = Promise.all([
+    shortcutStore.load().then(
+      (settings) => ({ settings, error: "" }),
+      () => ({ settings: createDefaultShortcutSettings(), error: "无法读取快捷网站设置" }),
+    ),
+    faviconCacheStore.load().then(
+      (cache) => ({ cache, error: "" }),
+      () => ({ cache: new Map<string, string>(), error: "无法读取快捷网站图标缓存" }),
+    ),
+  ]).then(([settingsResult, cacheResult]) => {
+    if (!active) return;
+    faviconCacheStore.prune(createShortcutOrigins(settingsResult.settings));
+    const cache = faviconCacheStore.snapshot();
+    finishShortcutLoad(settingsResult.settings, cache);
+    const message = [settingsResult.error, cacheResult.error].filter(Boolean).join("；");
+    setStatus("shortcuts", message);
+    flushFaviconCache();
+  });
 
   const loadTabsAndGroups = (async () => {
     try {
@@ -1013,6 +1058,17 @@ function findTabRow(list: HTMLElement, tabId: number): HTMLElement | undefined {
   return Array.from(list.children).find(
     (child): child is HTMLElement =>
       child instanceof HTMLElement && child.dataset.tabId === String(tabId),
+  );
+}
+
+function createShortcutOrigins(
+  settings: ReturnType<typeof createDefaultShortcutSettings>,
+): ReadonlySet<string> {
+  return new Set(
+    settings.items
+      .slice(0, 12)
+      .map((shortcut) => getHttpOrigin(shortcut.url))
+      .filter(Boolean),
   );
 }
 

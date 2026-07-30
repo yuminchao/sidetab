@@ -152,7 +152,7 @@ export function createFakeChrome(options: {
     return updated;
   });
   const getCurrent = vi.fn(async () => options.currentWindow ?? ({ id: 10 } as chrome.windows.Window));
-  const storageGet = vi.fn(async () => options.stored ?? {});
+  const storageGet = vi.fn(async (_key: string) => options.stored ?? {});
   const storageSet = vi.fn<(items: Record<string, unknown>) => Promise<void>>(
     async () => undefined,
   );
