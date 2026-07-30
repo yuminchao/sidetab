@@ -1703,7 +1703,7 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
-  it("updates the DOM for all seven current-window events and ignores other windows", async () => {
+  it("updates the DOM for all current-window events and ignores other windows", async () => {
     const fake = createFakeChrome({
       tabs: [
         fakeTab({ id: 1, index: 0, active: true }),
@@ -1741,6 +1741,90 @@ describe("sidebar lifecycle", () => {
     await flush();
     expect(rowIds()).toEqual([3, 4]);
     expect(row(3).querySelector(".tab-title")?.textContent).toBe("Three");
+    cleanup();
+  });
+
+  it("replaces a live tab ID once while preserving unchanged keyed rows", async () => {
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 1, index: 0 }), fakeTab({ id: 2, index: 1, title: "Two" })],
+    });
+    const cleanup = await startSidebar(fake);
+    const unchanged = row(2);
+    fake.setTabs([
+      fakeTab({ id: 3, index: 0, title: "Replacement" }),
+      fakeTab({ id: 2, index: 1, title: "Two" }),
+    ]);
+
+    fake.events.onReplaced.emit(3, 1);
+    await flush();
+
+    expect(rowIds()).toEqual([3, 2]);
+    expect(document.querySelectorAll("[data-tab-id='3']")).toHaveLength(1);
+    expect(document.querySelector("[data-tab-id='1']")).toBeNull();
+    expect(row(2)).toBe(unchanged);
+    cleanup();
+  });
+
+  it("replays a replacement over an older startup snapshot", async () => {
+    const snapshot = deferred<chrome.tabs.Tab[]>();
+    const fake = createFakeChrome();
+    fake.methods.query.mockReturnValueOnce(snapshot.promise);
+    const started = startSidebar(fake);
+    await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledOnce());
+    fake.setTabs([
+      fakeTab({ id: 3, index: 0, title: "Replacement" }),
+      fakeTab({ id: 2, index: 1, title: "Two" }),
+    ]);
+
+    fake.events.onReplaced.emit(3, 1);
+    snapshot.resolve([
+      fakeTab({ id: 1, index: 0, title: "Old" }),
+      fakeTab({ id: 2, index: 1, title: "Two" }),
+    ]);
+    const cleanup = await started;
+
+    expect(rowIds()).toEqual([3, 2]);
+    cleanup();
+  });
+
+  it("keeps a buffered close after its deferred replacement lookup", async () => {
+    const snapshot = deferred<chrome.tabs.Tab[]>();
+    const replacement = deferred<chrome.tabs.Tab>();
+    const fake = createFakeChrome();
+    fake.methods.query.mockReturnValueOnce(snapshot.promise);
+    fake.methods.get.mockReturnValueOnce(replacement.promise);
+    const started = startSidebar(fake);
+    await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledOnce());
+
+    fake.events.onReplaced.emit(3, 1);
+    fake.events.onRemoved.emit(3, { windowId: 10, isWindowClosing: false });
+    snapshot.resolve([
+      fakeTab({ id: 1, index: 0, title: "Old" }),
+      fakeTab({ id: 2, index: 1, title: "Two" }),
+    ]);
+    await flush();
+    replacement.resolve(fakeTab({ id: 3, index: 0, title: "Replacement" }));
+    const cleanup = await started;
+
+    expect(rowIds()).toEqual([2]);
+    cleanup();
+  });
+
+  it("merges concurrent replacement lookup failures into one resync", async () => {
+    const resync = deferred<chrome.tabs.Tab[]>();
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 1 })] });
+    const cleanup = await startSidebar(fake);
+    fake.methods.query.mockReturnValueOnce(resync.promise);
+    fake.methods.get.mockRejectedValue(new Error("replacement gone"));
+
+    fake.events.onReplaced.emit(3, 1);
+    fake.events.onReplaced.emit(4, 1);
+    await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledTimes(2));
+    expect(fake.methods.groupQuery).toHaveBeenCalledTimes(2);
+    resync.resolve([fakeTab({ id: 1 })]);
+    await flush();
+
+    expect(fake.methods.query).toHaveBeenCalledTimes(2);
     cleanup();
   });
 
@@ -1839,19 +1923,24 @@ describe("sidebar lifecycle", () => {
   it("cleans up idempotently, cancels debounce, destroys renderers, and ignores in-flight work", async () => {
     vi.useFakeTimers();
     const attached = deferred<chrome.tabs.Tab>();
+    const replacement = deferred<chrome.tabs.Tab>();
     const fake = createFakeChrome({
       tabs: [fakeTab({ id: 1, favIconUrl: "data:image/png;base64,broken" })],
     });
-    fake.methods.get.mockReturnValueOnce(attached.promise);
+    fake.methods.get
+      .mockReturnValueOnce(attached.promise)
+      .mockReturnValueOnce(replacement.promise);
     const cleanup = await startSidebar(fake);
     input("missing");
     fake.events.onAttached.emit(4, { newWindowId: 10, newPosition: 1 });
+    fake.events.onReplaced.emit(5, 1);
     const image = row(1).querySelector("img")!;
 
     cleanup();
     cleanup();
     await vi.advanceTimersByTimeAsync(100);
     attached.resolve(fakeTab({ id: 4, index: 1 }));
+    replacement.resolve(fakeTab({ id: 5, index: 0 }));
     await flush();
     image.dispatchEvent(new Event("error"));
     click(element("shortcut-settings"));

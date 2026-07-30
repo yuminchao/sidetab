@@ -685,7 +685,7 @@ describe("tab renderer", () => {
 
     expect(list.firstElementChild).toBe(original.get("500"));
     expect(list.lastElementChild).toBe(original.get("1"));
-    for (const row of list.querySelectorAll<HTMLElement>(".tab-row")) {
+    for (const row of Array.from(list.querySelectorAll<HTMLElement>(".tab-row"))) {
       expect(row).toBe(original.get(row.dataset.tabId));
     }
   });

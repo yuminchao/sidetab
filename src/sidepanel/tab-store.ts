@@ -87,6 +87,34 @@ export class TabStore {
     return this.put(tab);
   }
 
+  replaceId(removedId: number, replacement: chrome.tabs.Tab): TabViewModel | undefined {
+    let model: TabViewModel;
+    try {
+      model = toTabViewModel(replacement);
+    } catch {
+      return undefined;
+    }
+
+    const ordered = this.tabsInChromeOrder()
+      .filter((tab) => tab.id !== removedId && tab.id !== model.id);
+    const destination = Math.max(0, Math.min(model.index, ordered.length));
+    ordered.splice(destination, 0, model);
+
+    const next = new Map<number, TabViewModel>();
+    for (const [index, tab] of ordered.entries()) {
+      next.set(tab.id, {
+        ...tab,
+        index,
+        active: model.active ? tab.id === model.id : tab.active,
+      });
+    }
+    this.tabs.clear();
+    for (const [id, tab] of next) {
+      this.tabs.set(id, tab);
+    }
+    return copyTab(this.tabs.get(model.id)!);
+  }
+
   remove(id: number): boolean {
     const tab = this.tabs.get(id);
     if (!tab) {

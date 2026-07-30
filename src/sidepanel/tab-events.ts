@@ -6,6 +6,8 @@ export type TabEventHandlers = {
   moved(tabId: number, index: number): void;
   detached(tabId: number): void;
   attached(tab: chrome.tabs.Tab): void;
+  replaced(tab: chrome.tabs.Tab, removedTabId: number): void;
+  replacementLookupFailed(): void;
 };
 
 export function subscribeToTabEvents(
@@ -55,6 +57,9 @@ export function subscribeToTabEvents(
       handlers.detached(tabId);
     }
   };
+  const onReplaced = (addedTabId: number, removedTabId: number): void => {
+    void forwardReplacedTab(addedTabId, removedTabId);
+  };
 
   async function forwardAttachedTab(tabId: number): Promise<void> {
     try {
@@ -67,6 +72,19 @@ export function subscribeToTabEvents(
     }
   }
 
+  async function forwardReplacedTab(addedTabId: number, removedTabId: number): Promise<void> {
+    try {
+      const tab = await tabsApi.get(addedTabId);
+      if (active && tab.windowId === currentWindowId) {
+        handlers.replaced(tab, removedTabId);
+      }
+    } catch {
+      if (active) {
+        handlers.replacementLookupFailed();
+      }
+    }
+  }
+
   tabsApi.onCreated.addListener(onCreated);
   tabsApi.onRemoved.addListener(onRemoved);
   tabsApi.onUpdated.addListener(onUpdated);
@@ -74,6 +92,7 @@ export function subscribeToTabEvents(
   tabsApi.onMoved.addListener(onMoved);
   tabsApi.onAttached.addListener(onAttached);
   tabsApi.onDetached.addListener(onDetached);
+  tabsApi.onReplaced.addListener(onReplaced);
 
   return () => {
     if (!active) {
@@ -87,5 +106,6 @@ export function subscribeToTabEvents(
     tabsApi.onMoved.removeListener(onMoved);
     tabsApi.onAttached.removeListener(onAttached);
     tabsApi.onDetached.removeListener(onDetached);
+    tabsApi.onReplaced.removeListener(onReplaced);
   };
 }

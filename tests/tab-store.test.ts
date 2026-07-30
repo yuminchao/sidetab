@@ -128,6 +128,34 @@ describe("TabStore", () => {
     expect(store.list().map((item) => [item.id, item.index])).toEqual([[3, 0], [4, 1], [1, 2], [2, 3]]);
   });
 
+  it("atomically replaces an old ID and keeps one replacement in Chrome index order", () => {
+    const store = new TabStore();
+    store.initialize([
+      tab({ id: 1, index: 0 }),
+      tab({ id: 2, index: 1, active: true }),
+      tab({ id: 9, index: 2, title: "Stale target" }),
+      tab({ id: 3, index: 3 }),
+    ]);
+
+    expect(
+      store.replaceId(2, tab({ id: 9, index: 1, title: "Replacement", active: true })),
+    ).toMatchObject({ id: 9, index: 1, title: "Replacement", active: true });
+    expect(store.list().map((item) => [item.id, item.index])).toEqual([
+      [1, 0],
+      [9, 1],
+      [3, 2],
+    ]);
+  });
+
+  it("preserves the complete store when an ID replacement is invalid", () => {
+    const store = new TabStore();
+    store.initialize([tab({ id: 1, index: 0 }), tab({ id: 2, index: 1, active: true })]);
+    const before = store.list();
+
+    expect(store.replaceId(1, tab({ id: undefined, index: 0 }))).toBeUndefined();
+    expect(store.list()).toEqual(before);
+  });
+
   it("updates a tab without allowing its ID to change and removes exactly once", () => {
     const store = new TabStore();
     store.add(tab({ id: 1 }));

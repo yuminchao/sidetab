@@ -13,6 +13,7 @@ type ActivatedListener = (info: chrome.tabs.OnActivatedInfo) => void;
 type MovedListener = (tabId: number, info: chrome.tabs.OnMovedInfo) => void;
 type AttachedListener = (tabId: number, info: chrome.tabs.OnAttachedInfo) => void;
 type DetachedListener = (tabId: number, info: chrome.tabs.OnDetachedInfo) => void;
+type ReplacedListener = (addedTabId: number, removedTabId: number) => void;
 
 function tab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
   return { id: 1, windowId: 10, index: 0, active: false, pinned: false, ...overrides } as chrome.tabs.Tab;
@@ -27,6 +28,7 @@ function setup(get: (tabId: number) => Promise<chrome.tabs.Tab> = async (id) => 
     onMoved: new FakeEvent<MovedListener>(),
     onAttached: new FakeEvent<AttachedListener>(),
     onDetached: new FakeEvent<DetachedListener>(),
+    onReplaced: new FakeEvent<ReplacedListener>(),
   };
   const handlers: TabEventHandlers = {
     created: vi.fn(),
@@ -36,6 +38,8 @@ function setup(get: (tabId: number) => Promise<chrome.tabs.Tab> = async (id) => 
     moved: vi.fn(),
     detached: vi.fn(),
     attached: vi.fn(),
+    replaced: vi.fn(),
+    replacementLookupFailed: vi.fn(),
   };
   const api = { ...events, get } as unknown as typeof chrome.tabs;
   return { events, handlers, api };
@@ -165,7 +169,7 @@ describe("tab event subscription", () => {
     expect(handlers.attached).not.toHaveBeenCalled();
   });
 
-  it("stops all seven event types after unsubscribe", async () => {
+  it("stops all eight event types after unsubscribe", async () => {
     const { api, events, handlers } = setup();
     const unsubscribe = subscribeToTabEvents(api, 10, handlers);
     unsubscribe();
@@ -177,6 +181,7 @@ describe("tab event subscription", () => {
     events.onMoved.emit(1, { windowId: 10, fromIndex: 0, toIndex: 1 });
     events.onDetached.emit(1, { oldWindowId: 10, oldPosition: 0 });
     events.onAttached.emit(1, { newWindowId: 10, newPosition: 0 });
+    events.onReplaced.emit(2, 1);
     await flushAttached();
 
     for (const handler of Object.values(handlers)) {
@@ -197,6 +202,56 @@ describe("tab event subscription", () => {
     await flushAttached();
 
     expect(handlers.attached).not.toHaveBeenCalled();
+  });
+
+  it("loads and forwards a replacement only when its added tab is in the current window", async () => {
+    const get = vi.fn(async (id: number) => tab({ id, windowId: id === 11 ? 10 : 20 }));
+    const { api, events, handlers } = setup(get);
+    subscribeToTabEvents(api, 10, handlers);
+
+    events.onReplaced.emit(11, 1);
+    events.onReplaced.emit(12, 2);
+    await flushAttached();
+
+    expect(get).toHaveBeenNthCalledWith(1, 11);
+    expect(get).toHaveBeenNthCalledWith(2, 12);
+    expect(handlers.replaced).toHaveBeenCalledOnce();
+    expect(handlers.replaced).toHaveBeenCalledWith(tab({ id: 11 }), 1);
+    expect(handlers.replacementLookupFailed).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["promise rejection", () => vi.fn().mockRejectedValue(new Error("gone"))],
+    ["synchronous throw", () => vi.fn(() => { throw new Error("gone"); })],
+  ])("reports a replacement get %s", async (_case, makeGet) => {
+    const { api, events, handlers } = setup(makeGet());
+    subscribeToTabEvents(api, 10, handlers);
+
+    expect(() => events.onReplaced.emit(11, 1)).not.toThrow();
+    await flushAttached();
+
+    expect(handlers.replaced).not.toHaveBeenCalled();
+    expect(handlers.replacementLookupFailed).toHaveBeenCalledOnce();
+  });
+
+  it("invalidates an in-flight replacement success and failure after unsubscribe", async () => {
+    const first = deferred<chrome.tabs.Tab>();
+    const second = deferred<chrome.tabs.Tab>();
+    const get = vi.fn()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const { api, events, handlers } = setup(get);
+    const unsubscribe = subscribeToTabEvents(api, 10, handlers);
+
+    events.onReplaced.emit(11, 1);
+    events.onReplaced.emit(12, 2);
+    unsubscribe();
+    first.resolve(tab({ id: 11 }));
+    second.reject(new Error("gone"));
+    await flushAttached();
+
+    expect(handlers.replaced).not.toHaveBeenCalled();
+    expect(handlers.replacementLookupFailed).not.toHaveBeenCalled();
   });
 
   it("safely ignores an in-flight attached rejection after unsubscribe", async () => {

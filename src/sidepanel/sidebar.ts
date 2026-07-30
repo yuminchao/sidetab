@@ -86,10 +86,15 @@ async function startSidebarInternal(
   let bufferingEvents = false;
   let faviconMapSignature: string | undefined;
   const bufferedEvents: Array<Promise<() => void>> = [];
-  type AttachedSlot = { resolve(mutation: () => void): void };
-  const attachedSlotsById = new Map<number, AttachedSlot[]>();
-  const pendingAttachedSlots = new Set<AttachedSlot>();
+  type AsyncEventSlot = {
+    kind: "attached" | "replaced";
+    removedTabId?: number;
+    resolve(mutation: () => void): void;
+  };
+  const asyncEventSlotsById = new Map<number, AsyncEventSlot[]>();
+  const pendingAsyncEventSlots = new Set<AsyncEventSlot>();
   const bufferedAttachedTabs = new WeakSet<chrome.tabs.Tab>();
+  const bufferedReplacementTabs = new WeakSet<chrome.tabs.Tab>();
   let shortcutSettingsReady = false;
   let operationGeneration = 0;
   let reorderBusy = false;
@@ -148,12 +153,12 @@ async function startSidebarInternal(
   elements.settingsButton.disabled = true;
   elements.settingsButton.addEventListener("click", blockPendingSettings, true);
 
-  const discardPendingAttached = (): void => {
-    for (const slot of pendingAttachedSlots) {
+  const discardPendingAsyncEvents = (): void => {
+    for (const slot of pendingAsyncEventSlots) {
       slot.resolve(() => undefined);
     }
-    pendingAttachedSlots.clear();
-    attachedSlotsById.clear();
+    pendingAsyncEventSlots.clear();
+    asyncEventSlotsById.clear();
   };
 
   const finishBufferedEvents = async (): Promise<boolean> => {
@@ -495,7 +500,7 @@ async function startSidebarInternal(
     unsubscribeGroups();
     bufferingEvents = false;
     bufferedEvents.length = 0;
-    discardPendingAttached();
+    discardPendingAsyncEvents();
     elements.list.removeEventListener("click", onListClick);
     elements.newTabButton.removeEventListener("click", onNewTabClick);
     elements.tabScroll.removeEventListener("scroll", onTabScroll);
@@ -624,6 +629,22 @@ async function startSidebarInternal(
         true,
       );
     },
+    replaced(tab: chrome.tabs.Tab, removedTabId: number) {
+      if (bufferedReplacementTabs.delete(tab)) {
+        return;
+      }
+      contextMenu.closeForTab(removedTabId);
+      applyEvent(
+        () => {
+          tabStore.replaceId(removedTabId, tab);
+        },
+        renderTabList,
+        true,
+      );
+    },
+    replacementLookupFailed() {
+      void resyncTabsAndGroups();
+    },
     updated(tab: chrome.tabs.Tab) {
       let previous: ReturnType<TabStore["list"]>[number] | undefined;
       let model: ReturnType<TabStore["replace"]>;
@@ -737,23 +758,32 @@ async function startSidebarInternal(
     },
   };
 
-  const subscribeWithBufferedAttachments = (windowId: number): (() => void) => {
+  const subscribeWithBufferedAsyncEvents = (windowId: number): (() => void) => {
     type AttachedListener = Parameters<typeof deps.tabs.onAttached.addListener>[0];
+    type ReplacedListener = Parameters<typeof deps.tabs.onReplaced.addListener>[0];
     const attachedListeners = new Map<AttachedListener, AttachedListener>();
+    const replacedListeners = new Map<ReplacedListener, ReplacedListener>();
+    const reserveAsyncEvent = (
+      tabId: number,
+      kind: AsyncEventSlot["kind"],
+      removedTabId?: number,
+    ): void => {
+      let resolve!: (mutation: () => void) => void;
+      const promise = new Promise<() => void>((resolvePromise) => {
+        resolve = resolvePromise;
+      });
+      const slot: AsyncEventSlot = { kind, removedTabId, resolve };
+      const slots = asyncEventSlotsById.get(tabId) ?? [];
+      slots.push(slot);
+      asyncEventSlotsById.set(tabId, slots);
+      pendingAsyncEventSlots.add(slot);
+      bufferedEvents.push(promise);
+    };
     const wrappedOnAttached = {
       addListener(listener: AttachedListener): void {
         const wrapped: AttachedListener = (tabId, attachInfo) => {
           if (active && bufferingEvents && attachInfo.newWindowId === windowId) {
-            let resolve!: (mutation: () => void) => void;
-            const promise = new Promise<() => void>((resolvePromise) => {
-              resolve = resolvePromise;
-            });
-            const slot: AttachedSlot = { resolve };
-            const slots = attachedSlotsById.get(tabId) ?? [];
-            slots.push(slot);
-            attachedSlotsById.set(tabId, slots);
-            pendingAttachedSlots.add(slot);
-            bufferedEvents.push(promise);
+            reserveAsyncEvent(tabId, "attached");
           }
           listener(tabId, attachInfo);
         };
@@ -768,22 +798,51 @@ async function startSidebarInternal(
         }
       },
     } as typeof deps.tabs.onAttached;
+    const wrappedOnReplaced = {
+      addListener(listener: ReplacedListener): void {
+        const wrapped: ReplacedListener = (addedTabId, removedTabId) => {
+          if (active && bufferingEvents) {
+            reserveAsyncEvent(addedTabId, "replaced", removedTabId);
+          }
+          listener(addedTabId, removedTabId);
+        };
+        replacedListeners.set(listener, wrapped);
+        deps.tabs.onReplaced.addListener(wrapped);
+      },
+      removeListener(listener: ReplacedListener): void {
+        const wrapped = replacedListeners.get(listener);
+        if (wrapped) {
+          deps.tabs.onReplaced.removeListener(wrapped);
+          replacedListeners.delete(listener);
+        }
+      },
+    } as typeof deps.tabs.onReplaced;
 
-    const getAttachedTab = async (tabId: number): Promise<chrome.tabs.Tab> => {
-      const slots = attachedSlotsById.get(tabId);
+    const getAsyncEventTab = async (tabId: number): Promise<chrome.tabs.Tab> => {
+      const slots = asyncEventSlotsById.get(tabId);
       const slot = slots?.shift();
       if (slots?.length === 0) {
-        attachedSlotsById.delete(tabId);
+        asyncEventSlotsById.delete(tabId);
       }
       try {
         const tab = await deps.tabs.get(tabId);
         if (slot) {
-          pendingAttachedSlots.delete(slot);
+          pendingAsyncEventSlots.delete(slot);
           if (active && tab.windowId === windowId) {
-            bufferedAttachedTabs.add(tab);
-            slot.resolve(() => {
-              tabStore.add(tab);
-            });
+            if (slot.kind === "attached") {
+              bufferedAttachedTabs.add(tab);
+              slot.resolve(() => {
+                tabStore.add(tab);
+              });
+            } else {
+              bufferedReplacementTabs.add(tab);
+              slot.resolve(() => {
+                if (slot.removedTabId !== undefined) {
+                  contextMenu.closeForTab(slot.removedTabId);
+                  tabStore.replaceId(slot.removedTabId, tab);
+                }
+              });
+            }
           } else {
             slot.resolve(() => undefined);
           }
@@ -791,7 +850,7 @@ async function startSidebarInternal(
         return tab;
       } catch (error) {
         if (slot) {
-          pendingAttachedSlots.delete(slot);
+          pendingAsyncEventSlots.delete(slot);
           slot.resolve(() => undefined);
         }
         throw error;
@@ -801,7 +860,8 @@ async function startSidebarInternal(
     const tabsApi = new Proxy(deps.tabs, {
       get(target, property, receiver) {
         if (property === "onAttached") return wrappedOnAttached;
-        if (property === "get") return getAttachedTab;
+        if (property === "onReplaced") return wrappedOnReplaced;
+        if (property === "get") return getAsyncEventTab;
         return Reflect.get(target, property, receiver) as unknown;
       },
     });
@@ -846,7 +906,7 @@ async function startSidebarInternal(
 
       currentWindowId = windowId;
       bufferingEvents = true;
-      unsubscribeTabs = subscribeWithBufferedAttachments(windowId);
+      unsubscribeTabs = subscribeWithBufferedAsyncEvents(windowId);
       unsubscribeGroups = subscribeToTabGroupEvents(
         deps.tabGroups,
         windowId,
@@ -865,7 +925,7 @@ async function startSidebarInternal(
           unsubscribeGroups = () => undefined;
           bufferingEvents = false;
           bufferedEvents.length = 0;
-          discardPendingAttached();
+          discardPendingAsyncEvents();
           setStatus("tabs", "无法读取当前窗口的标签页");
         }
         return;

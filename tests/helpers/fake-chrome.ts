@@ -12,6 +12,7 @@ type ActivatedListener = (info: chrome.tabs.OnActivatedInfo) => void;
 type MovedListener = (tabId: number, info: chrome.tabs.OnMovedInfo) => void;
 type AttachedListener = (tabId: number, info: chrome.tabs.OnAttachedInfo) => void;
 type DetachedListener = (tabId: number, info: chrome.tabs.OnDetachedInfo) => void;
+type ReplacedListener = (addedTabId: number, removedTabId: number) => void;
 type TabGroupListener = (group: chrome.tabGroups.TabGroup) => void;
 
 export function fakeTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
@@ -57,6 +58,7 @@ export function createFakeChrome(options: {
     onMoved: new FakeEvent<MovedListener>(),
     onAttached: new FakeEvent<AttachedListener>(),
     onDetached: new FakeEvent<DetachedListener>(),
+    onReplaced: new FakeEvent<ReplacedListener>(),
   };
   const groupEvents = {
     onCreated: new FakeEvent<TabGroupListener>(),
@@ -198,6 +200,9 @@ export function createFakeChrome(options: {
       historySearch,
       storageGet,
       storageSet,
+    },
+    setTabs(next: chrome.tabs.Tab[]) {
+      tabState = next.map((tab) => ({ ...tab }));
     },
   };
 }
