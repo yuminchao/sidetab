@@ -84,6 +84,7 @@ async function startSidebarInternal(
   let unsubscribeTabs: () => void = () => undefined;
   let unsubscribeGroups: () => void = () => undefined;
   let bufferingEvents = false;
+  let faviconMapSignature: string | undefined;
   const bufferedEvents: Array<Promise<() => void>> = [];
   type AttachedSlot = { resolve(mutation: () => void): void };
   const attachedSlotsById = new Map<number, AttachedSlot[]>();
@@ -230,11 +231,13 @@ async function startSidebarInternal(
   );
 
   const syncShortcutFavicons = (): void => {
-    if (active) {
-      const favicons = createOriginFaviconMap(tabStore.list());
-      shortcutRenderer.setFaviconsByOrigin(favicons);
-      historySearch.setFaviconsByOrigin(favicons);
-    }
+    if (!active) return;
+    const favicons = createOriginFaviconMap(tabStore.list());
+    const signature = JSON.stringify(Array.from(favicons.entries()));
+    if (signature === faviconMapSignature) return;
+    faviconMapSignature = signature;
+    shortcutRenderer.setFaviconsByOrigin(favicons);
+    historySearch.setFaviconsByOrigin(favicons);
   };
 
   const resyncTabsAndGroups = (): Promise<void> => {

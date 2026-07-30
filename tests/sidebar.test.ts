@@ -1746,18 +1746,73 @@ describe("sidebar lifecycle", () => {
 
   it("patches an ordinary update in place while history search is open", async () => {
     vi.useFakeTimers();
-    const fake = createFakeChrome({ tabs: [fakeTab({ id: 1, title: "Alpha" })] });
+    const fake = createFakeChrome({
+      stored: enabledShortcuts(),
+      tabs: [
+        fakeTab({
+          id: 1,
+          title: "Alpha",
+          url: "https://docs.example/page",
+          favIconUrl: "data:image/png;base64,alpha",
+        }),
+      ],
+      historyItems: [
+        { id: "history-1", title: "Alpha history", url: "https://docs.example/history" },
+      ],
+    });
     const cleanup = await startSidebar(fake);
     const initial = row(1);
 
-    fake.events.onUpdated.emit(1, {}, fakeTab({ id: 1, title: "Alpha updated" }));
-    expect(row(1)).toBe(initial);
-
     input("alpha");
     await vi.advanceTimersByTimeAsync(100);
-    const whileSearching = row(1);
-    fake.events.onUpdated.emit(1, {}, fakeTab({ id: 1, title: "Alpha again" }));
-    expect(row(1)).toBe(whileSearching);
+    const shortcutBefore = shortcutImage();
+    const historyBefore = element("history-search-results").firstElementChild;
+
+    fake.events.onUpdated.emit(
+      1,
+      { title: "Alpha updated" },
+      fakeTab({
+        id: 1,
+        title: "Alpha updated",
+        url: "https://docs.example/page",
+        favIconUrl: "data:image/png;base64,alpha",
+      }),
+    );
+    expect(row(1)).toBe(initial);
+    expect(shortcutImage()).toBe(shortcutBefore);
+    expect(element("history-search-results").firstElementChild).toBe(historyBefore);
+
+    fake.events.onUpdated.emit(
+      1,
+      { favIconUrl: "data:image/png;base64,updated" },
+      fakeTab({
+        id: 1,
+        title: "Alpha updated",
+        url: "https://docs.example/page",
+        favIconUrl: "data:image/png;base64,updated",
+      }),
+    );
+    const shortcutAfter = shortcutImage();
+    const historyAfter = element("history-search-results").firstElementChild;
+    expect(shortcutAfter).not.toBe(shortcutBefore);
+    expect(shortcutAfter?.getAttribute("src")).toBe("data:image/png;base64,updated");
+    expect(historyAfter).not.toBe(historyBefore);
+    expect(historyAfter?.querySelector("img")?.getAttribute("src")).toBe(
+      "data:image/png;base64,updated",
+    );
+
+    fake.events.onUpdated.emit(
+      1,
+      { title: "Alpha again" },
+      fakeTab({
+        id: 1,
+        title: "Alpha again",
+        url: "https://docs.example/page",
+        favIconUrl: "data:image/png;base64,updated",
+      }),
+    );
+    expect(shortcutImage()).toBe(shortcutAfter);
+    expect(element("history-search-results").firstElementChild).toBe(historyAfter);
     cleanup();
   });
 
