@@ -13,7 +13,7 @@ function historyItem(
 }
 
 describe("history search model", () => {
-  it("queries all time with a twenty-result limit", async () => {
+  it("queries all time with a two-hundred-candidate limit", async () => {
     const search = vi.fn(async () => [
       historyItem("1", "https://first.example/path", "First"),
     ]);
@@ -21,7 +21,7 @@ describe("history search model", () => {
     await expect(searchHistory({ search }, "docs")).resolves.toEqual([
       { id: "1", title: "First", url: "https://first.example/path" },
     ]);
-    expect(search).toHaveBeenCalledWith({ text: "docs", startTime: 0, maxResults: 20 });
+    expect(search).toHaveBeenCalledWith({ text: "docs", startTime: 0, maxResults: 200 });
   });
 
   it("preserves order while filtering invalid and non-web results", async () => {
@@ -51,6 +51,51 @@ describe("history search model", () => {
     expect(result).toHaveLength(20);
     expect(result[0]?.id).toBe("0");
     expect(result.at(-1)?.id).toBe("19");
+  });
+
+  it("deduplicates complete URLs before taking twenty results", async () => {
+    const duplicates = Array.from({ length: 20 }, (_, index) =>
+      historyItem(
+        String(index),
+        `https://site-${index % 10}.example/path`,
+        `Recent ${index}`,
+      ),
+    );
+    const tail = Array.from({ length: 10 }, (_, index) =>
+      historyItem(
+        `tail-${index}`,
+        `https://tail-${index}.example/path`,
+        `Tail ${index}`,
+      ),
+    );
+    const search = vi.fn(async () => [...duplicates, ...tail]);
+
+    const result = await searchHistory({ search }, "docs");
+
+    expect(result).toHaveLength(20);
+    expect(result.filter((item) => item.url === "https://site-0.example/path")).toHaveLength(1);
+    expect(result.find((item) => item.url === "https://site-0.example/path")?.title).toBe(
+      "Recent 0",
+    );
+    expect(result.at(-1)?.url).toBe("https://tail-9.example/path");
+  });
+
+  it("deduplicates only the normalized complete URL", async () => {
+    const search = vi.fn(async () => [
+      historyItem("recent", "https://example.com/path", "Recent"),
+      historyItem("duplicate", "https://example.com/path", "Older"),
+      historyItem("other-path", "https://example.com/other", "Other path"),
+      historyItem("query", "https://example.com/path?q=1", "Query"),
+      historyItem("hash", "https://example.com/path#section", "Hash"),
+      historyItem("invalid", "chrome://settings/", "Invalid"),
+    ]);
+
+    await expect(searchHistory({ search }, "example")).resolves.toEqual([
+      { id: "recent", title: "Recent", url: "https://example.com/path" },
+      { id: "other-path", title: "Other path", url: "https://example.com/other" },
+      { id: "query", title: "Query", url: "https://example.com/path?q=1" },
+      { id: "hash", title: "Hash", url: "https://example.com/path#section" },
+    ]);
   });
 
   it("maps Chrome history failures to a stable message", async () => {
@@ -108,7 +153,7 @@ describe("history search controller", () => {
     input.focus();
     await flush();
 
-    expect(search).toHaveBeenCalledWith({ text: "", startTime: 0, maxResults: 20 });
+    expect(search).toHaveBeenCalledWith({ text: "", startTime: 0, maxResults: 200 });
     expect(results.hidden).toBe(false);
     expect(input.getAttribute("role")).toBe("combobox");
     expect(input.getAttribute("aria-expanded")).toBe("true");
@@ -139,7 +184,7 @@ describe("history search controller", () => {
     expect(search).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(search).toHaveBeenCalledOnce();
-    expect(search).toHaveBeenCalledWith({ text: "latest", startTime: 0, maxResults: 20 });
+    expect(search).toHaveBeenCalledWith({ text: "latest", startTime: 0, maxResults: 200 });
 
     pending.resolve([historyItem("1", "https://latest.example/", "Latest")]);
     await flush();

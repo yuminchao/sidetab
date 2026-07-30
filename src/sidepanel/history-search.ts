@@ -12,16 +12,19 @@ export async function searchHistory(
 ): Promise<HistorySearchResult[]> {
   let items: chrome.history.HistoryItem[];
   try {
-    items = await api.search({ text, startTime: 0, maxResults: 20 });
+    items = await api.search({ text, startTime: 0, maxResults: 200 });
   } catch {
     throw new Error("无法读取历史记录");
   }
 
   const results: HistorySearchResult[] = [];
+  const seenUrls = new Set<string>();
   for (const item of items) {
     if (results.length === 20) break;
     const result = normalizeHistoryItem(item);
-    if (result) results.push(result);
+    if (!result || seenUrls.has(result.url)) continue;
+    seenUrls.add(result.url);
+    results.push(result);
   }
   return results;
 }
