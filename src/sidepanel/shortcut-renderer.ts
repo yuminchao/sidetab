@@ -6,7 +6,7 @@ import {
   type Shortcut,
   type ShortcutSettings,
 } from "./shortcut-model";
-import { createFaviconCandidates, getHttpOrigin } from "./favicon-model";
+import { createFaviconCandidates, getAllowedImageUrl, getHttpOrigin } from "./favicon-model";
 
 export type ShortcutRendererElements = {
   strip: HTMLElement;
@@ -25,12 +25,15 @@ export type ShortcutRendererCallbacks = {
   onOpen(url: string): void | Promise<void>;
   onOpenError?(message: string): void;
   onFontSizePreview?(size: number): void;
+  onFaviconLoaded?(origin: string, url: string): void;
+  onCachedFaviconFailed?(origin: string, url: string): void;
   onSave(settings: ShortcutSettings): Promise<ShortcutSettings>;
 };
 
 export type ShortcutRenderer = {
   render(settings: ShortcutSettings): void;
   setFaviconsByOrigin(favicons: ReadonlyMap<string, string>): void;
+  setCachedFaviconsByOrigin(favicons: ReadonlyMap<string, string>): void;
   openSettings(settings: ShortcutSettings): void;
   setError(message: string): void;
   destroy(): void;
@@ -51,6 +54,8 @@ export function createShortcutRenderer(
   let session: EditorSession | undefined;
   let active = true;
   let faviconsByOrigin = new Map<string, string>();
+  let cachedFaviconsByOrigin = new Map<string, string>();
+  const shortcutButtons = new Map<string, HTMLButtonElement>();
 
   const setError = (message: string) => {
     elements.error.textContent = message;
@@ -74,13 +79,20 @@ export function createShortcutRenderer(
   };
 
   const renderStrip = (settings: ShortcutSettings) => {
-    const fragment = document.createDocumentFragment();
-    if (settings.enabled) {
-      for (const shortcut of settings.items.slice(0, 12)) {
-        fragment.append(createShortcutButton(shortcut, faviconsByOrigin));
-      }
+    const visible = settings.enabled ? settings.items.slice(0, 12) : [];
+    const nextButtons = new Map<string, HTMLButtonElement>();
+    for (const [index, shortcut] of visible.entries()) {
+      const button = shortcutButtons.get(shortcut.id) ?? createShortcutButton(shortcut.id);
+      updateShortcutButton(button, shortcut, faviconsByOrigin, cachedFaviconsByOrigin);
+      nextButtons.set(shortcut.id, button);
+      const current = elements.strip.children[index] ?? null;
+      if (current !== button) elements.strip.insertBefore(button, current);
     }
-    elements.strip.replaceChildren(fragment);
+    for (const [id, button] of shortcutButtons) {
+      if (!nextButtons.has(id)) button.remove();
+    }
+    shortcutButtons.clear();
+    for (const [id, button] of nextButtons) shortcutButtons.set(id, button);
     elements.strip.hidden = !settings.enabled;
   };
 
@@ -188,13 +200,32 @@ export function createShortcutRenderer(
     if (!button?.classList.contains("shortcut-button")) {
       return;
     }
-    const nextUrl = target.dataset.nextUrl;
-    if (nextUrl) {
-      target.dataset.nextUrl = "";
-      target.src = nextUrl;
+    const candidates = readFaviconCandidates(target);
+    const index = Number.parseInt(target.dataset.candidateIndex ?? "0", 10);
+    const currentCandidate = candidates[index];
+    const origin = target.dataset.origin ?? "";
+    if (currentCandidate?.source === "cache" && origin) {
+      callbacks.onCachedFaviconFailed?.(origin, currentCandidate.url);
+    }
+    const nextIndex = index + 1;
+    const nextCandidate = candidates[nextIndex];
+    if (nextCandidate) {
+      target.dataset.candidateIndex = String(nextIndex);
+      target.dataset.nextUrl = candidates[nextIndex + 1]?.url ?? "";
+      target.src = nextCandidate.url;
       return;
     }
     target.replaceWith(createShortcutLetter(target.dataset.fallback ?? ""));
+  };
+
+  const onShortcutIconLoad = (event: Event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLImageElement) || !elements.strip.contains(target)) return;
+    const candidates = readFaviconCandidates(target);
+    const index = Number.parseInt(target.dataset.candidateIndex ?? "0", 10);
+    const candidate = candidates[index];
+    const origin = target.dataset.origin ?? "";
+    if (candidate && origin) callbacks.onFaviconLoaded?.(origin, candidate.url);
   };
 
   const onSettingsClick = () => {
@@ -375,6 +406,7 @@ export function createShortcutRenderer(
 
   elements.strip.addEventListener("click", onStripClick);
   elements.strip.addEventListener("error", onShortcutIconError, true);
+  elements.strip.addEventListener("load", onShortcutIconLoad, true);
   elements.settingsButton.addEventListener("click", onSettingsClick);
   elements.enabled.addEventListener("change", onEnabledChange);
   elements.fontSize.addEventListener("input", onFontSizeInput);
@@ -398,9 +430,35 @@ export function createShortcutRenderer(
       if (!active) {
         return;
       }
-      const previousSignature = createShortcutFaviconSignature(current, faviconsByOrigin);
+      const previousSignature = createShortcutFaviconSignature(
+        current,
+        faviconsByOrigin,
+        cachedFaviconsByOrigin,
+      );
       faviconsByOrigin = new Map(favicons);
-      const nextSignature = createShortcutFaviconSignature(current, faviconsByOrigin);
+      const nextSignature = createShortcutFaviconSignature(
+        current,
+        faviconsByOrigin,
+        cachedFaviconsByOrigin,
+      );
+      if (current.enabled && !stringArraysEqual(previousSignature, nextSignature)) {
+        renderStrip(current);
+      }
+    },
+
+    setCachedFaviconsByOrigin(favicons) {
+      if (!active) return;
+      const previousSignature = createShortcutFaviconSignature(
+        current,
+        faviconsByOrigin,
+        cachedFaviconsByOrigin,
+      );
+      cachedFaviconsByOrigin = new Map(favicons);
+      const nextSignature = createShortcutFaviconSignature(
+        current,
+        faviconsByOrigin,
+        cachedFaviconsByOrigin,
+      );
       if (current.enabled && !stringArraysEqual(previousSignature, nextSignature)) {
         renderStrip(current);
       }
@@ -418,6 +476,8 @@ export function createShortcutRenderer(
       invalidateSession();
       elements.strip.removeEventListener("click", onStripClick);
       elements.strip.removeEventListener("error", onShortcutIconError, true);
+      elements.strip.removeEventListener("load", onShortcutIconLoad, true);
+      shortcutButtons.clear();
       elements.settingsButton.removeEventListener("click", onSettingsClick);
       elements.enabled.removeEventListener("change", onEnabledChange);
       elements.fontSize.removeEventListener("input", onFontSizeInput);
@@ -434,32 +494,104 @@ export function createShortcutRenderer(
 }
 
 function createShortcutButton(
-  shortcut: Shortcut,
-  faviconsByOrigin: ReadonlyMap<string, string>,
+  shortcutId: string,
 ): HTMLButtonElement {
   const button = document.createElement("button");
   button.className = "shortcut-button";
   button.type = "button";
+  button.dataset.shortcutId = shortcutId;
+  return button;
+}
+
+function updateShortcutButton(
+  button: HTMLButtonElement,
+  shortcut: Shortcut,
+  faviconsByOrigin: ReadonlyMap<string, string>,
+  cachedFaviconsByOrigin: ReadonlyMap<string, string>,
+): void {
   button.dataset.shortcutId = shortcut.id;
   button.title = shortcut.name;
   button.setAttribute("aria-label", shortcut.name);
   const fallback = getFirstCharacter(shortcut.name);
   const origin = getHttpOrigin(shortcut.url);
-  const candidates = createFaviconCandidates(faviconsByOrigin.get(origin), shortcut.url);
+  const candidates = createShortcutFaviconCandidates(
+    faviconsByOrigin.get(origin),
+    cachedFaviconsByOrigin.get(origin),
+    shortcut.url,
+  );
+  const candidatesKey = JSON.stringify(candidates);
 
-  if (candidates.length === 0) {
-    button.append(createShortcutLetter(fallback));
-  } else {
-    const image = document.createElement("img");
-    image.src = candidates[0] as string;
-    image.width = 20;
-    image.height = 20;
-    image.alt = "";
-    image.dataset.nextUrl = candidates[1] ?? "";
-    image.dataset.fallback = fallback;
-    button.append(image);
+  if (button.dataset.candidatesKey !== candidatesKey) {
+    button.dataset.candidatesKey = candidatesKey;
+    button.replaceChildren(createShortcutFavicon(candidates, origin, fallback));
+    return;
   }
-  return button;
+  const image = button.querySelector<HTMLImageElement>("img");
+  if (image) image.dataset.fallback = fallback;
+  const letter = button.querySelector<HTMLElement>(".shortcut-letter");
+  if (letter) letter.textContent = fallback || "·";
+}
+
+type ShortcutFaviconCandidate = {
+  url: string;
+  source: "live" | "cache" | "root";
+};
+
+function createShortcutFaviconCandidates(
+  liveUrl: string | undefined,
+  cachedUrl: string | undefined,
+  pageUrl: string,
+): ShortcutFaviconCandidate[] {
+  const rootUrl = createFaviconCandidates(undefined, pageUrl)[0] ?? "";
+  const candidates: ShortcutFaviconCandidate[] = [];
+  const seen = new Set<string>();
+  for (const candidate of [
+    { url: getAllowedImageUrl(liveUrl), source: "live" as const },
+    { url: getAllowedImageUrl(cachedUrl), source: "cache" as const },
+    { url: rootUrl, source: "root" as const },
+  ]) {
+    if (candidate.url && !seen.has(candidate.url)) {
+      seen.add(candidate.url);
+      candidates.push(candidate);
+    }
+  }
+  return candidates;
+}
+
+function createShortcutFavicon(
+  candidates: readonly ShortcutFaviconCandidate[],
+  origin: string,
+  fallback: string,
+): HTMLElement {
+  const first = candidates[0];
+  if (!first) return createShortcutLetter(fallback);
+  const image = document.createElement("img");
+  image.src = first.url;
+  image.width = 20;
+  image.height = 20;
+  image.alt = "";
+  image.dataset.candidates = JSON.stringify(candidates);
+  image.dataset.candidateIndex = "0";
+  image.dataset.nextUrl = candidates[1]?.url ?? "";
+  image.dataset.origin = origin;
+  image.dataset.fallback = fallback;
+  return image;
+}
+
+function readFaviconCandidates(image: HTMLImageElement): ShortcutFaviconCandidate[] {
+  try {
+    const parsed = JSON.parse(image.dataset.candidates ?? "[]") as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item): item is ShortcutFaviconCandidate =>
+        Boolean(item) &&
+        typeof item === "object" &&
+        typeof (item as ShortcutFaviconCandidate).url === "string" &&
+        ["live", "cache", "root"].includes((item as ShortcutFaviconCandidate).source),
+    );
+  } catch {
+    return [];
+  }
 }
 
 function createShortcutLetter(text: string): HTMLElement {
@@ -560,10 +692,15 @@ function copySettings(settings: ShortcutSettings): ShortcutSettings {
 function createShortcutFaviconSignature(
   settings: ShortcutSettings,
   faviconsByOrigin: ReadonlyMap<string, string>,
+  cachedFaviconsByOrigin: ReadonlyMap<string, string>,
 ): string[] {
   return settings.items.slice(0, 12).map((shortcut) => {
     const origin = getHttpOrigin(shortcut.url);
-    return createFaviconCandidates(faviconsByOrigin.get(origin), shortcut.url)[0] ?? "";
+    return JSON.stringify(createShortcutFaviconCandidates(
+      faviconsByOrigin.get(origin),
+      cachedFaviconsByOrigin.get(origin),
+      shortcut.url,
+    ));
   });
 }
 

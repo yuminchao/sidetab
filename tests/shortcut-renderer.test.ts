@@ -80,12 +80,16 @@ describe("shortcut renderer", () => {
   let onOpen: ReturnType<typeof vi.fn>;
   let onSave: ReturnType<typeof vi.fn>;
   let onFontSizePreview: ReturnType<typeof vi.fn>;
+  let onFaviconLoaded: ReturnType<typeof vi.fn>;
+  let onCachedFaviconFailed: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     elements = createFixture();
     onOpen = vi.fn();
     onSave = vi.fn(async (value: ShortcutSettings) => value);
     onFontSizePreview = vi.fn();
+    onFaviconLoaded = vi.fn();
+    onCachedFaviconFailed = vi.fn();
   });
 
   it("previews valid font sizes and restores the saved size on cancel, Escape, or close", () => {
@@ -217,7 +221,7 @@ describe("shortcut renderer", () => {
     renderer.setFaviconsByOrigin(
       new Map([["https://example.com", "https://cdn.example/second.png"]]),
     );
-    expect(elements.strip.firstElementChild).not.toBe(buttonBeforeChange);
+    expect(elements.strip.firstElementChild).toBe(buttonBeforeChange);
     expect(elements.strip.querySelector("img")?.getAttribute("src")).toBe(
       "https://cdn.example/second.png",
     );
@@ -258,13 +262,13 @@ describe("shortcut renderer", () => {
       new Map([["https://example.com", "https://cdn.example/docs-new.png"]]),
     );
     const changedButton = elements.strip.querySelector(".shortcut-button");
-    expect(changedButton).not.toBe(button);
+    expect(changedButton).toBe(button);
     expect(changedButton?.querySelector("img")?.getAttribute("src")).toBe(
       "https://cdn.example/docs-new.png",
     );
 
     renderer.setFaviconsByOrigin(new Map());
-    expect(elements.strip.querySelector(".shortcut-button")).not.toBe(changedButton);
+    expect(elements.strip.querySelector(".shortcut-button")).toBe(changedButton);
     expect(elements.strip.querySelector("img")?.getAttribute("src")).toBe(
       "https://example.com/favicon.ico",
     );
@@ -339,6 +343,105 @@ describe("shortcut renderer", () => {
     renderer.destroy();
     imageAfterRender?.dispatchEvent(new Event("error"));
     expect(elements.strip.querySelector("img")).toBe(imageAfterRender);
+  });
+
+  it("tries live, cached, and root candidates in order and reports loading feedback", () => {
+    const renderer = createShortcutRenderer(elements, {
+      onOpen,
+      onSave,
+      onFaviconLoaded,
+      onCachedFaviconFailed,
+    });
+    renderer.setFaviconsByOrigin(
+      new Map([["https://example.com", "https://cdn.example/live.png"]]),
+    );
+    renderer.setCachedFaviconsByOrigin(
+      new Map([["https://example.com", "https://cache.example/cached.png"]]),
+    );
+    renderer.render(settings());
+    const image = elements.strip.querySelector<HTMLImageElement>("img")!;
+
+    expect(image.getAttribute("src")).toBe("https://cdn.example/live.png");
+    image.dispatchEvent(new Event("error"));
+    expect(image.getAttribute("src")).toBe("https://cache.example/cached.png");
+    expect(onCachedFaviconFailed).not.toHaveBeenCalled();
+    image.dispatchEvent(new Event("error"));
+    expect(onCachedFaviconFailed).toHaveBeenCalledWith(
+      "https://example.com",
+      "https://cache.example/cached.png",
+    );
+    expect(image.getAttribute("src")).toBe("https://example.com/favicon.ico");
+    image.dispatchEvent(new Event("load"));
+    expect(onFaviconLoaded).toHaveBeenCalledWith(
+      "https://example.com",
+      "https://example.com/favicon.ico",
+    );
+  });
+
+  it("deduplicates equivalent live and cached candidates", () => {
+    const renderer = createShortcutRenderer(elements, {
+      onOpen,
+      onSave,
+      onCachedFaviconFailed,
+    });
+    const shared = "https://cdn.example/shared.png";
+    renderer.setFaviconsByOrigin(new Map([["https://example.com", shared]]));
+    renderer.setCachedFaviconsByOrigin(new Map([["https://example.com", shared]]));
+    renderer.render(settings());
+    const image = elements.strip.querySelector<HTMLImageElement>("img")!;
+
+    image.dispatchEvent(new Event("error"));
+
+    expect(image.getAttribute("src")).toBe("https://example.com/favicon.ico");
+    expect(onCachedFaviconFailed).not.toHaveBeenCalled();
+  });
+
+  it("reuses shortcut buttons and unchanged images across cached map updates", () => {
+    const renderer = createShortcutRenderer(elements, { onOpen, onSave });
+    renderer.render(settings({
+      items: [
+        shortcut({ id: "a", url: "https://a.example/" }),
+        shortcut({ id: "b", url: "https://b.example/" }),
+      ],
+    }));
+    const firstButton = elements.strip.children[0];
+    const secondButton = elements.strip.children[1];
+    const firstImage = firstButton?.querySelector("img");
+    const secondImage = secondButton?.querySelector("img");
+
+    renderer.setCachedFaviconsByOrigin(
+      new Map([["https://a.example", "https://cache.example/a.png"]]),
+    );
+
+    expect(elements.strip.children[0]).toBe(firstButton);
+    expect(elements.strip.children[1]).toBe(secondButton);
+    expect(firstButton?.querySelector("img")).not.toBe(firstImage);
+    expect(secondButton?.querySelector("img")).toBe(secondImage);
+    const changedFirstImage = firstButton?.querySelector("img");
+    renderer.setCachedFaviconsByOrigin(
+      new Map([["https://a.example", "https://cache.example/a.png"]]),
+    );
+    expect(firstButton?.querySelector("img")).toBe(changedFirstImage);
+  });
+
+  it("stops favicon feedback after destruction", () => {
+    const renderer = createShortcutRenderer(elements, {
+      onOpen,
+      onSave,
+      onFaviconLoaded,
+      onCachedFaviconFailed,
+    });
+    renderer.setCachedFaviconsByOrigin(
+      new Map([["https://example.com", "https://cache.example/icon.png"]]),
+    );
+    renderer.render(settings());
+    const image = elements.strip.querySelector<HTMLImageElement>("img")!;
+    renderer.destroy();
+
+    image.dispatchEvent(new Event("load"));
+    image.dispatchEvent(new Event("error"));
+    expect(onFaviconLoaded).not.toHaveBeenCalled();
+    expect(onCachedFaviconFailed).not.toHaveBeenCalled();
   });
 
   it("keeps an emoji intact when deriving a letter icon", () => {
