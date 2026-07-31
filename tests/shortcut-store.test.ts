@@ -32,7 +32,7 @@ describe("shortcut store", () => {
 
     await expect(createShortcutStore(area).load()).resolves.toEqual({
       enabled: true,
-      tabTitleFontSize: 14,
+      tabTitleFontSize: 16,
       items: [{ id: "example", name: "Example", url: "https://example.com/", icon: "letter" }],
     });
   });

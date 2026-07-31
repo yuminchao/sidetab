@@ -285,7 +285,7 @@ describe("sidebar lifecycle", () => {
     expect(rowIds()).toEqual([1, 2]);
     expect(element("shortcut-strip").hidden).toBe(true);
     expect(element("shortcut-strip").childElementCount).toBe(0);
-    expect(document.documentElement.style.getPropertyValue("--tab-title-font-size")).toBe("14px");
+    expect(document.documentElement.style.getPropertyValue("--tab-title-font-size")).toBe("16px");
     cleanup();
   });
 
@@ -546,13 +546,13 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
-  it("migrates legacy settings to 14px and previews by changing only the root CSS variable", async () => {
+  it("migrates legacy settings to 16px and previews by changing only the root CSS variable", async () => {
     const fake = createFakeChrome({
       stored: { shortcutSettings: { enabled: false, items: [] } },
     });
     const setProperty = vi.spyOn(document.documentElement.style, "setProperty");
     const cleanup = await startSidebar(fake);
-    expect(document.documentElement.style.getPropertyValue("--tab-title-font-size")).toBe("14px");
+    expect(document.documentElement.style.getPropertyValue("--tab-title-font-size")).toBe("16px");
 
     click(element("shortcut-settings"));
     setProperty.mockClear();
@@ -2377,7 +2377,7 @@ describe("sidebar document structure", () => {
 
   it("scopes the configurable font size to tab titles", () => {
     const css = readFileSync("src/sidepanel/sidebar.css", "utf8");
-    expect(css).toMatch(/:root\s*\{[^}]*--tab-title-font-size:\s*14px/s);
+    expect(css).toMatch(/:root\s*\{[^}]*--tab-title-font-size:\s*16px/s);
     expect(css).toMatch(/\.tab-title\s*\{[^}]*font-size:\s*var\(--tab-title-font-size\)/s);
     expect(css.match(/var\(--tab-title-font-size\)/g)).toHaveLength(1);
   });

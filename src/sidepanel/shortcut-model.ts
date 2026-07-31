@@ -13,7 +13,7 @@ export type ShortcutSettings = {
   items: Shortcut[];
 };
 
-export const DEFAULT_TAB_TITLE_FONT_SIZE = 14;
+export const DEFAULT_TAB_TITLE_FONT_SIZE = 16;
 export const MIN_TAB_TITLE_FONT_SIZE = 12;
 export const MAX_TAB_TITLE_FONT_SIZE = 18;
 

@@ -16,24 +16,46 @@ function parseCsp(value: string): Record<string, string[]> {
 }
 
 describe("extension manifest", () => {
-  it("keeps the npm and extension release versions aligned at 0.8.0", () => {
+  it("keeps the npm and extension release versions aligned at 0.8.1", () => {
     const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
     const packageLock = JSON.parse(readFileSync("package-lock.json", "utf8"));
-    expect(manifest.version).toBe("0.8.0");
-    expect(packageJson.version).toBe("0.8.0");
-    expect(packageLock.version).toBe("0.8.0");
-    expect(packageLock.packages[""].version).toBe("0.8.0");
+    expect(manifest.version).toBe("0.8.1");
+    expect(packageJson.version).toBe("0.8.1");
+    expect(packageLock.version).toBe("0.8.1");
+    expect(packageLock.packages[""].version).toBe("0.8.1");
   });
 
   it("documents the current release archive, permissions, and file count", () => {
     const readme = readFileSync("README.md", "utf8");
     const checklist = readFileSync("docs/chrome-web-store-checklist.md", "utf8");
     expect(readme).toContain(`release/sidetab-lite-${manifest.version}.zip`);
-    for (const permission of ["sidePanel", "tabs", "tabGroups", "storage", "history"]) {
+    for (const permission of [
+      "sidePanel",
+      "tabs",
+      "tabGroups",
+      "storage",
+      "history",
+      "sessions",
+    ]) {
       expect(readme).toContain(`\`${permission}\``);
       expect(checklist).toContain(`\`${permission}\``);
     }
-    expect(checklist).toContain("14 个审核文件");
+    expect(checklist).toContain("15 个审核文件");
+  });
+
+  it("documents the 0.8.1 history, add-tab, and recently closed changes", () => {
+    const readme = readFileSync("README.md", "utf8");
+    const checklist = readFileSync("docs/chrome-web-store-checklist.md", "utf8");
+    const updateLog = readFileSync("update.log", "utf8");
+
+    for (const document of [readme, checklist, updateLog]) {
+      expect(document).toContain("主机名及端口与规范化路径");
+      expect(document).toContain("失去焦点");
+      expect(document).toContain("打开最近关闭标签页");
+    }
+    expect(readme).toContain("新增标签页图标");
+    expect(checklist).toContain("新增标签页图标");
+    expect(updateLog).toContain("只缓存一个 sessionId");
   });
 
   it("documents the 0.8.0 performance and consistency changes", () => {
@@ -73,6 +95,7 @@ describe("extension manifest", () => {
       "tabGroups",
       "storage",
       "history",
+      "sessions",
     ]);
     expect(manifest).not.toHaveProperty("host_permissions");
     expect(manifest).not.toHaveProperty("content_scripts");

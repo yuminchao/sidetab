@@ -610,6 +610,7 @@ Expected: 因版本、权限和文档仍是 `0.8.0` 而失败。
 
 - 将 `manifest.json`、`package.json`、`package-lock.json` 根版本统一为 `0.8.1`。
 - 在 Manifest 权限末尾加入 `sessions`，不增加主机权限或 content script。
+- 将标签标题默认字号从 14px 调整为 16px，旧设置缺少字号字段时迁移到 16px；保持 12–18px 可配置范围和固定标签行高不变。
 - 在 `scripts/check-dist.mjs` 和发布测试夹具中同步精确权限数组。
 - README 说明 `sessions` 只用于读取和恢复最近关闭的单个标签页，不持久化会话数据。
 - 更新 `docs/chrome-web-store-checklist.md` 中的版本、15 个文件、6 项权限、功能验收和隐私检查。
@@ -670,5 +671,6 @@ git commit -m "$(Get-Date -Format yyyyMMddHHmmss) feat 发布0.8.1版本"
 - Manifest 只新增 `sessions` 权限，没有主机权限和 content script。
 - 历史记录最多展示去重后的 20 条；输入框失焦可靠收起。
 - 最近关闭控制器只缓存一个字符串 `sessionId`，没有轮询和持久化。
+- 新安装、旧设置迁移和恢复默认设置均使用 16px 标签标题字号，且只影响标签标题。
 - 恢复操作不直接修改 TabStore，不主动触发标签列表全量重渲染。
 - 所有生命周期监听器和计时器在 cleanup/destroy 中释放，迟到异步结果不能更新已销毁界面。
