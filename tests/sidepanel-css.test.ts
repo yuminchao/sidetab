@@ -58,7 +58,10 @@ describe("side panel responsive CSS", () => {
 
   it("keeps the new-tab control compact and the empty state non-interactive", () => {
     expect(css).toMatch(
-      /\.new-tab-button\s*{[^}]*width:\s*44px[^}]*height:\s*24px[^}]*margin:\s*3px\s+auto[^}]*border:\s*1px\s+solid\s+ButtonBorder[^}]*border-radius:\s*5px/s,
+      /\.new-tab-button\s*{[^}]*display:\s*grid[^}]*place-items:\s*center[^}]*width:\s*44px[^}]*height:\s*24px[^}]*margin:\s*3px\s+auto[^}]*border:\s*0[^}]*border-radius:\s*0[^}]*background:\s*transparent/s,
+    );
+    expect(css).toMatch(
+      /\.new-tab-button::before\s*{[^}]*width:\s*18px[^}]*height:\s*18px[^}]*background-color:\s*currentColor[^}]*content:\s*""[^}]*-webkit-mask:\s*url\("\.\.\/assets\/icons\/add-tab\.svg"\)\s+center\s*\/\s*contain\s+no-repeat[^}]*mask:\s*url\("\.\.\/assets\/icons\/add-tab\.svg"\)\s+center\s*\/\s*contain\s+no-repeat/s,
     );
     expect(css).toMatch(
       /\.empty-message\s*{[^}]*position:\s*absolute[^}]*z-index:\s*1[^}]*inset:\s*30px\s+0\s+0[^}]*pointer-events:\s*none/s,

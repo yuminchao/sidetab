@@ -370,14 +370,20 @@ input:focus-visible {
   height: 24px;
   margin: 3px auto;
   padding: 0;
-  border: 1px solid ButtonBorder;
-  border-radius: 5px;
+  border: 0;
+  border-radius: 0;
   background: transparent;
   color: CanvasText;
-  font: inherit;
-  font-size: 20px;
-  line-height: 1;
   cursor: pointer;
+}
+
+.new-tab-button::before {
+  width: 18px;
+  height: 18px;
+  background-color: currentColor;
+  content: "";
+  -webkit-mask: url("../assets/icons/add-tab.svg") center / contain no-repeat;
+  mask: url("../assets/icons/add-tab.svg") center / contain no-repeat;
 }
 
 .new-tab-button:hover:not(:disabled) {

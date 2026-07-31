@@ -12,6 +12,13 @@ const pngAssets = [
   ["assets/shortcuts/github.png", 32],
 ] as const;
 
+const sanitizedSvgAssets = [
+  { name: "search.svg", pathCount: 1 },
+  { name: "settings.svg", pathCount: 1 },
+  { name: "network.svg", pathCount: 1 },
+  { name: "add-tab.svg", pathCount: 2 },
+] as const;
+
 describe("local image assets", () => {
   it.each(pngAssets)("provides %s as a non-empty %i px PNG", async (path, size) => {
     const image = sharp(path);
@@ -23,9 +30,9 @@ describe("local image assets", () => {
     expect(contents.byteLength).toBeGreaterThan(0);
   });
 
-  it.each(["search.svg", "settings.svg", "network.svg"])(
-    "provides a sanitized %s mask asset",
-    (name) => {
+  it.each(sanitizedSvgAssets)(
+    "provides a sanitized $name mask asset",
+    ({ name, pathCount }) => {
       const assetPath = `assets/icons/${name}`;
       expect(existsSync(assetPath)).toBe(true);
       if (!existsSync(assetPath)) return;
@@ -33,14 +40,22 @@ describe("local image assets", () => {
       const source = readFileSync(assetPath, "utf8");
       const document = new DOMParser().parseFromString(source, "image/svg+xml");
       const root = document.documentElement;
-      const path = root.firstElementChild;
+      const paths = Array.from(root.children);
 
       expect(document.querySelector("parsererror")).toBeNull();
       expect(root.tagName).toBe("svg");
       expect(root.namespaceURI).toBe("http://www.w3.org/2000/svg");
       expect(Array.from(root.attributes, ({ name }) => name)).toEqual(["xmlns", "viewBox"]);
-      expect(Array.from(root.children, ({ tagName }) => tagName)).toEqual(["path"]);
-      expect(Array.from(path?.attributes ?? [], ({ name }) => name)).toEqual(["d"]);
+      expect(Array.from(root.children, ({ tagName }) => tagName)).toEqual(
+        Array.from({ length: pathCount }, () => "path"),
+      );
+      for (const path of paths) {
+        expect(Array.from(path.attributes, ({ name }) => name)).toEqual(["d"]);
+        expect(path.getAttribute("d")?.trim()).not.toBe("");
+      }
+      if (name === "add-tab.svg") {
+        expect(root.getAttribute("viewBox")).toBe("0 0 1024 1024");
+      }
       const sourceWithoutNamespace = source.replace(' xmlns="http://www.w3.org/2000/svg"', "");
       expect(sourceWithoutNamespace).not.toMatch(
         /<\?xml|<!doctype|t=|p-id|width=|height=|xlink|https?:|<script|\son\w+=/i,
