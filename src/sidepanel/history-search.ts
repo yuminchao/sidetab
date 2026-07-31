@@ -1,10 +1,8 @@
+import { createSearchResult, type SearchResult } from "./search-result-model";
+
 export type HistorySearchApi = Pick<typeof chrome.history, "search">;
 
-export type HistorySearchResult = {
-  id: string;
-  title: string;
-  url: string;
-};
+export type HistorySearchResult = SearchResult;
 
 export async function searchHistory(
   api: HistorySearchApi,
@@ -21,42 +19,19 @@ export async function searchHistory(
   const seenKeys = new Set<string>();
   for (const item of items) {
     if (results.length === 20) break;
-    const normalized = normalizeHistoryItem(item);
+    const normalized = item.url
+      ? createSearchResult({
+          id: item.id || item.url,
+          title: item.title || "",
+          url: item.url,
+          source: "history",
+        })
+      : undefined;
     if (!normalized || seenKeys.has(normalized.dedupeKey)) continue;
     seenKeys.add(normalized.dedupeKey);
     results.push(normalized.result);
   }
   return results;
-}
-
-type NormalizedHistoryItem = {
-  result: HistorySearchResult;
-  dedupeKey: string;
-};
-
-function normalizeHistoryPath(pathname: string): string {
-  const withoutTrailingSlashes = pathname.replace(/\/+$/, "");
-  return withoutTrailingSlashes || "/";
-}
-
-function normalizeHistoryItem(
-  item: chrome.history.HistoryItem,
-): NormalizedHistoryItem | undefined {
-  if (!item.url) return undefined;
-  try {
-    const url = new URL(item.url);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
-    return {
-      result: {
-        id: item.id || url.href,
-        title: item.title?.trim() || url.hostname,
-        url: url.href,
-      },
-      dedupeKey: `${url.host}${normalizeHistoryPath(url.pathname)}`,
-    };
-  } catch {
-    return undefined;
-  }
 }
 
 export type HistorySearchController = {

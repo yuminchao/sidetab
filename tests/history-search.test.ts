@@ -19,7 +19,7 @@ describe("history search model", () => {
     ]);
 
     await expect(searchHistory({ search }, "docs")).resolves.toEqual([
-      { id: "1", title: "First", url: "https://first.example/path" },
+      { id: "1", source: "history", title: "First", url: "https://first.example/path" },
     ]);
     expect(search).toHaveBeenCalledWith({ text: "docs", startTime: 0, maxResults: 500 });
   });
@@ -34,8 +34,8 @@ describe("history search model", () => {
     ]);
 
     await expect(searchHistory({ search }, "")).resolves.toEqual([
-      { id: "first", title: "First", url: "https://first.example/" },
-      { id: "second", title: "second.example", url: "http://second.example/path" },
+      { id: "first", source: "history", title: "First", url: "https://first.example/" },
+      { id: "second", source: "history", title: "second.example", url: "http://second.example/path" },
     ]);
   });
 
@@ -95,13 +95,14 @@ describe("history search model", () => {
     await expect(searchHistory({ search }, "docs")).resolves.toEqual([
       {
         id: "newest",
+        source: "history",
         title: "Newest",
         url: "https://example.com/page/?utm=new#top",
       },
-      { id: "subdomain", title: "Subdomain", url: "https://www.example.com/page" },
-      { id: "port", title: "Port", url: "https://example.com:8443/page" },
-      { id: "case", title: "Case", url: "https://example.com/Page" },
-      { id: "other", title: "Other", url: "https://example.com/other" },
+      { id: "subdomain", source: "history", title: "Subdomain", url: "https://www.example.com/page" },
+      { id: "port", source: "history", title: "Port", url: "https://example.com:8443/page" },
+      { id: "case", source: "history", title: "Case", url: "https://example.com/Page" },
+      { id: "other", source: "history", title: "Other", url: "https://example.com/other" },
     ]);
     expect(search).toHaveBeenCalledWith({ text: "docs", startTime: 0, maxResults: 500 });
   });
