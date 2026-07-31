@@ -31,10 +31,12 @@ describe("side panel settings markup", () => {
 
   it("keeps the bottom settings control as an accessible icon button", () => {
     const shell = document.querySelector<HTMLElement>(".search-shell");
+    const results = document.querySelector<HTMLElement>("#history-search-results");
     const input = document.querySelector<HTMLInputElement>("#tab-search");
     const button = document.querySelector<HTMLButtonElement>("#shortcut-settings");
 
     expect(shell?.parentElement?.classList.contains("bottom-toolbar")).toBe(true);
+    expect(results?.getAttribute("aria-label")).toBe("收藏夹和历史记录搜索结果");
     expect(Array.from(shell?.children ?? [])).toEqual([input, button]);
     expect(input?.placeholder).toBe("搜索收藏夹和历史记录");
     expect(input?.getAttribute("aria-label")).toBe("搜索收藏夹和历史记录");
