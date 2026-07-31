@@ -5,6 +5,10 @@ import { createShortcutStore, type StorageArea } from "./shortcut-store";
 import { createShortcutFaviconCacheStore } from "./shortcut-favicon-cache";
 import { createOriginFaviconMap, getHttpOrigin } from "./favicon-model";
 import {
+  createRecentlyClosedTabController,
+  type SessionsApi,
+} from "./recently-closed-tab";
+import {
   createHistorySearchController,
   type HistorySearchApi,
 } from "./history-search";
@@ -29,6 +33,7 @@ export type SidebarDependencies = {
   windows: Pick<typeof chrome.windows, "getCurrent">;
   storage: StorageArea;
   history: HistorySearchApi;
+  sessions: SessionsApi;
   document: Document;
 };
 
@@ -82,6 +87,7 @@ async function startSidebarInternal(
   const shortcutActions = createShortcutActions(deps.tabs);
   const tabRenderer = createTabRenderer({ list: elements.list, empty: elements.empty });
   let active = true;
+  const recentlyClosed = createRecentlyClosedTabController(deps.sessions);
   let currentWindowId: number | undefined;
   let unsubscribeTabs: () => void = () => undefined;
   let unsubscribeGroups: () => void = () => undefined;
@@ -106,6 +112,7 @@ async function startSidebarInternal(
   let resyncPromise: Promise<void> | undefined;
   let addShortcutBusy = false;
   let appearanceSettingsBusy = false;
+  let restoreRecentlyClosedBusy = false;
   const groupTabBusy = new Set<number>();
   const groupToggleBusy = new Set<number>();
   const statusSlots = {
@@ -422,6 +429,7 @@ async function startSidebarInternal(
       getTab: (id) => tabStore.list().find((tab) => tab.id === id),
       getGroups: () => groupStore.list(),
       canCloseBelow: (id) => getClosableTabsBelow(tabStore.list(), id).length > 0,
+      getRecentlyClosedSessionId: () => recentlyClosed.getSessionId(),
       onCommand(command) {
         if (command.action === "add-shortcut") {
           void addTabShortcut(command.tabId);
@@ -449,6 +457,17 @@ async function startSidebarInternal(
         }
         if (command.action === "duplicate") {
           runTabOperation(tabActions.duplicate(command.tabId));
+          return;
+        }
+        if (command.action === "restore-recently-closed") {
+          if (restoreRecentlyClosedBusy) return;
+          restoreRecentlyClosedBusy = true;
+          runTabOperation(
+            recentlyClosed.restore(command.sessionId),
+            () => {
+              restoreRecentlyClosedBusy = false;
+            },
+          );
           return;
         }
         if (command.action === "set-pinned") {
@@ -548,6 +567,7 @@ async function startSidebarInternal(
     );
     elements.settingsButton.removeEventListener("click", blockPendingSettings, true);
     contextMenu.destroy();
+    recentlyClosed.destroy();
     groupDialog.close();
     groupDialog.destroy();
     dragController.destroy();
@@ -1128,6 +1148,7 @@ if (typeof chrome !== "undefined" && typeof document !== "undefined") {
     tabGroups: chrome.tabGroups,
     windows: chrome.windows,
     history: chrome.history,
+    sessions: chrome.sessions,
     storage: chrome.storage.local,
     document,
   }, window);

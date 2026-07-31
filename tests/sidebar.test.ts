@@ -114,6 +114,13 @@ function mixedTabs(): chrome.tabs.Tab[] {
   ];
 }
 
+function recentlyClosedTabSession(sessionId: string): chrome.sessions.Session {
+  return {
+    lastModified: 0,
+    tab: fakeTab({ sessionId }),
+  };
+}
+
 function input(value: string): void {
   const search = element<HTMLInputElement>("tab-search");
   search.value = value;
@@ -778,7 +785,7 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.historySearch).toHaveBeenCalledWith({
       text: "",
       startTime: 0,
-      maxResults: 200,
+      maxResults: 500,
     });
     expect(element("history-search-results").textContent).toContain("History");
     fake.methods.historySearch.mockClear();
@@ -791,7 +798,7 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.historySearch).toHaveBeenCalledWith({
       text: "beta",
       startTime: 0,
-      maxResults: 200,
+      maxResults: 500,
     });
     expect(rowIds()).toEqual([1, 2]);
     cleanup();
@@ -1034,6 +1041,81 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.update).toHaveBeenCalledWith(7, { pinned: true });
     cleanup();
     expect(document.querySelector(".tab-context-menu")).toBeNull();
+  });
+
+  it("disables restore-recently-closed when no tab session is available", async () => {
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 7 })] });
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(fake.methods.sessionsGetRecentlyClosed).toHaveBeenCalledOnce());
+
+    openTabContextMenu(7);
+    const restore = contextMenuItem("restore-recently-closed");
+    expect(restore.disabled).toBe(true);
+    click(restore);
+
+    expect(fake.methods.sessionsRestore).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("restores the bound recent tab without proactively rebuilding the tab list", async () => {
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 7 })],
+      recentlyClosedSessions: [recentlyClosedTabSession("recent-session")],
+    });
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(fake.methods.sessionsGetRecentlyClosed).toHaveBeenCalledOnce());
+    const rowBefore = row(7);
+    const listBefore = Array.from(element("tab-list").children);
+
+    openTabContextMenu(7);
+    const restore = contextMenuItem("restore-recently-closed");
+    expect(restore.disabled).toBe(false);
+    click(restore);
+    await vi.waitFor(() => expect(fake.methods.sessionsRestore).toHaveBeenCalledOnce());
+    await flush();
+
+    expect(fake.methods.sessionsRestore).toHaveBeenCalledWith("recent-session");
+    expect(fake.methods.query).toHaveBeenCalledOnce();
+    expect(row(7)).toBe(rowBefore);
+    expect(Array.from(element("tab-list").children)).toEqual(listBefore);
+    cleanup();
+  });
+
+  it("shows a stable error when restoring a recent tab fails", async () => {
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 7 })],
+      recentlyClosedSessions: [recentlyClosedTabSession("recent-session")],
+    });
+    fake.methods.sessionsRestore.mockRejectedValueOnce(new Error("browser failure"));
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(fake.methods.sessionsGetRecentlyClosed).toHaveBeenCalledOnce());
+
+    openTabContextMenu(7);
+    click(contextMenuItem("restore-recently-closed"));
+
+    await vi.waitFor(() =>
+      expect(element("status-message").textContent).toBe("无法打开最近关闭标签页"),
+    );
+    expect(fake.methods.sessionsGetRecentlyClosed).toHaveBeenCalledTimes(2);
+    cleanup();
+  });
+
+  it("removes the sessions listener and ignores a late initial result on cleanup", async () => {
+    const pending = deferred<chrome.sessions.Session[]>();
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 7 })] });
+    fake.methods.sessionsGetRecentlyClosed.mockReturnValueOnce(pending.promise);
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(fake.sessionEvents.onChanged.listenerCount).toBe(1));
+
+    cleanup();
+    const listBefore = element("tab-list").innerHTML;
+    pending.resolve([recentlyClosedTabSession("late-session")]);
+    await flush();
+    fake.sessionEvents.onChanged.emit();
+
+    expect(fake.sessionEvents.onChanged.listenerCount).toBe(0);
+    expect(element("tab-list").innerHTML).toBe(listBefore);
+    expect(fake.methods.sessionsGetRecentlyClosed).toHaveBeenCalledOnce();
   });
 
   it("closes only ordinary tabs below an ordinary tab and waits for removal events", async () => {
@@ -2125,6 +2207,7 @@ describe("sidebar lifecycle", () => {
       tabGroups: fake.tabGroups,
       windows: fake.windows,
       history: fake.history,
+      sessions: fake.sessions,
       storage: { local: fake.storage },
     });
     vi.resetModules();
@@ -2155,6 +2238,7 @@ describe("sidebar lifecycle", () => {
       tabGroups: fake.tabGroups,
       windows: fake.windows,
       history: fake.history,
+      sessions: fake.sessions,
       storage: { local: fake.storage },
     });
     vi.resetModules();
@@ -2181,6 +2265,7 @@ describe("sidebar lifecycle", () => {
       tabGroups: fake.tabGroups,
       windows: fake.windows,
       history: fake.history,
+      sessions: fake.sessions,
       storage: { local: fake.storage },
     });
     vi.resetModules();
@@ -2206,6 +2291,7 @@ describe("sidebar lifecycle", () => {
       tabGroups: fake.tabGroups,
       windows: fake.windows,
       history: fake.history,
+      sessions: fake.sessions,
       storage: { local: fake.storage },
     });
     vi.resetModules();
@@ -2247,6 +2333,7 @@ describe("sidebar lifecycle", () => {
       tabGroups: typeof chrome.tabGroups;
       windows: typeof chrome.windows;
       history: typeof chrome.history;
+      sessions: typeof chrome.sessions;
       storage: typeof chrome.storage.local;
       document: Document;
     };

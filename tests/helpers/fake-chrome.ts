@@ -14,6 +14,7 @@ type AttachedListener = (tabId: number, info: chrome.tabs.OnAttachedInfo) => voi
 type DetachedListener = (tabId: number, info: chrome.tabs.OnDetachedInfo) => void;
 type ReplacedListener = (addedTabId: number, removedTabId: number) => void;
 type TabGroupListener = (group: chrome.tabGroups.TabGroup) => void;
+type SessionChangedListener = () => void;
 
 export function fakeTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
   return {
@@ -46,10 +47,14 @@ export function createFakeChrome(options: {
   tabs?: chrome.tabs.Tab[];
   groups?: chrome.tabGroups.TabGroup[];
   historyItems?: chrome.history.HistoryItem[];
+  recentlyClosedSessions?: chrome.sessions.Session[];
   stored?: Record<string, unknown>;
 } = {}) {
   let tabState = (options.tabs ?? []).map((tab) => ({ ...tab }));
   let groupState = (options.groups ?? []).map((group) => ({ ...group }));
+  let recentlyClosedState = (options.recentlyClosedSessions ?? []).map((session) => ({
+    ...session,
+  }));
   const events = {
     onCreated: new FakeEvent<CreatedListener>(),
     onRemoved: new FakeEvent<RemovedListener>(),
@@ -65,6 +70,9 @@ export function createFakeChrome(options: {
     onUpdated: new FakeEvent<TabGroupListener>(),
     onMoved: new FakeEvent<TabGroupListener>(),
     onRemoved: new FakeEvent<TabGroupListener>(),
+  };
+  const sessionEvents = {
+    onChanged: new FakeEvent<SessionChangedListener>(),
   };
   const query = vi.fn(async () => tabState);
   const get = vi.fn(async (tabId: number) => {
@@ -157,6 +165,16 @@ export function createFakeChrome(options: {
     async () => undefined,
   );
   const historySearch = vi.fn(async () => options.historyItems ?? []);
+  const sessionsGetRecentlyClosed = vi.fn(async () => recentlyClosedState);
+  const sessionsRestore = vi.fn(async (sessionId: string) => {
+    const index = recentlyClosedState.findIndex(
+      (session) => session.tab?.sessionId === sessionId,
+    );
+    const session = recentlyClosedState[index];
+    if (!session) throw new Error("session not found");
+    recentlyClosedState.splice(index, 1);
+    return session;
+  });
 
   return {
     tabs: {
@@ -179,10 +197,16 @@ export function createFakeChrome(options: {
     } as unknown as typeof chrome.tabGroups,
     windows: { getCurrent } as Pick<typeof chrome.windows, "getCurrent">,
     history: { search: historySearch } as Pick<typeof chrome.history, "search">,
+    sessions: {
+      getRecentlyClosed: sessionsGetRecentlyClosed,
+      restore: sessionsRestore,
+      onChanged: sessionEvents.onChanged,
+    },
     storage: { get: storageGet, set: storageSet },
     document,
     events,
     groupEvents,
+    sessionEvents,
     methods: {
       query,
       get,
@@ -198,11 +222,16 @@ export function createFakeChrome(options: {
       groupUpdate,
       getCurrent,
       historySearch,
+      sessionsGetRecentlyClosed,
+      sessionsRestore,
       storageGet,
       storageSet,
     },
     setTabs(next: chrome.tabs.Tab[]) {
       tabState = next.map((tab) => ({ ...tab }));
+    },
+    setRecentlyClosedSessions(next: chrome.sessions.Session[]) {
+      recentlyClosedState = next.map((session) => ({ ...session }));
     },
   };
 }
