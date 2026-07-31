@@ -1,4 +1,9 @@
-import { createSearchResult, type SearchResult } from "./search-result-model";
+import { searchBookmarks, type BookmarkSearchApi } from "./bookmark-search";
+import {
+  createSearchResult,
+  mergeSearchResults,
+  type SearchResult,
+} from "./search-result-model";
 
 export type HistorySearchApi = Pick<typeof chrome.history, "search">;
 
@@ -45,6 +50,7 @@ export type HistorySearchController = {
 export function createHistorySearchController(
   elements: { document: Document; input: HTMLInputElement; results: HTMLElement },
   callbacks: {
+    bookmarks: BookmarkSearchApi;
     history: HistorySearchApi;
     onOpen(url: string): void | Promise<void>;
     onOpenError?(message: string): void;
@@ -54,7 +60,7 @@ export function createHistorySearchController(
   let generation = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let blurTimer: ReturnType<typeof setTimeout> | undefined;
-  let currentResults: HistorySearchResult[] = [];
+  let currentResults: SearchResult[] = [];
   let selectedIndex = -1;
   let openBusy = false;
   let faviconsByOrigin = new Map<string, string>();
@@ -118,7 +124,7 @@ export function createHistorySearchController(
     return fallback;
   };
 
-  const createOption = (item: HistorySearchResult, index: number): HTMLButtonElement => {
+  const createOption = (item: SearchResult, index: number): HTMLButtonElement => {
     const option = elements.document.createElement("button");
     option.className = "history-search-option";
     option.type = "button";
@@ -148,10 +154,10 @@ export function createHistorySearchController(
     return option;
   };
 
-  const renderResults = (items: HistorySearchResult[], query: string): void => {
+  const renderResults = (items: SearchResult[], query: string): void => {
     currentResults = items;
     if (items.length === 0) {
-      renderMessage(query ? "没有匹配的历史记录" : "暂无历史记录");
+      renderMessage(query ? "没有匹配的记录" : "暂无历史记录");
       return;
     }
     selectedIndex = 0;
@@ -164,15 +170,34 @@ export function createHistorySearchController(
 
   const runQuery = async (query: string): Promise<void> => {
     const queryGeneration = ++generation;
+    const trimmedQuery = query.trim();
     renderMessage("正在搜索…");
-    try {
-      const items = await searchHistory(callbacks.history, query);
-      if (!active || queryGeneration !== generation) return;
-      renderResults(items, query);
-    } catch {
-      if (!active || queryGeneration !== generation) return;
-      renderMessage("无法读取历史记录");
+
+    if (!trimmedQuery) {
+      try {
+        const items = await searchHistory(callbacks.history, "");
+        if (!active || queryGeneration !== generation) return;
+        renderResults(items, "");
+      } catch {
+        if (!active || queryGeneration !== generation) return;
+        renderMessage("无法读取历史记录");
+      }
+      return;
     }
+
+    const [bookmarkResult, historyResult] = await Promise.allSettled([
+      searchBookmarks(callbacks.bookmarks, trimmedQuery),
+      searchHistory(callbacks.history, trimmedQuery),
+    ]);
+    if (!active || queryGeneration !== generation) return;
+    if (bookmarkResult.status === "rejected" && historyResult.status === "rejected") {
+      renderMessage("无法读取搜索记录");
+      return;
+    }
+
+    const bookmarks = bookmarkResult.status === "fulfilled" ? bookmarkResult.value : [];
+    const history = historyResult.status === "fulfilled" ? historyResult.value : [];
+    renderResults(mergeSearchResults(bookmarks, history), trimmedQuery);
   };
 
   const close = (): void => {
@@ -196,7 +221,7 @@ export function createHistorySearchController(
       elements.input.value = "";
       close();
     } catch {
-      if (active) callbacks.onOpenError?.("无法打开历史记录");
+      if (active) callbacks.onOpenError?.("无法打开搜索结果");
     } finally {
       openBusy = false;
     }

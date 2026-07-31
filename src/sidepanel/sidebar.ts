@@ -4,6 +4,7 @@ import { createShortcutRenderer } from "./shortcut-renderer";
 import { createShortcutStore, type StorageArea } from "./shortcut-store";
 import { createShortcutFaviconCacheStore } from "./shortcut-favicon-cache";
 import { createOriginFaviconMap, getHttpOrigin } from "./favicon-model";
+import type { BookmarkSearchApi } from "./bookmark-search";
 import {
   createRecentlyClosedTabController,
   type SessionsApi,
@@ -32,6 +33,7 @@ export type SidebarDependencies = {
   tabGroups: typeof chrome.tabGroups;
   windows: Pick<typeof chrome.windows, "getCurrent">;
   storage: StorageArea;
+  bookmarks: BookmarkSearchApi;
   history: HistorySearchApi;
   sessions: SessionsApi;
   document: Document;
@@ -262,6 +264,7 @@ async function startSidebarInternal(
       results: elements.historyResults,
     },
     {
+      bookmarks: deps.bookmarks,
       history: deps.history,
       async onOpen(url) {
         try {
@@ -1147,6 +1150,7 @@ if (typeof chrome !== "undefined" && typeof document !== "undefined") {
     tabs: chrome.tabs,
     tabGroups: chrome.tabGroups,
     windows: chrome.windows,
+    bookmarks: chrome.bookmarks,
     history: chrome.history,
     sessions: chrome.sessions,
     storage: chrome.storage.local,

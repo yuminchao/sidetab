@@ -776,6 +776,12 @@ describe("sidebar lifecycle", () => {
     vi.useFakeTimers();
     const fake = createFakeChrome({
       tabs: [fakeTab({ id: 1, title: "Alpha" }), fakeTab({ id: 2, index: 1, title: "Beta" })],
+      bookmarkItems: [{
+        id: "bookmark-1",
+        title: "Bookmark",
+        url: "https://bookmark.example/",
+        syncing: false,
+      }],
       historyItems: [{ id: "history-1", title: "History", url: "https://history.example/" }],
     });
     const cleanup = await startSidebar(fake);
@@ -787,6 +793,7 @@ describe("sidebar lifecycle", () => {
       startTime: 0,
       maxResults: 500,
     });
+    expect(fake.methods.bookmarkSearch).not.toHaveBeenCalled();
     expect(element("history-search-results").textContent).toContain("History");
     fake.methods.historySearch.mockClear();
 
@@ -800,6 +807,8 @@ describe("sidebar lifecycle", () => {
       startTime: 0,
       maxResults: 500,
     });
+    expect(fake.methods.bookmarkSearch).toHaveBeenCalledWith("beta");
+    expect(element("history-search-results").textContent).toContain("Bookmark");
     expect(rowIds()).toEqual([1, 2]);
     cleanup();
   });
@@ -840,7 +849,7 @@ describe("sidebar lifecycle", () => {
     await flush();
     click(results.querySelector("[role='option']")!);
     await vi.waitFor(() =>
-      expect(element("status-message").textContent).toBe("无法打开历史记录"),
+      expect(element("status-message").textContent).toBe("无法打开搜索结果"),
     );
     cleanup();
   });
@@ -2206,6 +2215,7 @@ describe("sidebar lifecycle", () => {
       tabs: fake.tabs,
       tabGroups: fake.tabGroups,
       windows: fake.windows,
+      bookmarks: fake.bookmarks,
       history: fake.history,
       sessions: fake.sessions,
       storage: { local: fake.storage },
@@ -2237,6 +2247,7 @@ describe("sidebar lifecycle", () => {
       tabs: fake.tabs,
       tabGroups: fake.tabGroups,
       windows: fake.windows,
+      bookmarks: fake.bookmarks,
       history: fake.history,
       sessions: fake.sessions,
       storage: { local: fake.storage },
@@ -2264,6 +2275,7 @@ describe("sidebar lifecycle", () => {
       tabs: fake.tabs,
       tabGroups: fake.tabGroups,
       windows: fake.windows,
+      bookmarks: fake.bookmarks,
       history: fake.history,
       sessions: fake.sessions,
       storage: { local: fake.storage },
@@ -2290,6 +2302,7 @@ describe("sidebar lifecycle", () => {
       tabs: fake.tabs,
       tabGroups: fake.tabGroups,
       windows: fake.windows,
+      bookmarks: fake.bookmarks,
       history: fake.history,
       sessions: fake.sessions,
       storage: { local: fake.storage },
@@ -2332,6 +2345,7 @@ describe("sidebar lifecycle", () => {
       tabs: typeof chrome.tabs;
       tabGroups: typeof chrome.tabGroups;
       windows: typeof chrome.windows;
+      bookmarks: typeof chrome.bookmarks;
       history: typeof chrome.history;
       sessions: typeof chrome.sessions;
       storage: typeof chrome.storage.local;

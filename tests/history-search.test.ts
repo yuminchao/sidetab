@@ -12,6 +12,20 @@ function historyItem(
   return { id, url, title };
 }
 
+function bookmark(
+  id: string,
+  url: string | undefined,
+  title = "",
+): chrome.bookmarks.BookmarkTreeNode {
+  return { id, url, title, syncing: false };
+}
+
+function emptyBookmarks() {
+  return {
+    search: vi.fn(async (): Promise<chrome.bookmarks.BookmarkTreeNode[]> => []),
+  };
+}
+
 describe("history search model", () => {
   it("queries all time with a five-hundred-candidate limit", async () => {
     const search = vi.fn(async () => [
@@ -162,22 +176,29 @@ describe("history search controller", () => {
     results = document.querySelector("#results")!;
   });
 
-  it("shows recent history on focus and prefers the current-origin favicon", async () => {
-    const search = vi.fn(async () => [
+  it("shows recent history on focus without querying bookmarks for a blank input", async () => {
+    const historySearch = vi.fn(async () => [
       historyItem("1", "https://docs.example/page", "Documentation"),
     ]);
+    const bookmarkSearch = vi.fn(async (): Promise<chrome.bookmarks.BookmarkTreeNode[]> => []);
     const controller = createHistorySearchController(
       { document, input, results },
-      { history: { search }, onOpen: vi.fn(async () => undefined) },
+      {
+        bookmarks: { search: bookmarkSearch },
+        history: { search: historySearch },
+        onOpen: vi.fn(async () => undefined),
+      },
     );
     controller.setFaviconsByOrigin(
       new Map([["https://docs.example", "data:image/png;base64,current"]]),
     );
 
+    input.value = "   ";
     input.focus();
     await flush();
 
-    expect(search).toHaveBeenCalledWith({ text: "", startTime: 0, maxResults: 500 });
+    expect(bookmarkSearch).not.toHaveBeenCalled();
+    expect(historySearch).toHaveBeenCalledWith({ text: "", startTime: 0, maxResults: 500 });
     expect(results.hidden).toBe(false);
     expect(input.getAttribute("role")).toBe("combobox");
     expect(input.getAttribute("aria-expanded")).toBe("true");
@@ -196,7 +217,11 @@ describe("history search controller", () => {
     ]);
     const controller = createHistorySearchController(
       { document, input, results },
-      { history: { search }, onOpen: vi.fn(async () => undefined) },
+      {
+        bookmarks: emptyBookmarks(),
+        history: { search },
+        onOpen: vi.fn(async () => undefined),
+      },
     );
     input.focus();
     await flush();
@@ -219,7 +244,11 @@ describe("history search controller", () => {
     const search = vi.fn(() => pending.promise);
     const controller = createHistorySearchController(
       { document, input, results },
-      { history: { search }, onOpen: vi.fn(async () => undefined) },
+      {
+        bookmarks: emptyBookmarks(),
+        history: { search },
+        onOpen: vi.fn(async () => undefined),
+      },
     );
 
     input.value = "first";
@@ -239,16 +268,101 @@ describe("history search controller", () => {
     controller.destroy();
   });
 
+  it("starts trimmed bookmark and history searches in parallel", async () => {
+    vi.useFakeTimers();
+    const bookmarkPending = deferred<chrome.bookmarks.BookmarkTreeNode[]>();
+    const historyPending = deferred<chrome.history.HistoryItem[]>();
+    const bookmarkSearch = vi.fn(() => bookmarkPending.promise);
+    const historySearch = vi.fn(() => historyPending.promise);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      {
+        bookmarks: { search: bookmarkSearch },
+        history: { search: historySearch },
+        onOpen: vi.fn(async () => undefined),
+      },
+    );
+
+    input.value = "  docs  ";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(bookmarkSearch).toHaveBeenCalledOnce();
+    expect(bookmarkSearch).toHaveBeenCalledWith("docs");
+    expect(historySearch).toHaveBeenCalledOnce();
+    expect(historySearch).toHaveBeenCalledWith({
+      text: "docs",
+      startTime: 0,
+      maxResults: 500,
+    });
+
+    bookmarkPending.resolve([]);
+    historyPending.resolve([]);
+    await flush();
+    controller.destroy();
+  });
+
+  it("pins five bookmarks, removes cross-source duplicates, and fills with history", async () => {
+    const bookmarkSearch = vi.fn(async () => [
+      bookmark("b-shared", "https://shared.example/docs/", "Bookmark Shared"),
+      ...Array.from({ length: 4 }, (_, index) =>
+        bookmark(`b-${index}`, `https://bookmark-${index}.example/`, `Bookmark ${index}`),
+      ),
+    ]);
+    const historySearch = vi.fn(async () => [
+      historyItem("h-shared", "http://shared.example/docs?from=history", "History Duplicate"),
+      ...Array.from({ length: 20 }, (_, index) =>
+        historyItem(`h-${index}`, `https://history-${index}.example/`, `History ${index}`),
+      ),
+    ]);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      {
+        bookmarks: { search: bookmarkSearch },
+        history: { search: historySearch },
+        onOpen: vi.fn(async () => undefined),
+      },
+    );
+
+    input.value = " records ";
+    input.focus();
+    await flush();
+
+    const titles = Array.from(
+      results.querySelectorAll<HTMLElement>(".history-search-title"),
+      (element) => element.textContent,
+    );
+    expect(titles).toHaveLength(20);
+    expect(titles.slice(0, 5)).toEqual([
+      "Bookmark Shared",
+      "Bookmark 0",
+      "Bookmark 1",
+      "Bookmark 2",
+      "Bookmark 3",
+    ]);
+    expect(titles).not.toContain("History Duplicate");
+    expect(titles.at(-1)).toBe("History 14");
+    controller.destroy();
+  });
+
   it("renders distinct empty and failure states", async () => {
     vi.useFakeTimers();
-    const search = vi
+    const historySearch = vi
       .fn()
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockRejectedValueOnce(new Error("failed"));
+    const bookmarkSearch = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error("failed"));
     const controller = createHistorySearchController(
       { document, input, results },
-      { history: { search }, onOpen: vi.fn(async () => undefined) },
+      {
+        bookmarks: { search: bookmarkSearch },
+        history: { search: historySearch },
+        onOpen: vi.fn(async () => undefined),
+      },
     );
 
     input.focus();
@@ -258,12 +372,62 @@ describe("history search controller", () => {
     input.value = "missing";
     input.dispatchEvent(new Event("input", { bubbles: true }));
     await vi.advanceTimersByTimeAsync(100);
-    expect(results.textContent).toBe("没有匹配的历史记录");
+    expect(results.textContent).toBe("没有匹配的记录");
 
     input.value = "failed";
     input.dispatchEvent(new Event("input", { bubbles: true }));
     await vi.advanceTimersByTimeAsync(100);
-    expect(results.textContent).toBe("无法读取历史记录");
+    expect(results.textContent).toBe("无法读取搜索记录");
+    controller.destroy();
+  });
+
+  it("shows history results when bookmark search fails", async () => {
+    const bookmarkSearch = vi.fn(async (): Promise<chrome.bookmarks.BookmarkTreeNode[]> => {
+      throw new Error("bookmark failed");
+    });
+    const historySearch = vi.fn(async () => [
+      historyItem("history", "https://history.example/", "History Result"),
+    ]);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      {
+        bookmarks: { search: bookmarkSearch },
+        history: { search: historySearch },
+        onOpen: vi.fn(async () => undefined),
+      },
+    );
+
+    input.value = "query";
+    input.focus();
+    await flush();
+
+    expect(bookmarkSearch).toHaveBeenCalledOnce();
+    expect(results.textContent).toContain("History Result");
+    controller.destroy();
+  });
+
+  it("shows bookmark results when history search fails", async () => {
+    const bookmarkSearch = vi.fn(async () => [
+      bookmark("bookmark", "https://bookmark.example/", "Bookmark Result"),
+    ]);
+    const historySearch = vi.fn(async (): Promise<chrome.history.HistoryItem[]> => {
+      throw new Error("history failed");
+    });
+    const controller = createHistorySearchController(
+      { document, input, results },
+      {
+        bookmarks: { search: bookmarkSearch },
+        history: { search: historySearch },
+        onOpen: vi.fn(async () => undefined),
+      },
+    );
+
+    input.value = "query";
+    input.focus();
+    await flush();
+
+    expect(historySearch).toHaveBeenCalledOnce();
+    expect(results.textContent).toContain("Bookmark Result");
     controller.destroy();
   });
 
@@ -275,7 +439,7 @@ describe("history search controller", () => {
     ]);
     const controller = createHistorySearchController(
       { document, input, results },
-      { history: { search }, onOpen },
+      { bookmarks: emptyBookmarks(), history: { search }, onOpen },
     );
 
     input.focus();
@@ -302,9 +466,12 @@ describe("history search controller", () => {
     const search = vi.fn(async () => [
       historyItem("1", "https://one.example/", "One"),
     ]);
+    const bookmarkSearch = vi.fn(async () => [
+      bookmark("bookmark", "https://bookmark.example/", "Bookmark"),
+    ]);
     const controller = createHistorySearchController(
       { document, input, results },
-      { history: { search }, onOpen, onOpenError },
+      { bookmarks: { search: bookmarkSearch }, history: { search }, onOpen, onOpenError },
     );
 
     input.value = "keep";
@@ -312,7 +479,8 @@ describe("history search controller", () => {
     await flush();
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     await flush();
-    expect(onOpenError).toHaveBeenCalledWith("无法打开历史记录");
+    expect(onOpen).toHaveBeenCalledWith("https://bookmark.example/");
+    expect(onOpenError).toHaveBeenCalledWith("无法打开搜索结果");
     expect(results.hidden).toBe(false);
 
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
@@ -322,7 +490,7 @@ describe("history search controller", () => {
     await flush();
     results.querySelector<HTMLElement>("[role='option']")!.click();
     await flush();
-    expect(onOpen).toHaveBeenLastCalledWith("https://one.example/");
+    expect(onOpen).toHaveBeenLastCalledWith("https://bookmark.example/");
     expect(results.hidden).toBe(true);
 
     input.click();
@@ -349,7 +517,11 @@ describe("history search controller", () => {
     ]);
     const controller = createHistorySearchController(
       { document, input, results },
-      { history: { search }, onOpen: vi.fn(async () => undefined) },
+      {
+        bookmarks: emptyBookmarks(),
+        history: { search },
+        onOpen: vi.fn(async () => undefined),
+      },
     );
 
     input.focus();
@@ -377,7 +549,7 @@ describe("history search controller", () => {
     ]);
     const controller = createHistorySearchController(
       { document, input, results },
-      { history: { search }, onOpen },
+      { bookmarks: emptyBookmarks(), history: { search }, onOpen },
     );
 
     input.focus();
@@ -401,7 +573,11 @@ describe("history search controller", () => {
     ]);
     const controller = createHistorySearchController(
       { document, input, results },
-      { history: { search }, onOpen: vi.fn(async () => undefined) },
+      {
+        bookmarks: emptyBookmarks(),
+        history: { search },
+        onOpen: vi.fn(async () => undefined),
+      },
     );
 
     input.focus();
@@ -415,16 +591,29 @@ describe("history search controller", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("drops stale responses and blocks late DOM changes after destroy", async () => {
+  it("drops stale combined responses and blocks both late sources after destroy", async () => {
     vi.useFakeTimers();
-    const old = deferred<chrome.history.HistoryItem[]>();
-    const latest = deferred<chrome.history.HistoryItem[]>();
-    const search = vi.fn()
-      .mockReturnValueOnce(old.promise)
-      .mockReturnValueOnce(latest.promise);
+    const oldBookmarks = deferred<chrome.bookmarks.BookmarkTreeNode[]>();
+    const oldHistory = deferred<chrome.history.HistoryItem[]>();
+    const latestBookmarks = deferred<chrome.bookmarks.BookmarkTreeNode[]>();
+    const latestHistory = deferred<chrome.history.HistoryItem[]>();
+    const destroyedBookmarks = deferred<chrome.bookmarks.BookmarkTreeNode[]>();
+    const destroyedHistory = deferred<chrome.history.HistoryItem[]>();
+    const bookmarkSearch = vi.fn()
+      .mockReturnValueOnce(oldBookmarks.promise)
+      .mockReturnValueOnce(latestBookmarks.promise)
+      .mockReturnValueOnce(destroyedBookmarks.promise);
+    const historySearch = vi.fn()
+      .mockReturnValueOnce(oldHistory.promise)
+      .mockReturnValueOnce(latestHistory.promise)
+      .mockReturnValueOnce(destroyedHistory.promise);
     const controller = createHistorySearchController(
       { document, input, results },
-      { history: { search }, onOpen: vi.fn(async () => undefined) },
+      {
+        bookmarks: { search: bookmarkSearch },
+        history: { search: historySearch },
+        onOpen: vi.fn(async () => undefined),
+      },
     );
 
     input.value = "old";
@@ -433,18 +622,39 @@ describe("history search controller", () => {
     input.value = "latest";
     input.dispatchEvent(new Event("input", { bubbles: true }));
     await vi.advanceTimersByTimeAsync(100);
-    latest.resolve([historyItem("2", "https://latest.example/", "Latest")]);
+    latestBookmarks.resolve([
+      bookmark("latest-bookmark", "https://latest-bookmark.example/", "Latest Bookmark"),
+    ]);
+    latestHistory.resolve([
+      historyItem("latest-history", "https://latest-history.example/", "Latest History"),
+    ]);
     await flush();
-    old.resolve([historyItem("1", "https://old.example/", "Old")]);
+    oldBookmarks.resolve([
+      bookmark("old-bookmark", "https://old-bookmark.example/", "Old Bookmark"),
+    ]);
+    oldHistory.resolve([
+      historyItem("old-history", "https://old-history.example/", "Old History"),
+    ]);
     await flush();
-    expect(results.textContent).toContain("Latest");
-    expect(results.textContent).not.toContain("Old");
+    expect(results.textContent).toContain("Latest Bookmark");
+    expect(results.textContent).toContain("Latest History");
+    expect(results.textContent).not.toContain("Old Bookmark");
+    expect(results.textContent).not.toContain("Old History");
 
     input.value = "destroyed";
     input.dispatchEvent(new Event("input", { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(bookmarkSearch).toHaveBeenCalledTimes(3);
+    expect(historySearch).toHaveBeenCalledTimes(3);
     controller.destroy();
     const before = results.innerHTML;
-    await vi.advanceTimersByTimeAsync(100);
+    destroyedBookmarks.resolve([
+      bookmark("destroyed-bookmark", "https://destroyed-bookmark.example/", "Destroyed Bookmark"),
+    ]);
+    destroyedHistory.resolve([
+      historyItem("destroyed-history", "https://destroyed-history.example/", "Destroyed History"),
+    ]);
+    await flush();
     expect(results.innerHTML).toBe(before);
   });
 });
