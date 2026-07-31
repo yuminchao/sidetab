@@ -36,6 +36,7 @@ describe("extension manifest", () => {
       "storage",
       "history",
       "sessions",
+      "bookmarks",
     ]) {
       expect(readme).toContain(`\`${permission}\``);
       expect(checklist).toContain(`\`${permission}\``);
@@ -56,6 +57,35 @@ describe("extension manifest", () => {
     expect(readme).toContain("新增标签页图标");
     expect(checklist).toContain("新增标签页图标");
     expect(updateLog).toContain("只缓存一个 sessionId");
+  });
+
+  it("documents bookmark-first search and its local permission use", () => {
+    const documents = [
+      readFileSync("README.md", "utf8"),
+      readFileSync("docs/privacy-policy.md", "utf8"),
+      readFileSync("docs/chrome-web-store-checklist.md", "utf8"),
+    ];
+
+    for (const document of documents) {
+      for (const detail of [
+        "空查询",
+        "最近 20 条",
+        "非空",
+        "`chrome.bookmarks.search()`",
+        "最多 5 条收藏夹",
+        "总数最多 20 条",
+        "收藏夹优先",
+        "不缓存完整收藏夹树",
+        "不注册收藏夹监听器",
+        "不持久化",
+        "不上传",
+        "`bookmarks`",
+        "升级",
+        "重新启用扩展",
+      ]) {
+        expect(document).toContain(detail);
+      }
+    }
   });
 
   it("documents the 0.8.0 performance and consistency changes", () => {
@@ -96,9 +126,12 @@ describe("extension manifest", () => {
       "storage",
       "history",
       "sessions",
+      "bookmarks",
     ]);
     expect(manifest).not.toHaveProperty("host_permissions");
     expect(manifest).not.toHaveProperty("content_scripts");
+    expect(manifest).not.toHaveProperty("optional_permissions");
+    expect(manifest).not.toHaveProperty("optional_host_permissions");
     expect(parseCsp(manifest.content_security_policy.extension_pages)).toEqual({
       "connect-src": ["'none'"],
       "frame-src": ["'none'"],

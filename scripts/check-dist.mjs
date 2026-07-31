@@ -337,8 +337,16 @@ export async function checkDist(distDirectory) {
   assert(manifest.manifest_version === 3, "manifest_version must be 3");
   assert(
     JSON.stringify(manifest.permissions) ===
-      JSON.stringify(["sidePanel", "tabs", "tabGroups", "storage", "history", "sessions"]),
-    "permissions must be exactly sidePanel, tabs, tabGroups, storage, history, sessions",
+      JSON.stringify([
+        "sidePanel",
+        "tabs",
+        "tabGroups",
+        "storage",
+        "history",
+        "sessions",
+        "bookmarks",
+      ]),
+    "permissions must be exactly sidePanel, tabs, tabGroups, storage, history, sessions, bookmarks",
   );
   assert(!Object.hasOwn(manifest, "host_permissions"), "host_permissions must not be present");
   assert(!Object.hasOwn(manifest, "content_scripts"), "content_scripts must not be present");

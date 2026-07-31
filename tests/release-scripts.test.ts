@@ -85,7 +85,15 @@ async function createReleaseFixture(): Promise<{ root: string; dist: string; rel
     version: "0.1.0",
     description: "Release validation fixture",
     minimum_chrome_version: "114",
-    permissions: ["sidePanel", "tabs", "tabGroups", "storage", "history", "sessions"],
+    permissions: [
+      "sidePanel",
+      "tabs",
+      "tabGroups",
+      "storage",
+      "history",
+      "sessions",
+      "bookmarks",
+    ],
     content_security_policy: {
       extension_pages:
         "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data: http: https:; style-src 'self'; frame-src 'none'",
@@ -304,6 +312,47 @@ describe("dist validation", () => {
     }
   });
 
+  it.each([
+    [
+      "missing bookmarks",
+      ["sidePanel", "tabs", "tabGroups", "storage", "history", "sessions"],
+    ],
+    [
+      "an extra permission",
+      [
+        "sidePanel",
+        "tabs",
+        "tabGroups",
+        "storage",
+        "history",
+        "sessions",
+        "bookmarks",
+        "alarms",
+      ],
+    ],
+    [
+      "a different order",
+      [
+        "sidePanel",
+        "tabs",
+        "tabGroups",
+        "storage",
+        "history",
+        "bookmarks",
+        "sessions",
+      ],
+    ],
+  ])("rejects manifest permissions with %s", async (_case, permissions) => {
+    const fixture = await createReleaseFixture();
+    const manifestPath = join(fixture.dist, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.permissions = permissions;
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    const { checkDist } = await loadCheckDist();
+
+    await expect(checkDist(fixture.dist)).rejects.toThrow(/permissions.*exactly/i);
+  });
+
   it("rejects a manifest path that escapes dist even when the outside file exists", async () => {
     const fixture = await createReleaseFixture();
     const manifestPath = join(fixture.dist, "manifest.json");
@@ -319,6 +368,7 @@ describe("dist validation", () => {
   });
 
   it.each([
+    ["optional_permissions", ["bookmarks"]],
     ["optional_host_permissions", ["https://example.com/*"]],
     ["externally_connectable", { matches: ["https://example.com/*"] }],
     ["web_accessible_resources", []],
