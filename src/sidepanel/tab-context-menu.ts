@@ -8,7 +8,8 @@ export type TabContextCommand =
   | { action: "close-below"; tabId: number }
   | { action: "create-group"; tabId: number }
   | { action: "add-to-group"; tabId: number; groupId: number }
-  | { action: "remove-from-group"; tabId: number };
+  | { action: "remove-from-group"; tabId: number }
+  | { action: "restore-recently-closed"; sessionId: string };
 
 export function createTabContextMenu(
   elements: { document: Document; list: HTMLElement; viewport: Window },
@@ -16,6 +17,7 @@ export function createTabContextMenu(
     getTab(id: number): TabViewModel | undefined;
     getGroups(): readonly TabGroupViewModel[];
     canCloseBelow?(id: number): boolean;
+    getRecentlyClosedSessionId?(): string | undefined;
     onCommand(command: TabContextCommand): void;
   },
 ) {
@@ -37,7 +39,19 @@ export function createTabContextMenu(
   addToGroup.setAttribute("aria-expanded", "false");
   const removeFromGroup = createItem("remove-from-group", "从分组中移除");
   const closeBelow = createItem("close-below", "关闭下方标签页");
-  menu.append(duplicate, setPinned, addShortcut, addToGroup, removeFromGroup, closeBelow);
+  const restoreRecentlyClosed = createItem(
+    "restore-recently-closed",
+    "打开最近关闭标签页",
+  );
+  menu.append(
+    duplicate,
+    setPinned,
+    addShortcut,
+    addToGroup,
+    removeFromGroup,
+    closeBelow,
+    restoreRecentlyClosed,
+  );
   elements.document.body.append(menu, submenu);
 
   let openTabId: number | undefined;
@@ -68,6 +82,7 @@ export function createTabContextMenu(
     menu.hidden = true;
     openTabId = undefined;
     openGroupId = -1;
+    delete restoreRecentlyClosed.dataset.sessionId;
     if (restoreFocus) returnFocus?.focus();
     returnFocus = undefined;
   }
@@ -129,6 +144,13 @@ export function createTabContextMenu(
     setPinned.dataset.nextPinned = String(!tab.pinned);
     removeFromGroup.hidden = !isValidTabGroupId(tab.groupId);
     closeBelow.disabled = !callbacks.canCloseBelow?.(tab.id);
+    const sessionId = callbacks.getRecentlyClosedSessionId?.();
+    restoreRecentlyClosed.disabled = !sessionId;
+    if (sessionId) {
+      restoreRecentlyClosed.dataset.sessionId = sessionId;
+    } else {
+      delete restoreRecentlyClosed.dataset.sessionId;
+    }
     menu.hidden = false;
     menu.style.left = "0px";
     menu.style.top = "0px";
@@ -192,6 +214,12 @@ export function createTabContextMenu(
       case "close-below":
         command = { action: "close-below", tabId: openTabId };
         break;
+      case "restore-recently-closed": {
+        const sessionId = button.dataset.sessionId;
+        if (!sessionId) return;
+        command = { action: "restore-recently-closed", sessionId };
+        break;
+      }
       case "remove-from-group":
         command = { action: "remove-from-group", tabId: openTabId };
         break;

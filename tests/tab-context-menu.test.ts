@@ -60,7 +60,14 @@ describe("tab context menu", () => {
         popup.querySelectorAll<HTMLButtonElement>("[role='menuitem']"),
         (item) => item.hidden ? null : item.textContent,
       ).filter(Boolean),
-    ).toEqual(["复制标签页", "固定标签", "设为快捷网站", "添加到分组", "关闭下方标签页"]);
+    ).toEqual([
+      "复制标签页",
+      "固定标签",
+      "设为快捷网站",
+      "添加到分组",
+      "关闭下方标签页",
+      "打开最近关闭标签页",
+    ]);
     expect(document.activeElement).toBe(popup.querySelector("[data-menu-action='duplicate']"));
 
     (popup.querySelector("[data-menu-action='duplicate']") as HTMLElement).click();
@@ -167,6 +174,91 @@ describe("tab context menu", () => {
     expect(document.activeElement).toBe(popup.querySelector("[data-menu-action='close-below']"));
     popup.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(onCommand).toHaveBeenCalledWith({ action: "close-below", tabId: 1 });
+    menu.destroy();
+  });
+
+  it("disables restore-recently-closed without a session and skips it during navigation", () => {
+    const onCommand = vi.fn();
+    const menu = createTabContextMenu(
+      { document, list, viewport: window },
+      {
+        getTab: (id) => tabs.find((tab) => tab.id === id),
+        getGroups: () => [],
+        canCloseBelow: () => true,
+        getRecentlyClosedSessionId: () => undefined,
+        onCommand,
+      },
+    );
+    const popup = document.querySelector<HTMLElement>(".tab-context-menu")!;
+
+    context(row(1));
+    const restore = popup.querySelector<HTMLButtonElement>(
+      "[data-menu-action='restore-recently-closed']",
+    )!;
+    expect(restore.disabled).toBe(true);
+    restore.click();
+    expect(onCommand).not.toHaveBeenCalled();
+
+    popup.querySelector<HTMLButtonElement>("[data-menu-action='close-below']")!.focus();
+    popup.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(document.activeElement).toBe(popup.querySelector("[data-menu-action='duplicate']"));
+    menu.destroy();
+  });
+
+  it("binds the recent session when opening and dispatches that snapshot", () => {
+    let currentSessionId = "recent-session";
+    const onCommand = vi.fn();
+    const menu = createTabContextMenu(
+      { document, list, viewport: window },
+      {
+        getTab: (id) => tabs.find((tab) => tab.id === id),
+        getGroups: () => [],
+        getRecentlyClosedSessionId: () => currentSessionId,
+        onCommand,
+      },
+    );
+    const popup = document.querySelector<HTMLElement>(".tab-context-menu")!;
+
+    context(row(1));
+    const restore = popup.querySelector<HTMLButtonElement>(
+      "[data-menu-action='restore-recently-closed']",
+    )!;
+    expect(restore.disabled).toBe(false);
+    currentSessionId = "newer-session";
+    restore.click();
+
+    expect(onCommand).toHaveBeenCalledWith({
+      action: "restore-recently-closed",
+      sessionId: "recent-session",
+    });
+    expect(restore.dataset.sessionId).toBeUndefined();
+    menu.destroy();
+  });
+
+  it("dispatches restore-recently-closed from Enter", () => {
+    const onCommand = vi.fn();
+    const menu = createTabContextMenu(
+      { document, list, viewport: window },
+      {
+        getTab: (id) => tabs.find((tab) => tab.id === id),
+        getGroups: () => [],
+        canCloseBelow: () => false,
+        getRecentlyClosedSessionId: () => "keyboard-session",
+        onCommand,
+      },
+    );
+    const popup = document.querySelector<HTMLElement>(".tab-context-menu")!;
+
+    context(row(1));
+    popup.querySelector<HTMLButtonElement>(
+      "[data-menu-action='restore-recently-closed']",
+    )!.focus();
+    popup.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    expect(onCommand).toHaveBeenCalledWith({
+      action: "restore-recently-closed",
+      sessionId: "keyboard-session",
+    });
     menu.destroy();
   });
 

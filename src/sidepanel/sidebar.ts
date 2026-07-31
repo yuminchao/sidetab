@@ -451,7 +451,9 @@ async function startSidebarInternal(
           runTabOperation(tabActions.duplicate(command.tabId));
           return;
         }
-        runTabOperation(tabActions.setPinned(command.tabId, command.pinned));
+        if (command.action === "set-pinned") {
+          runTabOperation(tabActions.setPinned(command.tabId, command.pinned));
+        }
       },
     },
   );
