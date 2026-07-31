@@ -2422,9 +2422,9 @@ describe("sidebar document structure", () => {
     expect(footer?.querySelector("#history-search-results")?.getAttribute("role"))
       .toBe("listbox");
     expect(footer?.querySelector<HTMLInputElement>("#tab-search")?.placeholder)
-      .toBe("搜索历史记录");
+      .toBe("搜索收藏夹和历史记录");
     expect(footer?.querySelector("#tab-search")?.getAttribute("aria-label"))
-      .toBe("搜索历史记录");
+      .toBe("搜索收藏夹和历史记录");
     expect(footer?.querySelector("#shortcut-settings")).not.toBeNull();
     expect(footer?.querySelector("#status-message")).toBeNull();
   });

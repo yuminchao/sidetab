@@ -510,6 +510,119 @@ describe("history search controller", () => {
     controller.destroy();
   });
 
+  it("keeps a newer query open after an older result finishes opening", async () => {
+    vi.useFakeTimers();
+    const oldOpen = deferred<void>();
+    const newOpen = deferred<void>();
+    const onOpen = vi.fn()
+      .mockReturnValueOnce(oldOpen.promise)
+      .mockReturnValueOnce(newOpen.promise);
+    const search = vi.fn(async (query: chrome.history.HistoryQuery) => [
+      query.text === "old"
+        ? historyItem("old", "https://old.example/", "Old Result")
+        : historyItem("new", "https://new.example/", "New Result"),
+    ]);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      { bookmarks: emptyBookmarks(), history: { search }, onOpen },
+    );
+
+    input.value = "old";
+    input.focus();
+    await flush();
+    results.querySelector<HTMLElement>("[role='option']")!.click();
+    expect(onOpen).toHaveBeenCalledWith("https://old.example/");
+
+    input.value = "new";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(results.textContent).toContain("New Result");
+    results.querySelector<HTMLElement>("[role='option']")!.click();
+    expect(onOpen).toHaveBeenLastCalledWith("https://new.example/");
+
+    oldOpen.resolve();
+    await flush();
+
+    expect(input.value).toBe("new");
+    expect(results.hidden).toBe(false);
+    expect(results.textContent).toContain("New Result");
+    results.querySelector<HTMLElement>("[role='option']")!.click();
+    expect(onOpen).toHaveBeenCalledTimes(2);
+
+    newOpen.resolve();
+    await flush();
+    expect(results.hidden).toBe(true);
+    controller.destroy();
+  });
+
+  it("does not report an older open failure over a newer query", async () => {
+    vi.useFakeTimers();
+    const oldOpen = deferred<void>();
+    const onOpenError = vi.fn();
+    const search = vi.fn(async (query: chrome.history.HistoryQuery) => [
+      query.text === "old"
+        ? historyItem("old", "https://old.example/", "Old Result")
+        : historyItem("new", "https://new.example/", "New Result"),
+    ]);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      {
+        bookmarks: emptyBookmarks(),
+        history: { search },
+        onOpen: vi.fn(() => oldOpen.promise),
+        onOpenError,
+      },
+    );
+
+    input.value = "old";
+    input.focus();
+    await flush();
+    results.querySelector<HTMLElement>("[role='option']")!.click();
+    input.value = "new";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(100);
+
+    oldOpen.reject(new Error("old failure"));
+    await flush();
+
+    expect(onOpenError).not.toHaveBeenCalled();
+    expect(input.value).toBe("new");
+    expect(results.hidden).toBe(false);
+    expect(results.textContent).toContain("New Result");
+    controller.destroy();
+  });
+
+  it("does not write to the interface when an open finishes after destroy", async () => {
+    const pendingOpen = deferred<void>();
+    const onOpenError = vi.fn();
+    const search = vi.fn(async () => [
+      historyItem("one", "https://one.example/", "One"),
+    ]);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      {
+        bookmarks: emptyBookmarks(),
+        history: { search },
+        onOpen: vi.fn(() => pendingOpen.promise),
+        onOpenError,
+      },
+    );
+
+    input.value = "keep";
+    input.focus();
+    await flush();
+    results.querySelector<HTMLElement>("[role='option']")!.click();
+    controller.destroy();
+    const before = { inputValue: input.value, results: results.innerHTML };
+
+    pendingOpen.resolve();
+    await flush();
+
+    expect(input.value).toBe(before.inputValue);
+    expect(results.innerHTML).toBe(before.results);
+    expect(onOpenError).not.toHaveBeenCalled();
+  });
+
   it("closes after blur and cancels the pending close when focus returns", async () => {
     vi.useFakeTimers();
     const search = vi.fn(async () => [

@@ -36,6 +36,8 @@ describe("side panel settings markup", () => {
 
     expect(shell?.parentElement?.classList.contains("bottom-toolbar")).toBe(true);
     expect(Array.from(shell?.children ?? [])).toEqual([input, button]);
+    expect(input?.placeholder).toBe("搜索收藏夹和历史记录");
+    expect(input?.getAttribute("aria-label")).toBe("搜索收藏夹和历史记录");
     expect(button?.tagName).toBe("BUTTON");
     expect(button?.title).toBe("设置");
     expect(button?.getAttribute("aria-label")).toBe("设置");

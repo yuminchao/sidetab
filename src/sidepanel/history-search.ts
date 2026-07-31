@@ -62,7 +62,7 @@ export function createHistorySearchController(
   let blurTimer: ReturnType<typeof setTimeout> | undefined;
   let currentResults: SearchResult[] = [];
   let selectedIndex = -1;
-  let openBusy = false;
+  let openGeneration: number | undefined;
   let faviconsByOrigin = new Map<string, string>();
 
   if (!elements.results.id) elements.results.id = "history-search-results";
@@ -213,17 +213,20 @@ export function createHistorySearchController(
 
   const openResult = async (index: number): Promise<void> => {
     const item = currentResults[index];
-    if (!item || openBusy) return;
-    openBusy = true;
+    const resultGeneration = generation;
+    if (!item || openGeneration === resultGeneration) return;
+    openGeneration = resultGeneration;
     try {
       await callbacks.onOpen(item.url);
-      if (!active) return;
+      if (!active || resultGeneration !== generation) return;
       elements.input.value = "";
       close();
     } catch {
-      if (active) callbacks.onOpenError?.("无法打开搜索结果");
+      if (active && resultGeneration === generation) {
+        callbacks.onOpenError?.("无法打开搜索结果");
+      }
     } finally {
-      openBusy = false;
+      if (openGeneration === resultGeneration) openGeneration = undefined;
     }
   };
 
