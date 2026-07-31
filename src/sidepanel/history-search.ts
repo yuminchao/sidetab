@@ -76,6 +76,7 @@ export function createHistorySearchController(
   let active = true;
   let generation = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let blurTimer: ReturnType<typeof setTimeout> | undefined;
   let currentResults: HistorySearchResult[] = [];
   let selectedIndex = -1;
   let openBusy = false;
@@ -91,6 +92,13 @@ export function createHistorySearchController(
     if (timer !== undefined) {
       clearTimeout(timer);
       timer = undefined;
+    }
+  };
+
+  const clearBlurTimer = (): void => {
+    if (blurTimer !== undefined) {
+      clearTimeout(blurTimer);
+      blurTimer = undefined;
     }
   };
 
@@ -193,6 +201,7 @@ export function createHistorySearchController(
   const close = (): void => {
     generation += 1;
     clearTimer();
+    clearBlurTimer();
     currentResults = [];
     selectedIndex = -1;
     elements.results.hidden = true;
@@ -217,7 +226,16 @@ export function createHistorySearchController(
   };
 
   const reopen = (): void => {
+    clearBlurTimer();
     if (elements.results.hidden) void runQuery(elements.input.value);
+  };
+
+  const onBlur = (): void => {
+    clearBlurTimer();
+    blurTimer = setTimeout(() => {
+      blurTimer = undefined;
+      if (active) close();
+    }, 0);
   };
 
   const onInput = (): void => {
@@ -285,6 +303,7 @@ export function createHistorySearchController(
   };
 
   elements.input.addEventListener("focus", reopen);
+  elements.input.addEventListener("blur", onBlur);
   elements.input.addEventListener("click", reopen);
   elements.input.addEventListener("input", onInput);
   elements.input.addEventListener("keydown", onKeyDown);
@@ -309,6 +328,7 @@ export function createHistorySearchController(
       close();
       active = false;
       elements.input.removeEventListener("focus", reopen);
+      elements.input.removeEventListener("blur", onBlur);
       elements.input.removeEventListener("click", reopen);
       elements.input.removeEventListener("input", onInput);
       elements.input.removeEventListener("keydown", onKeyDown);

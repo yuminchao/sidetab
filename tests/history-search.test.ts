@@ -326,6 +326,79 @@ describe("history search controller", () => {
     controller.destroy();
   });
 
+  it("closes after blur and cancels the pending close when focus returns", async () => {
+    vi.useFakeTimers();
+    const search = vi.fn(async () => [
+      historyItem("1", "https://one.example/", "One"),
+    ]);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      { history: { search }, onOpen: vi.fn(async () => undefined) },
+    );
+
+    input.focus();
+    await flush();
+    input.blur();
+    expect(results.hidden).toBe(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(results.hidden).toBe(true);
+    expect(input.getAttribute("aria-expanded")).toBe("false");
+
+    input.focus();
+    await flush();
+    input.blur();
+    input.focus();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(results.hidden).toBe(false);
+    controller.destroy();
+  });
+
+  it("lets a result click finish before the deferred blur close", async () => {
+    vi.useFakeTimers();
+    const onOpen = vi.fn(async () => undefined);
+    const search = vi.fn(async () => [
+      historyItem("1", "https://one.example/", "One"),
+    ]);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      { history: { search }, onOpen },
+    );
+
+    input.focus();
+    await flush();
+    const option = results.querySelector<HTMLButtonElement>("[role='option']")!;
+    input.blur();
+    option.click();
+    await flush();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(onOpen).toHaveBeenCalledOnce();
+    expect(onOpen).toHaveBeenCalledWith("https://one.example/");
+    expect(results.hidden).toBe(true);
+    controller.destroy();
+  });
+
+  it("clears a pending blur close when destroyed", async () => {
+    vi.useFakeTimers();
+    const search = vi.fn(async () => [
+      historyItem("1", "https://one.example/", "One"),
+    ]);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      { history: { search }, onOpen: vi.fn(async () => undefined) },
+    );
+
+    input.focus();
+    await flush();
+    input.blur();
+    controller.destroy();
+    const before = results.innerHTML;
+    await vi.runAllTimersAsync();
+
+    expect(results.innerHTML).toBe(before);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("drops stale responses and blocks late DOM changes after destroy", async () => {
     vi.useFakeTimers();
     const old = deferred<chrome.history.HistoryItem[]>();
