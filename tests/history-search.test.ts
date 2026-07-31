@@ -39,6 +39,21 @@ describe("history search model", () => {
     ]);
   });
 
+  it("uses the normalized URL as the fallback ID", async () => {
+    const search = vi.fn(async () => [
+      historyItem("", "HTTPS://EXAMPLE.COM:443/a/../b", "Normalized"),
+    ]);
+
+    await expect(searchHistory({ search }, "")).resolves.toEqual([
+      {
+        id: "https://example.com/b",
+        source: "history",
+        title: "Normalized",
+        url: "https://example.com/b",
+      },
+    ]);
+  });
+
   it("returns at most twenty normalized results", async () => {
     const search = vi.fn(async () =>
       Array.from({ length: 24 }, (_, index) =>

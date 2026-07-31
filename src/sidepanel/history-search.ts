@@ -29,7 +29,9 @@ export async function searchHistory(
       : undefined;
     if (!normalized || seenKeys.has(normalized.dedupeKey)) continue;
     seenKeys.add(normalized.dedupeKey);
-    results.push(normalized.result);
+    results.push(
+      item.id ? normalized.result : { ...normalized.result, id: normalized.result.url },
+    );
   }
   return results;
 }
