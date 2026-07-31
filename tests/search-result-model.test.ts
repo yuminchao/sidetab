@@ -29,6 +29,9 @@ describe("search result model", () => {
     });
     expect(createSearchResult(result("two", "history", "chrome://settings/"))).toBeUndefined();
     expect(createSearchResult(result("three", "history", "not a url"))).toBeUndefined();
+    expect(createSearchResult(result("root", "history", "https://example.com///"))?.dedupeKey).toBe(
+      "example.com/",
+    );
   });
 
   it("keeps at most five bookmarks first and fills the remaining slots with history", () => {
@@ -59,6 +62,28 @@ describe("search result model", () => {
         title: "Title",
         url: "https://example.com/page/",
       },
+    ]);
+  });
+
+  it("deduplicates bookmarks before filling remaining results with history", () => {
+    const merged = mergeSearchResults(
+      [
+        result("first-bookmark", "bookmark", "https://example.com/docs/"),
+        result("duplicate-bookmark", "bookmark", "http://example.com/docs?q=1"),
+        result("second-bookmark", "bookmark", "https://bookmarks.example/second"),
+      ],
+      [
+        result("duplicate-history", "history", "https://example.com/docs#history"),
+        result("first-history", "history", "https://history.example/one"),
+        result("second-history", "history", "https://history.example/two"),
+      ],
+    );
+
+    expect(merged.map((item) => item.id)).toEqual([
+      "first-bookmark",
+      "second-bookmark",
+      "first-history",
+      "second-history",
     ]);
   });
 });
