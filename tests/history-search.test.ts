@@ -13,7 +13,7 @@ function historyItem(
 }
 
 describe("history search model", () => {
-  it("queries all time with a two-hundred-candidate limit", async () => {
+  it("queries all time with a five-hundred-candidate limit", async () => {
     const search = vi.fn(async () => [
       historyItem("1", "https://first.example/path", "First"),
     ]);
@@ -21,7 +21,7 @@ describe("history search model", () => {
     await expect(searchHistory({ search }, "docs")).resolves.toEqual([
       { id: "1", title: "First", url: "https://first.example/path" },
     ]);
-    expect(search).toHaveBeenCalledWith({ text: "docs", startTime: 0, maxResults: 200 });
+    expect(search).toHaveBeenCalledWith({ text: "docs", startTime: 0, maxResults: 500 });
   });
 
   it("preserves order while filtering invalid and non-web results", async () => {
@@ -80,22 +80,30 @@ describe("history search model", () => {
     expect(result.at(-1)?.url).toBe("https://tail-9.example/path");
   });
 
-  it("deduplicates only the normalized complete URL", async () => {
+  it("deduplicates by host and normalized path while preserving the newest full URL", async () => {
     const search = vi.fn(async () => [
-      historyItem("recent", "https://example.com/path", "Recent"),
-      historyItem("duplicate", "https://example.com/path", "Older"),
-      historyItem("other-path", "https://example.com/other", "Other path"),
-      historyItem("query", "https://example.com/path?q=1", "Query"),
-      historyItem("hash", "https://example.com/path#section", "Hash"),
-      historyItem("invalid", "chrome://settings/", "Invalid"),
+      historyItem("newest", "https://example.com/page/?utm=new#top", "Newest"),
+      historyItem("scheme", "http://example.com/page", "Scheme"),
+      historyItem("query", "https://example.com/page?utm=old", "Query"),
+      historyItem("credentials", "https://user:pass@example.com/page", "Credentials"),
+      historyItem("subdomain", "https://www.example.com/page", "Subdomain"),
+      historyItem("port", "https://example.com:8443/page", "Port"),
+      historyItem("case", "https://example.com/Page", "Case"),
+      historyItem("other", "https://example.com/other", "Other"),
     ]);
 
-    await expect(searchHistory({ search }, "example")).resolves.toEqual([
-      { id: "recent", title: "Recent", url: "https://example.com/path" },
-      { id: "other-path", title: "Other path", url: "https://example.com/other" },
-      { id: "query", title: "Query", url: "https://example.com/path?q=1" },
-      { id: "hash", title: "Hash", url: "https://example.com/path#section" },
+    await expect(searchHistory({ search }, "docs")).resolves.toEqual([
+      {
+        id: "newest",
+        title: "Newest",
+        url: "https://example.com/page/?utm=new#top",
+      },
+      { id: "subdomain", title: "Subdomain", url: "https://www.example.com/page" },
+      { id: "port", title: "Port", url: "https://example.com:8443/page" },
+      { id: "case", title: "Case", url: "https://example.com/Page" },
+      { id: "other", title: "Other", url: "https://example.com/other" },
     ]);
+    expect(search).toHaveBeenCalledWith({ text: "docs", startTime: 0, maxResults: 500 });
   });
 
   it("maps Chrome history failures to a stable message", async () => {
@@ -153,7 +161,7 @@ describe("history search controller", () => {
     input.focus();
     await flush();
 
-    expect(search).toHaveBeenCalledWith({ text: "", startTime: 0, maxResults: 200 });
+    expect(search).toHaveBeenCalledWith({ text: "", startTime: 0, maxResults: 500 });
     expect(results.hidden).toBe(false);
     expect(input.getAttribute("role")).toBe("combobox");
     expect(input.getAttribute("aria-expanded")).toBe("true");
@@ -207,7 +215,7 @@ describe("history search controller", () => {
     expect(search).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(search).toHaveBeenCalledOnce();
-    expect(search).toHaveBeenCalledWith({ text: "latest", startTime: 0, maxResults: 200 });
+    expect(search).toHaveBeenCalledWith({ text: "latest", startTime: 0, maxResults: 500 });
 
     pending.resolve([historyItem("1", "https://latest.example/", "Latest")]);
     await flush();

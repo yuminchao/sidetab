@@ -12,34 +12,47 @@ export async function searchHistory(
 ): Promise<HistorySearchResult[]> {
   let items: chrome.history.HistoryItem[];
   try {
-    items = await api.search({ text, startTime: 0, maxResults: 200 });
+    items = await api.search({ text, startTime: 0, maxResults: 500 });
   } catch {
     throw new Error("无法读取历史记录");
   }
 
   const results: HistorySearchResult[] = [];
-  const seenUrls = new Set<string>();
+  const seenKeys = new Set<string>();
   for (const item of items) {
     if (results.length === 20) break;
-    const result = normalizeHistoryItem(item);
-    if (!result || seenUrls.has(result.url)) continue;
-    seenUrls.add(result.url);
-    results.push(result);
+    const normalized = normalizeHistoryItem(item);
+    if (!normalized || seenKeys.has(normalized.dedupeKey)) continue;
+    seenKeys.add(normalized.dedupeKey);
+    results.push(normalized.result);
   }
   return results;
 }
 
+type NormalizedHistoryItem = {
+  result: HistorySearchResult;
+  dedupeKey: string;
+};
+
+function normalizeHistoryPath(pathname: string): string {
+  const withoutTrailingSlashes = pathname.replace(/\/+$/, "");
+  return withoutTrailingSlashes || "/";
+}
+
 function normalizeHistoryItem(
   item: chrome.history.HistoryItem,
-): HistorySearchResult | undefined {
+): NormalizedHistoryItem | undefined {
   if (!item.url) return undefined;
   try {
     const url = new URL(item.url);
     if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
     return {
-      id: item.id || url.href,
-      title: item.title?.trim() || url.hostname,
-      url: url.href,
+      result: {
+        id: item.id || url.href,
+        title: item.title?.trim() || url.hostname,
+        url: url.href,
+      },
+      dedupeKey: `${url.host}${normalizeHistoryPath(url.pathname)}`,
     };
   } catch {
     return undefined;
