@@ -9,6 +9,7 @@ export const EXPECTED_FILES = Object.freeze(
     "sidepanel/index.html",
     "sidepanel/sidebar.css",
     "sidepanel/sidebar.js",
+    "assets/icons/add-tab.svg",
     "assets/icons/icon-16.png",
     "assets/icons/icon-32.png",
     "assets/icons/icon-48.png",

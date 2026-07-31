@@ -61,10 +61,11 @@ const pngSizes = new Map([
   ["assets/icons/icon-48.png", 48],
   ["assets/icons/icon-128.png", 128],
 ]);
-const sanitizedSvgPaths = new Set([
-  "assets/icons/network.svg",
-  "assets/icons/search.svg",
-  "assets/icons/settings.svg",
+const sanitizedSvgPaths = new Map([
+  ["assets/icons/add-tab.svg", 2],
+  ["assets/icons/network.svg", 1],
+  ["assets/icons/search.svg", 1],
+  ["assets/icons/settings.svg", 1],
 ]);
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
@@ -74,7 +75,7 @@ function assert(condition, message) {
   }
 }
 
-function validateSanitizedSvg(svgPath, source) {
+function validateSanitizedSvg(svgPath, source, expectedPathCount) {
   assert(!/^\s*<\?xml\b/.test(source), `forbidden SVG XML declaration in ${svgPath}`);
 
   let document;
@@ -100,25 +101,27 @@ function validateSanitizedSvg(svgPath, source) {
   assert(root.getAttribute("xmlns") === SVG_NAMESPACE, `invalid SVG namespace in ${svgPath}`);
   assert(Boolean(root.getAttribute("viewBox")?.trim()), `SVG viewBox is missing in ${svgPath}`);
 
-  const elements = Array.from(root.children);
-  const path = elements[0];
+  const paths = Array.from(root.children);
   assert(
-    elements.length === 1 && path?.tagName === "path" && path.namespaceURI === SVG_NAMESPACE,
+    paths.length === expectedPathCount &&
+      paths.every((path) => path.tagName === "path" && path.namespaceURI === SVG_NAMESPACE),
     `forbidden SVG child in ${svgPath}`,
   );
   assert(
     Array.from(root.childNodes).every(
-      (node) => node === path || (node.nodeType === 3 && !node.textContent?.trim()),
+      (node) => paths.includes(node) || (node.nodeType === 3 && !node.textContent?.trim()),
     ),
     `forbidden SVG child node in ${svgPath}`,
   );
-  assert(
-    JSON.stringify(path.getAttributeNames()) === JSON.stringify(["d"]) &&
-      Boolean(path.getAttribute("d")?.trim()) &&
-      !/https?:/i.test(path.getAttribute("d") ?? "") &&
-      path.childNodes.length === 0,
-    `forbidden SVG path content in ${svgPath}`,
-  );
+  for (const path of paths) {
+    assert(
+      JSON.stringify(path.getAttributeNames()) === JSON.stringify(["d"]) &&
+        Boolean(path.getAttribute("d")?.trim()) &&
+        !/https?:/i.test(path.getAttribute("d") ?? "") &&
+        path.childNodes.length === 0,
+      `forbidden SVG path content in ${svgPath}`,
+    );
+  }
 }
 
 export function validateExtensionCsp(value) {
@@ -365,7 +368,11 @@ export async function checkDist(distDirectory) {
     } else if (path.endsWith(".js")) {
       validateJavaScript(path, await readFile(absolutePath, "utf8"));
     } else if (sanitizedSvgPaths.has(path)) {
-      validateSanitizedSvg(path, await readFile(absolutePath, "utf8"));
+      validateSanitizedSvg(
+        path,
+        await readFile(absolutePath, "utf8"),
+        sanitizedSvgPaths.get(path),
+      );
     }
   }
 
