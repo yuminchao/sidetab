@@ -256,6 +256,7 @@ async function startSidebarInternal(
       },
     },
   );
+  shortcutRenderer.render({ ...createDefaultShortcutSettings(), enabled: false });
 
   const historySearch = createHistorySearchController(
     {

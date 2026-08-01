@@ -617,11 +617,18 @@ describe("sidebar lifecycle", () => {
 
   it("keeps shortcuts hidden while persisted disabled settings are loading", async () => {
     const storage = deferred<Record<string, unknown>>();
-    const fake = createFakeChrome();
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({
+          url: "https://chatgpt.com/path",
+          favIconUrl: "data:image/png;base64,openai-tab",
+        }),
+      ],
+    });
     fake.methods.storageGet.mockReturnValueOnce(storage.promise);
 
     const started = startSidebar(fake);
-    await flush();
+    await vi.waitFor(() => expect(rowIds()).toEqual([1]));
     const strip = element("shortcut-strip");
     expect(strip.hidden).toBe(true);
     expect(strip.childElementCount).toBe(0);
@@ -639,11 +646,18 @@ describe("sidebar lifecycle", () => {
 
   it("renders default shortcuts only after empty storage finishes loading", async () => {
     const storage = deferred<Record<string, unknown>>();
-    const fake = createFakeChrome();
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({
+          url: "https://chatgpt.com/path",
+          favIconUrl: "data:image/png;base64,openai-default",
+        }),
+      ],
+    });
     fake.methods.storageGet.mockReturnValueOnce(storage.promise);
 
     const started = startSidebar(fake);
-    await flush();
+    await vi.waitFor(() => expect(rowIds()).toEqual([1]));
     const strip = element("shortcut-strip");
     expect(strip.hidden).toBe(true);
     expect(strip.childElementCount).toBe(0);
@@ -657,6 +671,9 @@ describe("sidebar lifecycle", () => {
         (button as HTMLElement).dataset.shortcutId,
       ),
     ).toEqual(["openai", "google", "github"]);
+    expect(shortcutImage("openai")?.getAttribute("src")).toBe(
+      "data:image/png;base64,openai-default",
+    );
     cleanup();
   });
 
