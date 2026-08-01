@@ -150,12 +150,12 @@ describe("shortcut renderer", () => {
 
   it("hides and clears a disabled strip, then renders enabled shortcuts", () => {
     const renderer = createShortcutRenderer(elements, { onOpen, onSave });
-    renderer.render(createDefaultShortcutSettings());
+    renderer.render({ ...createDefaultShortcutSettings(), enabled: false });
 
     expect(elements.strip.hidden).toBe(true);
     expect(elements.strip.childElementCount).toBe(0);
 
-    renderer.render({ ...createDefaultShortcutSettings(), enabled: true });
+    renderer.render(createDefaultShortcutSettings());
     const buttons = elements.strip.querySelectorAll<HTMLButtonElement>(".shortcut-button");
     expect(elements.strip.hidden).toBe(false);
     expect(buttons).toHaveLength(3);
@@ -736,13 +736,13 @@ describe("shortcut renderer", () => {
     expect((focused as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("resets the unsaved draft to the complete disabled defaults", () => {
+  it("resets the unsaved draft to the complete enabled defaults", () => {
     const renderer = createShortcutRenderer(elements, { onOpen, onSave });
     renderer.openSettings(settings());
 
     click(elements.reset);
 
-    expect(elements.enabled.checked).toBe(false);
+    expect(elements.enabled.checked).toBe(true);
     expect(Array.from(elements.editor.querySelectorAll<HTMLInputElement>(".shortcut-name"), (input) => input.value)).toEqual([
       "OpenAI",
       "Google",
