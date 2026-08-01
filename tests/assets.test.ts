@@ -16,10 +16,13 @@ const sanitizedSvgAssets = [
   { name: "search.svg", pathCount: 1 },
   { name: "settings.svg", pathCount: 1 },
   { name: "network.svg", pathCount: 1 },
-  { name: "add-tab.svg", pathCount: 2 },
 ] as const;
 
 describe("local image assets", () => {
+  it("does not keep an add-tab SVG for the text-only button", () => {
+    expect(existsSync("assets/icons/add-tab.svg")).toBe(false);
+  });
+
   it.each(pngAssets)("provides %s as a non-empty %i px PNG", async (path, size) => {
     const image = sharp(path);
     const [metadata, contents] = await Promise.all([image.metadata(), image.toBuffer()]);
@@ -52,9 +55,6 @@ describe("local image assets", () => {
       for (const path of paths) {
         expect(Array.from(path.attributes, ({ name }) => name)).toEqual(["d"]);
         expect(path.getAttribute("d")?.trim()).not.toBe("");
-      }
-      if (name === "add-tab.svg") {
-        expect(root.getAttribute("viewBox")).toBe("0 0 1024 1024");
       }
       const sourceWithoutNamespace = source.replace(' xmlns="http://www.w3.org/2000/svg"', "");
       expect(sourceWithoutNamespace).not.toMatch(

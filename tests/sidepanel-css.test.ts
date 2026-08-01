@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import postcss from "postcss";
 import { describe, expect, it } from "vitest";
 
 const css = readFileSync("src/sidepanel/sidebar.css", "utf8");
@@ -57,12 +58,38 @@ describe("side panel responsive CSS", () => {
   });
 
   it("keeps the new-tab control compact and the empty state non-interactive", () => {
-    expect(css).toMatch(
-      /\.new-tab-button\s*{[^}]*display:\s*grid[^}]*place-items:\s*center[^}]*width:\s*44px[^}]*height:\s*24px[^}]*margin:\s*3px\s+auto[^}]*border:\s*0[^}]*border-radius:\s*0[^}]*background:\s*transparent/s,
+    const root = postcss.parse(css);
+    const rule = root.nodes.find(
+      (node) => node.type === "rule" && node.selector === ".new-tab-button",
     );
-    expect(css).toMatch(
-      /\.new-tab-button::before\s*{[^}]*width:\s*18px[^}]*height:\s*18px[^}]*background-color:\s*currentColor[^}]*content:\s*""[^}]*-webkit-mask:\s*url\("\.\.\/assets\/icons\/add-tab\.svg"\)\s+center\s*\/\s*contain\s+no-repeat[^}]*mask:\s*url\("\.\.\/assets\/icons\/add-tab\.svg"\)\s+center\s*\/\s*contain\s+no-repeat/s,
-    );
+    expect(rule?.type).toBe("rule");
+    if (!rule || rule.type !== "rule") return;
+
+    const declarations: Record<string, string> = {};
+    rule.walkDecls((declaration) => {
+      declarations[declaration.prop] = declaration.value;
+    });
+    expect(rule.nodes).toHaveLength(14);
+    expect(rule.nodes.every((node) => node.type === "decl")).toBe(true);
+    expect(declarations).toEqual({
+        display: "grid",
+        "place-items": "center",
+        width: "44px",
+        height: "24px",
+        margin: "3px auto",
+        padding: "0",
+        border: "1px solid ButtonBorder",
+        "border-radius": "5px",
+        background: "transparent",
+        color: "CanvasText",
+        font: "inherit",
+        "font-size": "20px",
+        "line-height": "1",
+        cursor: "pointer",
+      });
+    expect(css).not.toMatch(/\.new-tab-button::(?:before|after)/);
+    expect(rule.toString()).not.toMatch(/(?:mask|url\s*\()/);
+    expect(css).not.toContain("add-tab.svg");
     expect(css).toMatch(
       /\.empty-message\s*{[^}]*position:\s*absolute[^}]*z-index:\s*1[^}]*inset:\s*30px\s+0\s+0[^}]*pointer-events:\s*none/s,
     );

@@ -10,7 +10,6 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const expectedFiles = [
   "THIRD_PARTY_NOTICES.md",
-  "assets/icons/add-tab.svg",
   "assets/icons/icon-128.png",
   "assets/icons/icon-16.png",
   "assets/icons/icon-32.png",
@@ -124,11 +123,6 @@ async function createReleaseFixture(): Promise<{ root: string; dist: string; rel
     await mkdir(dirname(target), { recursive: true });
     if (path.endsWith(".png")) {
       await copyFile(resolve(import.meta.dirname, "..", path), target);
-    } else if (path === "assets/icons/add-tab.svg") {
-      await writeFile(
-        target,
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0"/><path d="M1 1"/></svg>',
-      );
     } else if (path === "assets/icons/pin.svg") {
       await writeFile(target, '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0" /></svg>');
     } else if (path.endsWith(".svg")) {
@@ -163,7 +157,8 @@ describe("release file contract", () => {
     const { EXPECTED_FILES } = await loadReleaseFiles();
 
     expect(EXPECTED_FILES).toEqual(expectedFiles);
-    expect(EXPECTED_FILES).toHaveLength(15);
+    expect(EXPECTED_FILES).toHaveLength(14);
+    expect(EXPECTED_FILES).not.toContain("assets/icons/add-tab.svg");
     expect(EXPECTED_FILES).toEqual([...EXPECTED_FILES].sort());
   });
 
@@ -297,13 +292,15 @@ describe("dist validation", () => {
     });
   });
 
-  it("builds the real dist with all fifteen reviewed files and excludes shortcut PNGs", async () => {
+  it("builds the real dist with all fourteen reviewed files and excludes shortcut PNGs", async () => {
     execFileSync(process.execPath, ["scripts/build.mjs"], { cwd: resolve(".") });
     const { checkDist } = await loadCheckDist();
+    const { assertExactReleaseFiles } = await loadReleaseFiles();
 
     await expect(checkDist(resolve("dist"))).resolves.toMatchObject({
       totalBytes: expect.any(Number),
     });
+    await expect(assertExactReleaseFiles(resolve("dist"))).resolves.toHaveLength(14);
     await expect(readFile(resolve("dist/THIRD_PARTY_NOTICES.md"), "utf8")).resolves.toContain(
       "ISC License",
     );
@@ -470,31 +467,6 @@ describe("dist validation", () => {
     const { checkDist } = await loadCheckDist();
 
     await expect(checkDist(fixture.dist)).rejects.toThrow(/svg|attribute|content/i);
-  });
-
-  it.each([
-    [
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0"/></svg>',
-      "one path",
-    ],
-    [
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0"/><path d="M1 1"/><path d="M2 2"/></svg>',
-      "three paths",
-    ],
-    [
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0"/><circle cx="1" cy="1" r="1"/></svg>',
-      "non-path child",
-    ],
-    [
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0"/><path fill="red" d="M1 1"/></svg>',
-      "extra path attribute",
-    ],
-  ])("rejects an add-tab SVG with %s", async (unsafeSvg) => {
-    const fixture = await createReleaseFixture();
-    await overwrite(fixture.dist, "assets/icons/add-tab.svg", unsafeSvg);
-    const { checkDist } = await loadCheckDist();
-
-    await expect(checkDist(fixture.dist)).rejects.toThrow(/svg|path|child|attribute|content/i);
   });
 
   it.each([

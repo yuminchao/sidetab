@@ -7,13 +7,16 @@ const document = new DOMParser().parseFromString(
 );
 
 describe("side panel settings markup", () => {
-  it("keeps the new-tab control accessible without a visible text glyph", () => {
+  it("renders the accessible new-tab control as one visible text glyph", () => {
     const button = document.querySelector<HTMLButtonElement>("#new-tab-button");
 
     expect(button?.type).toBe("button");
     expect(button?.title).toBe("新建标签页");
     expect(button?.getAttribute("aria-label")).toBe("新建标签页");
-    expect(button?.textContent?.trim()).toBe("");
+    expect(button?.textContent?.trim()).toBe("+");
+    expect(button?.childNodes).toHaveLength(1);
+    expect(button?.firstChild?.nodeType).toBe(Node.TEXT_NODE);
+    expect(button?.querySelector("svg, img")).toBeNull();
   });
 
   it("provides a static Chrome appearance settings entry", () => {
