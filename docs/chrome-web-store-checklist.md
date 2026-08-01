@@ -5,8 +5,8 @@
 - [ ] 在 `chrome://extensions` 开启开发者模式并加载 `dist`。
 - [ ] 扩展图标在 16、32、48、128 像素场景显示清晰。
 - [ ] 点击工具栏图标可以打开侧边栏。
-- [ ] 快捷入口默认关闭，关闭时不占用空白区域。
-- [ ] 开启快捷入口后，默认 OpenAI、Google、GitHub 入口可见且可打开。
+- [ ] 新安装和缺少 `enabled` 旧设置的快捷入口默认开启，默认 OpenAI、Google、GitHub 入口可见且可打开。
+- [ ] 用户显式关闭快捷入口后保持隐藏且不占用空白区域；点击恢复默认会重新开启并恢复 OpenAI、Google、GitHub。
 
 ## 标签页与快捷入口
 
@@ -41,6 +41,7 @@
 - [ ] DevTools Network 记录符合披露：浏览器可能读取缓存，也可能请求 HTTP/HTTPS `favIconUrl`；必要时还可能请求 HTTP/HTTPS 站点的 `origin/favicon.ico`。
 - [ ] 确认扩展没有使用 `fetch`、`XMLHttpRequest` 或第三方 favicon 服务，没有脚本网络连接，也没有远程代码。
 - [ ] 确认收藏夹搜索只处理本次非空查询返回的有限结果：不遍历收藏夹树、不缓存完整收藏夹树、不注册收藏夹监听器，结果不持久化、不上传。
+- [ ] 确认历史记录和收藏夹属于 Chrome 浏览器数据，扩展升级不会迁移或清除这些数据，升级后仍可按用户操作查询。
 - [ ] 权限精确为 `sidePanel`、`tabs`、`tabGroups`、`storage`、`history`、`sessions`、`bookmarks`，没有 host permission 和 content script。
 - [ ] CSP 精确为 `script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data: http: https:; style-src 'self'; frame-src 'none'`。
 - [ ] 商店隐私声明明确说明：扩展不收集、不出售或向开发者服务传输用户数据；历史与收藏夹记录仅在本地按用户操作查询，不持久化搜索结果；最近关闭功能只在内存中缓存一个 `sessionId`，不持久化会话记录；浏览器加载 favicon 时可能直接向对应站点发送图片请求。
@@ -58,12 +59,12 @@
 - [ ] 搜索框为圆角样式且其上方没有分割线；历史结果框在底部工具栏上方向上展开，不遮挡搜索框和设置按钮。
 - [ ] 快捷入口开启时，其与标签列表之间显示 1px 通栏分割线；关闭时分割线不占空间。
 - [ ] 标签右键菜单使用微软雅黑字体栈，180px 宽度下主菜单和“添加到分组”二级菜单均不溢出；浅色、深色主题下拖动插入线均清晰可辨。
-- [ ] 标签列表末尾的加号按钮为 44x24 像素紧凑无边框样式，使用本地新增标签页图标并保持水平、垂直居中；所在行总高为 30 像素，且不会撑开列表布局。
+- [ ] 标签列表末尾的加号按钮为 44x24 像素、有边框的文本 `+` 按钮，并保持水平、垂直居中；所在行总高为 30 像素，且不会撑开列表布局。
 
 ## 构建产物
 
 - [ ] `npm run package` 完整通过。
-- [ ] `dist` 和 ZIP 精确包含 15 个审核文件，不包含 `assets/shortcuts/openai.png`、`google.png`、`github.png`。
+- [ ] `dist` 和 ZIP 精确包含 14 个审核文件，图标资源为 4 个 PNG 与 4 个 SVG（固定、网络兜底、搜索、设置），不包含 `assets/icons/add-tab.svg` 及 `assets/shortcuts/openai.png`、`google.png`、`github.png`。
 - [ ] ZIP 根目录直接包含 `manifest.json`，不包含 `dist/` 顶层目录。
 - [ ] ZIP 不包含源码、source map、测试、项目文档或 `node_modules`。
 - [ ] 在全新目录解压 ZIP 后重新执行一次“加载已解压”检查。

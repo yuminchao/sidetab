@@ -16,13 +16,13 @@ function parseCsp(value: string): Record<string, string[]> {
 }
 
 describe("extension manifest", () => {
-  it("keeps the npm and extension release versions aligned at 0.8.1", () => {
+  it("keeps the npm and extension release versions aligned at 0.8.2", () => {
     const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
     const packageLock = JSON.parse(readFileSync("package-lock.json", "utf8"));
-    expect(manifest.version).toBe("0.8.1");
-    expect(packageJson.version).toBe("0.8.1");
-    expect(packageLock.version).toBe("0.8.1");
-    expect(packageLock.packages[""].version).toBe("0.8.1");
+    expect(manifest.version).toBe("0.8.2");
+    expect(packageJson.version).toBe("0.8.2");
+    expect(packageLock.version).toBe("0.8.2");
+    expect(packageLock.packages[""].version).toBe("0.8.2");
   });
 
   it("documents the current release archive, permissions, and file count", () => {
@@ -41,22 +41,40 @@ describe("extension manifest", () => {
       expect(readme).toContain(`\`${permission}\``);
       expect(checklist).toContain(`\`${permission}\``);
     }
-    expect(checklist).toContain("15 个审核文件");
+    expect(readme).toContain("四个 SVG");
+    for (const icon of ["固定", "网络兜底", "搜索", "设置"]) {
+      expect(readme).toContain(icon);
+    }
+    expect(checklist).toContain("14 个审核文件");
   });
 
-  it("documents the 0.8.1 history, add-tab, and recently closed changes", () => {
-    const readme = readFileSync("README.md", "utf8");
-    const checklist = readFileSync("docs/chrome-web-store-checklist.md", "utf8");
+  it("preserves the 0.8.1 history, add-tab, and recently closed release notes", () => {
     const updateLog = readFileSync("update.log", "utf8");
 
-    for (const document of [readme, checklist, updateLog]) {
-      expect(document).toContain("主机名及端口与规范化路径");
-      expect(document).toContain("失去焦点");
-      expect(document).toContain("打开最近关闭标签页");
-    }
-    expect(readme).toContain("新增标签页图标");
-    expect(checklist).toContain("新增标签页图标");
+    expect(updateLog).toContain("0.8.1");
+    expect(updateLog).toContain("主机名及端口与规范化路径");
+    expect(updateLog).toContain("失去焦点");
+    expect(updateLog).toContain("新增标签页图标");
+    expect(updateLog).toContain("打开最近关闭标签页");
     expect(updateLog).toContain("只缓存一个 sessionId");
+  });
+
+  it("documents the current shortcut defaults and text add-tab button without stale UI claims", () => {
+    const readme = readFileSync("README.md", "utf8");
+    const checklist = readFileSync("docs/chrome-web-store-checklist.md", "utf8");
+
+    for (const document of [readme, checklist]) {
+      expect(document).toContain("快捷入口默认开启");
+      expect(document).toContain("OpenAI、Google、GitHub");
+      expect(document).toContain("显式关闭");
+      expect(document).toContain("恢复默认");
+      expect(document).toContain("44x24");
+      expect(document).toContain("文本 `+`");
+      expect(document).toContain("边框");
+      expect(document).not.toContain("快捷入口默认关闭");
+      expect(document).not.toContain("新增标签页图标");
+      expect(document).not.toContain("无边框样式");
+    }
   });
 
   it("documents bookmark-first search and its local permission use", () => {
@@ -82,9 +100,32 @@ describe("extension manifest", () => {
         "`bookmarks`",
         "升级",
         "重新启用扩展",
+        "Chrome 浏览器数据",
+        "扩展升级不会迁移或清除",
       ]) {
         expect(document).toContain(detail);
       }
+    }
+  });
+
+  it("records the 0.8.2 release scope and performance boundaries first", () => {
+    const updateLog = readFileSync("update.log", "utf8");
+
+    expect(updateLog.startsWith("0.8.2\n")).toBe(true);
+    for (const detail of [
+      "收藏夹",
+      "最多 5 条",
+      "快捷入口默认开启",
+      "显式关闭",
+      "文本 `+`",
+      "14 个审核文件",
+      "不遍历收藏夹树",
+      "不缓存完整收藏夹树",
+      "不注册收藏夹监听器",
+      "必需权限",
+      "重新启用扩展",
+    ]) {
+      expect(updateLog).toContain(detail);
     }
   });
 
