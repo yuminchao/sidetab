@@ -87,9 +87,9 @@ describe("shortcut model", () => {
     ).toThrow("快捷网站 ID 不能重复");
   });
 
-  it("creates disabled default settings with the three prescribed shortcuts", () => {
+  it("creates enabled default settings with the three prescribed shortcuts", () => {
     expect(createDefaultShortcutSettings()).toEqual({
-      enabled: false,
+      enabled: true,
       tabTitleFontSize: 16,
       items: [
         { id: "openai", name: "OpenAI", url: "https://chatgpt.com/", icon: "openai" },
@@ -129,6 +129,33 @@ describe("shortcut model", () => {
       value: { enabled: true, items: [], tabTitleFontSize: 16 },
     });
   });
+
+  it("migrates a valid legacy object without enabled to enabled", () => {
+    expect(validateShortcutSettings({ items: [shortcut()], tabTitleFontSize: 14 })).toEqual({
+      ok: true,
+      value: {
+        enabled: true,
+        items: [shortcut({ url: "https://example.com/" })],
+        tabTitleFontSize: 14,
+      },
+    });
+  });
+
+  it("preserves an explicitly disabled setting", () => {
+    expect(validateShortcutSettings({ enabled: false, items: [], tabTitleFontSize: 16 })).toEqual({
+      ok: true,
+      value: { enabled: false, items: [], tabTitleFontSize: 16 },
+    });
+  });
+
+  it.each([undefined, null, "true", 1])(
+    "rejects an explicitly invalid enabled value %s",
+    (enabled) => {
+      expect(validateShortcutSettings({ enabled, items: [], tabTitleFontSize: 16 }).ok).toBe(
+        false,
+      );
+    },
+  );
 
   it("keeps default settings isolated between callers", () => {
     const first = createDefaultShortcutSettings();

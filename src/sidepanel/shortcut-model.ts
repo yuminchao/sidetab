@@ -31,7 +31,7 @@ const supportedIcons = new Set<ShortcutIcon>(["openai", "google", "github", "let
 
 export function createDefaultShortcutSettings(): ShortcutSettings {
   return {
-    enabled: false,
+    enabled: true,
     tabTitleFontSize: DEFAULT_TAB_TITLE_FONT_SIZE,
     items: defaultShortcuts.map((shortcut) => ({ ...shortcut })),
   };
@@ -82,7 +82,8 @@ export function validateShortcutSettings(input: unknown): ValidationResult {
       return invalidFormat();
     }
 
-    const enabled = input.enabled;
+    const hasEnabled = Object.hasOwn(input, "enabled");
+    const enabled = hasEnabled ? input.enabled : true;
     const rawItems = input.items;
     const hasTabTitleFontSize = Object.hasOwn(input, "tabTitleFontSize");
     const rawTabTitleFontSize = hasTabTitleFontSize

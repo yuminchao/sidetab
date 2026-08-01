@@ -13,7 +13,7 @@ function createArea(overrides: Partial<StorageArea> = {}): StorageArea {
 }
 
 describe("shortcut store", () => {
-  it("loads disabled defaults with all three shortcuts from empty storage", async () => {
+  it("loads enabled defaults with all three shortcuts from empty storage", async () => {
     const area = createArea();
 
     await expect(createShortcutStore(area).load()).resolves.toEqual(createDefaultShortcutSettings());
@@ -37,11 +37,55 @@ describe("shortcut store", () => {
     });
   });
 
+  it("migrates legacy settings without enabled while preserving items and font size", async () => {
+    const area = createArea({
+      get: vi.fn().mockResolvedValue({
+        [storedKey]: {
+          items: [{ id: "example", name: "  Example  ", url: " example.com ", icon: "letter" }],
+          tabTitleFontSize: 18,
+        },
+      }),
+    });
+
+    await expect(createShortcutStore(area).load()).resolves.toEqual({
+      enabled: true,
+      tabTitleFontSize: 18,
+      items: [{ id: "example", name: "Example", url: "https://example.com/", icon: "letter" }],
+    });
+  });
+
+  it("preserves an explicitly disabled persisted setting", async () => {
+    const area = createArea({
+      get: vi.fn().mockResolvedValue({
+        [storedKey]: { enabled: false, items: [], tabTitleFontSize: 14 },
+      }),
+    });
+
+    await expect(createShortcutStore(area).load()).resolves.toEqual({
+      enabled: false,
+      items: [],
+      tabTitleFontSize: 14,
+    });
+  });
+
   it("falls back to defaults without writing corrupt persisted settings", async () => {
     const area = createArea({ get: vi.fn().mockResolvedValue({ [storedKey]: { enabled: "yes" } }) });
 
     await expect(createShortcutStore(area).load()).resolves.toEqual(createDefaultShortcutSettings());
     expect(area.set).not.toHaveBeenCalled();
+  });
+
+  it("falls back to enabled defaults for an explicitly invalid enabled value", async () => {
+    const area = createArea({
+      get: vi.fn().mockResolvedValue({
+        [storedKey]: { enabled: "yes", items: [], tabTitleFontSize: 16 },
+      }),
+    });
+
+    await expect(createShortcutStore(area).load()).resolves.toEqual({
+      ...createDefaultShortcutSettings(),
+      enabled: true,
+    });
   });
 
   it("maps storage read failures to the domain error", async () => {
@@ -129,6 +173,7 @@ describe("shortcut store", () => {
     const result = await createShortcutStore(area).reset();
 
     expect(result).toEqual(createDefaultShortcutSettings());
+    expect(result.enabled).toBe(true);
     expect(area.set).toHaveBeenCalledWith({ [storedKey]: result });
   });
 

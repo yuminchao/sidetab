@@ -283,8 +283,12 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.query).toHaveBeenCalledWith({ windowId: 10 });
     expect(fake.methods.storageGet).toHaveBeenCalledWith("shortcutSettings");
     expect(rowIds()).toEqual([1, 2]);
-    expect(element("shortcut-strip").hidden).toBe(true);
-    expect(element("shortcut-strip").childElementCount).toBe(0);
+    expect(element("shortcut-strip").hidden).toBe(false);
+    expect(
+      Array.from(element("shortcut-strip").querySelectorAll(".shortcut-button"), (button) =>
+        (button as HTMLElement).dataset.shortcutId,
+      ),
+    ).toEqual(["openai", "google", "github"]);
     expect(document.documentElement.style.getPropertyValue("--tab-title-font-size")).toBe("16px");
     cleanup();
   });
@@ -476,6 +480,13 @@ describe("sidebar lifecycle", () => {
 
   it("keeps disabled shortcuts empty and stops favicon syncing after cleanup", async () => {
     const fake = createFakeChrome({
+      stored: {
+        shortcutSettings: {
+          enabled: false,
+          items: [{ id: "docs", name: "Docs", url: "https://docs.example/", icon: "letter" }],
+          tabTitleFontSize: 16,
+        },
+      },
       tabs: [
         fakeTab({
           url: "https://docs.example/page",
@@ -488,6 +499,7 @@ describe("sidebar lifecycle", () => {
     const replaceChildren = vi.spyOn(strip, "replaceChildren");
 
     expect(strip.hidden).toBe(true);
+    expect(strip.childElementCount).toBe(0);
     expect(shortcutImage()).toBeNull();
     cleanup();
     fake.events.onUpdated.emit(
@@ -597,7 +609,8 @@ describe("sidebar lifecycle", () => {
     const cleanup = await startSidebar(fake);
 
     expect(rowIds()).toEqual([1]);
-    expect(element("shortcut-strip").hidden).toBe(true);
+    expect(element("shortcut-strip").hidden).toBe(false);
+    expect(element("shortcut-strip").childElementCount).toBe(3);
     expect(element("status-message").textContent).toBe("无法读取快捷网站设置");
     cleanup();
   });
@@ -1263,8 +1276,9 @@ describe("sidebar lifecycle", () => {
       url: "https://example.com/path",
       icon: "letter",
     });
-    expect(saved.enabled).toBe(false);
-    expect(element("shortcut-strip").hidden).toBe(true);
+    expect(saved.enabled).toBe(true);
+    expect(element("shortcut-strip").hidden).toBe(false);
+    expect(element("shortcut-strip").childElementCount).toBe(4);
     expect(element("status-message").textContent).toBe("已添加到快捷网站");
     expect(fake.methods.create).not.toHaveBeenCalled();
     expect(fake.methods.duplicate).not.toHaveBeenCalled();
