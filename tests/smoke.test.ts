@@ -41,11 +41,12 @@ describe("extension manifest", () => {
       expect(readme).toContain(`\`${permission}\``);
       expect(checklist).toContain(`\`${permission}\``);
     }
-    expect(readme).toContain("四个 SVG");
-    for (const icon of ["固定", "网络兜底", "搜索", "设置"]) {
-      expect(readme).toContain(icon);
-    }
-    expect(checklist).toContain("14 个审核文件");
+    expect(readme).toContain(
+      "精确包含 14 个审核文件，其中图标资源为四个扩展 PNG 图标和四个 SVG（固定、网络兜底、搜索、设置）",
+    );
+    expect(checklist).toContain(
+      "精确包含 14 个审核文件，图标资源为 4 个 PNG 与 4 个 SVG（固定、网络兜底、搜索、设置）",
+    );
   });
 
   it("preserves the 0.8.1 history, add-tab, and recently closed release notes", () => {
@@ -111,7 +112,7 @@ describe("extension manifest", () => {
   it("records the 0.8.2 release scope and performance boundaries first", () => {
     const updateLog = readFileSync("update.log", "utf8");
 
-    expect(updateLog.startsWith("0.8.2\n")).toBe(true);
+    expect(updateLog.split(/\r?\n/, 1)[0]).toBe("0.8.2");
     for (const detail of [
       "收藏夹",
       "最多 5 条",
