@@ -615,6 +615,51 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
+  it("keeps shortcuts hidden while persisted disabled settings are loading", async () => {
+    const storage = deferred<Record<string, unknown>>();
+    const fake = createFakeChrome();
+    fake.methods.storageGet.mockReturnValueOnce(storage.promise);
+
+    const started = startSidebar(fake);
+    await flush();
+    const strip = element("shortcut-strip");
+    expect(strip.hidden).toBe(true);
+    expect(strip.childElementCount).toBe(0);
+    expect(strip.querySelector(".shortcut-button")).toBeNull();
+
+    storage.resolve({
+      shortcutSettings: { ...createDefaultShortcutSettings(), enabled: false },
+    });
+    const cleanup = await started;
+    expect(strip.hidden).toBe(true);
+    expect(strip.childElementCount).toBe(0);
+    expect(strip.querySelector(".shortcut-button")).toBeNull();
+    cleanup();
+  });
+
+  it("renders default shortcuts only after empty storage finishes loading", async () => {
+    const storage = deferred<Record<string, unknown>>();
+    const fake = createFakeChrome();
+    fake.methods.storageGet.mockReturnValueOnce(storage.promise);
+
+    const started = startSidebar(fake);
+    await flush();
+    const strip = element("shortcut-strip");
+    expect(strip.hidden).toBe(true);
+    expect(strip.childElementCount).toBe(0);
+    expect(strip.querySelector(".shortcut-button")).toBeNull();
+
+    storage.resolve({});
+    const cleanup = await started;
+    expect(strip.hidden).toBe(false);
+    expect(
+      Array.from(strip.querySelectorAll(".shortcut-button"), (button) =>
+        (button as HTMLElement).dataset.shortcutId,
+      ),
+    ).toEqual(["openai", "google", "github"]);
+    cleanup();
+  });
+
   it("disables settings until storage settles and ignores quick click and save", async () => {
     const storage = deferred<Record<string, unknown>>();
     const fake = createFakeChrome();

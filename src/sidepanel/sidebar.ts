@@ -633,7 +633,6 @@ async function startSidebarInternal(
     "click",
     onChromeAppearanceSettingsClick,
   );
-  shortcutRenderer.render(createDefaultShortcutSettings());
   updateDragEnabled();
   signal?.addEventListener("abort", cleanup, { once: true });
   if (signal?.aborted) {
