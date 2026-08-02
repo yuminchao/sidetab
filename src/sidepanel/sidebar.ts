@@ -27,6 +27,10 @@ import { createTabMiddleClickController } from "./tab-middle-click";
 import { createTabReorderPlan } from "./tab-reorder-model";
 import { createTabRenderer } from "./tab-renderer";
 import { TabStore } from "./tab-store";
+import {
+  createSameSiteGroupPlan,
+  getOtherSameSiteTabIds,
+} from "./same-site-tab-model";
 
 export type SidebarDependencies = {
   tabs: typeof chrome.tabs;
@@ -433,6 +437,10 @@ async function startSidebarInternal(
       getTab: (id) => tabStore.list().find((tab) => tab.id === id),
       getGroups: () => groupStore.list(),
       canCloseBelow: (id) => getClosableTabsBelow(tabStore.list(), id).length > 0,
+      canGroupSameSite: (id) =>
+        createSameSiteGroupPlan(tabStore.list(), id) !== undefined,
+      canCloseOtherSameSite: (id) =>
+        getOtherSameSiteTabIds(tabStore.list(), id).length > 0,
       getRecentlyClosedSessionId: () => recentlyClosed.getSessionId(),
       onCommand(command) {
         if (command.action === "add-shortcut") {
@@ -442,6 +450,24 @@ async function startSidebarInternal(
         if (command.action === "close-below") {
           const tabIds = getClosableTabsBelow(tabStore.list(), command.tabId);
           runTabOperation(tabActions.closeMany(tabIds));
+          return;
+        }
+        if (command.action === "close-same-site") {
+          const tabIds = getOtherSameSiteTabIds(tabStore.list(), command.tabId);
+          runTabOperation(tabActions.closeOtherSameSite(tabIds));
+          return;
+        }
+        if (command.action === "group-same-site") {
+          const plan = createSameSiteGroupPlan(tabStore.list(), command.tabId);
+          if (!plan || plan.tabIds.some((tabId) => groupTabBusy.has(tabId))) return;
+          for (const tabId of plan.tabIds) groupTabBusy.add(tabId);
+          runTabOperation(
+            groupActions.createSameSite(plan).then(() => undefined),
+            () => {
+              for (const tabId of plan.tabIds) groupTabBusy.delete(tabId);
+            },
+            () => { void resyncTabsAndGroups(); },
+          );
           return;
         }
         if (command.action === "create-group") {

@@ -1321,6 +1321,130 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.query).toHaveBeenCalledOnce();
   });
 
+  it("derives same-site menu availability from ordinary, grouped, pinned, and non-HTTP tabs", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://example.com/target", groupId: -1 }),
+        fakeTab({ id: 2, index: 1, url: "https://example.com/grouped", groupId: 7 }),
+        fakeTab({ id: 3, index: 2, url: "https://example.com/pinned", pinned: true }),
+        fakeTab({ id: 4, index: 3, url: "chrome://settings" }),
+      ],
+      groups: [fakeGroup({ id: 7 })],
+    });
+    const cleanup = await startSidebar(fake);
+
+    for (const tabId of [1, 2, 3]) {
+      openTabContextMenu(tabId);
+      expect(contextMenuItem("group-same-site").disabled).toBe(true);
+      expect(contextMenuItem("close-same-site").disabled).toBe(false);
+      expect(contextMenuItem("duplicate").disabled).toBe(false);
+    }
+    openTabContextMenu(4);
+    expect(contextMenuItem("group-same-site").disabled).toBe(true);
+    expect(contextMenuItem("close-same-site").disabled).toBe(true);
+    expect(contextMenuItem("duplicate").disabled).toBe(false);
+    cleanup();
+  });
+
+  it("recomputes same-site close targets from created, updated, and removed tab events", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://example.com/target" }),
+        fakeTab({ id: 2, index: 1, url: "https://example.com/old" }),
+        fakeTab({ id: 4, index: 2, url: "https://example.com/removed" }),
+      ],
+    });
+    const cleanup = await startSidebar(fake);
+
+    openTabContextMenu(1);
+    expect(contextMenuItem("close-same-site").disabled).toBe(false);
+    fake.events.onCreated.emit(
+      fakeTab({ id: 3, index: 3, url: "https://example.com/created" }),
+    );
+    fake.events.onUpdated.emit(
+      2,
+      { url: "https://other.example/updated" },
+      fakeTab({ id: 2, index: 1, url: "https://other.example/updated" }),
+    );
+    fake.events.onRemoved.emit(4, { windowId: 10, isWindowClosing: false });
+    click(contextMenuItem("close-same-site"));
+    await flush();
+
+    expect(fake.methods.remove).toHaveBeenCalledOnce();
+    expect(fake.methods.remove).toHaveBeenCalledWith([3]);
+    expect(rowIds()).toEqual([1, 2, 3]);
+    cleanup();
+  });
+
+  it("closes grouped ordinary same-site tabs but excludes the target and every pinned tab", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://example.com/target", pinned: true }),
+        fakeTab({ id: 2, index: 1, url: "https://example.com/grouped", groupId: 7 }),
+        fakeTab({ id: 3, index: 2, url: "https://example.com/pinned", pinned: true }),
+        fakeTab({ id: 4, index: 3, url: "https://example.com/ordinary" }),
+        fakeTab({ id: 5, index: 4, url: "https://other.example/page" }),
+      ],
+      groups: [fakeGroup({ id: 7 })],
+    });
+    const cleanup = await startSidebar(fake);
+    const rowsBefore = rowIds();
+
+    openTabContextMenu(1);
+    click(contextMenuItem("close-same-site"));
+    await flush();
+
+    expect(fake.methods.remove).toHaveBeenCalledOnce();
+    expect(fake.methods.remove).toHaveBeenCalledWith([2, 4]);
+    expect(rowIds()).toEqual(rowsBefore);
+    cleanup();
+  });
+
+  it("keeps same-site rows until Chrome events and reports the close action error", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://example.com/target" }),
+        fakeTab({ id: 2, index: 1, url: "https://example.com/other" }),
+      ],
+    });
+    fake.methods.remove.mockRejectedValueOnce(new Error("browser failed"));
+    const cleanup = await startSidebar(fake);
+
+    openTabContextMenu(1);
+    click(contextMenuItem("close-same-site"));
+
+    await vi.waitFor(() =>
+      expect(element("status-message").textContent).toBe(
+        "无法关闭其他同类网站标签页",
+      ),
+    );
+    expect(rowIds()).toEqual([1, 2]);
+    expect(fake.methods.query).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it("ignores a late same-site close rejection after cleanup", async () => {
+    const pendingRemove = deferred<undefined>();
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://example.com/target" }),
+        fakeTab({ id: 2, index: 1, url: "https://example.com/other" }),
+      ],
+    });
+    fake.methods.remove.mockReturnValueOnce(pendingRemove.promise);
+    const cleanup = await startSidebar(fake);
+
+    openTabContextMenu(1);
+    click(contextMenuItem("close-same-site"));
+    const statusBefore = element("status-message").textContent;
+    cleanup();
+    pendingRemove.reject(new Error("browser failed"));
+    await flush();
+
+    expect(element("status-message").textContent).toBe(statusBefore);
+    expect(fake.methods.query).toHaveBeenCalledOnce();
+  });
+
   it("persists the current tab as a shortcut without Chrome tab actions", async () => {
     const fake = createFakeChrome({
       tabs: [fakeTab({ id: 17, title: "Example", url: "https://example.com/path" })],
@@ -1472,6 +1596,177 @@ describe("sidebar lifecycle", () => {
     expect(groupRow(7)).toBe(originalGroup);
     expect(rowIds()).toEqual([2]);
     cleanup();
+  });
+
+  it("recomputes quick-group candidates from the latest tab events and uses exact metadata", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://example.com/target", groupId: -1 }),
+        fakeTab({ id: 2, index: 1, url: "https://example.com/updated", groupId: -1 }),
+        fakeTab({ id: 6, index: 2, url: "https://example.com/removed", groupId: -1 }),
+        fakeTab({ id: 7, index: 3, url: "https://example.com/grouped", groupId: 7 }),
+        fakeTab({ id: 8, index: 4, url: "https://example.com/pinned", pinned: true }),
+      ],
+      groups: [fakeGroup({ id: 7 })],
+    });
+    const cleanup = await startSidebar(fake);
+    const rowsBefore = rowIds();
+
+    openTabContextMenu(1);
+    expect(contextMenuItem("group-same-site").disabled).toBe(false);
+    fake.events.onCreated.emit(
+      fakeTab({ id: 3, index: 5, url: "https://example.com/created", groupId: -1 }),
+    );
+    fake.events.onUpdated.emit(
+      2,
+      { pinned: true },
+      fakeTab({ id: 2, index: 1, url: "https://example.com/updated", pinned: true }),
+    );
+    fake.events.onRemoved.emit(6, { windowId: 10, isWindowClosing: false });
+    const latestRows = rowIds();
+    click(contextMenuItem("group-same-site"));
+    await flush();
+
+    expect(fake.methods.group).toHaveBeenCalledOnce();
+    expect(fake.methods.group).toHaveBeenCalledWith({
+      tabIds: [1, 3],
+      createProperties: { windowId: 10 },
+    });
+    expect(fake.methods.groupUpdate).toHaveBeenCalledOnce();
+    expect(fake.methods.groupUpdate).toHaveBeenCalledWith(777, {
+      title: "example.com",
+      color: "grey",
+    });
+    expect(latestRows).not.toEqual(rowsBefore);
+    expect(rowIds()).toEqual(latestRows);
+    expect(fake.methods.query).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it("does not start an overlapping quick group while any candidate is busy", async () => {
+    const pendingGroup = deferred<number>();
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://example.com/target", groupId: -1 }),
+        fakeTab({ id: 2, index: 1, url: "https://example.com/other", groupId: -1 }),
+      ],
+    });
+    fake.methods.group.mockReturnValueOnce(pendingGroup.promise);
+    const cleanup = await startSidebar(fake);
+
+    openTabContextMenu(1);
+    click(contextMenuItem("group-same-site"));
+    openTabContextMenu(2);
+    click(contextMenuItem("group-same-site"));
+
+    expect(fake.methods.group).toHaveBeenCalledOnce();
+    pendingGroup.resolve(777);
+    await flush();
+    expect(fake.methods.groupUpdate).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it("silently skips quick grouping when the latest snapshot no longer has a plan", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://example.com/target", groupId: -1 }),
+        fakeTab({ id: 2, index: 1, url: "https://example.com/other", groupId: -1 }),
+      ],
+    });
+    const cleanup = await startSidebar(fake);
+
+    openTabContextMenu(1);
+    expect(contextMenuItem("group-same-site").disabled).toBe(false);
+    fake.events.onRemoved.emit(2, { windowId: 10, isWindowClosing: false });
+    click(contextMenuItem("group-same-site"));
+    await flush();
+
+    expect(fake.methods.group).not.toHaveBeenCalled();
+    expect(fake.methods.groupUpdate).not.toHaveBeenCalled();
+    expect(element("status-message").textContent).toBe("");
+    expect(fake.methods.query).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it("reports a quick-group failure and requests exactly one tab and group resync", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://example.com/target", groupId: -1 }),
+        fakeTab({ id: 2, index: 1, url: "https://example.com/other", groupId: -1 }),
+      ],
+    });
+    fake.methods.group.mockRejectedValueOnce(new Error("browser failed"));
+    const cleanup = await startSidebar(fake);
+
+    openTabContextMenu(1);
+    click(contextMenuItem("group-same-site"));
+
+    await vi.waitFor(() =>
+      expect(element("status-message").textContent).toBe(
+        "无法快速分组同类网站",
+      ),
+    );
+    expect(fake.methods.query).toHaveBeenCalledTimes(2);
+    expect(fake.methods.groupQuery).toHaveBeenCalledTimes(2);
+    expect(fake.methods.groupUpdate).not.toHaveBeenCalled();
+
+    openTabContextMenu(1);
+    click(contextMenuItem("group-same-site"));
+    await vi.waitFor(() => expect(fake.methods.group).toHaveBeenCalledTimes(2));
+    expect(fake.methods.groupUpdate).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it("keeps the Chrome-created group and resyncs once when quick-group metadata fails", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://example.com/target", groupId: -1 }),
+        fakeTab({ id: 2, index: 1, url: "https://example.com/other", groupId: -1 }),
+      ],
+    });
+    fake.methods.groupUpdate.mockRejectedValueOnce(new Error("metadata failed"));
+    const cleanup = await startSidebar(fake);
+
+    openTabContextMenu(1);
+    click(contextMenuItem("group-same-site"));
+
+    await vi.waitFor(() =>
+      expect(element("status-message").textContent).toBe(
+        "分组已创建，但无法保存名称或颜色",
+      ),
+    );
+    expect(fake.methods.group).toHaveBeenCalledOnce();
+    expect(fake.methods.groupUpdate).toHaveBeenCalledOnce();
+    expect(fake.methods.query).toHaveBeenCalledTimes(2);
+    expect(fake.methods.groupQuery).toHaveBeenCalledTimes(2);
+    expect(groupRow(777).querySelector(".tab-group-title")?.textContent).toBe("未命名分组");
+    expect(groupRow(777).querySelector<HTMLElement>(".tab-group-color")?.dataset.color).toBe(
+      "grey",
+    );
+    cleanup();
+  });
+
+  it("ignores a late quick-group rejection after cleanup", async () => {
+    const pendingGroup = deferred<number>();
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://example.com/target", groupId: -1 }),
+        fakeTab({ id: 2, index: 1, url: "https://example.com/other", groupId: -1 }),
+      ],
+    });
+    fake.methods.group.mockReturnValueOnce(pendingGroup.promise);
+    const cleanup = await startSidebar(fake);
+
+    openTabContextMenu(1);
+    click(contextMenuItem("group-same-site"));
+    const statusBefore = element("status-message").textContent;
+    cleanup();
+    pendingGroup.reject(new Error("browser failed"));
+    await flush();
+
+    expect(element("status-message").textContent).toBe(statusBefore);
+    expect(fake.methods.query).toHaveBeenCalledOnce();
+    expect(fake.methods.groupQuery).toHaveBeenCalledOnce();
   });
 
   it("opens the group dialog from the context menu and retries only partial metadata creation", async () => {
