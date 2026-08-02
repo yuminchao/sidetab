@@ -385,4 +385,50 @@ describe("side panel responsive CSS", () => {
     expect(css).toMatch(/\.tab-row\[data-drop-placement="after"\]::after/s);
     expect(css).toMatch(/\.tab-row\[data-drag-source="true"\]\s*\{[^}]*opacity:/s);
   });
+
+  it("uses adaptive menu surfaces and inert context separators", () => {
+    expect(css).toMatch(
+      /\.tab-context-menu\s*\{[^}]*background:\s*color-mix\(in\s+srgb,\s*CanvasText\s+4%,\s*Canvas\)/s,
+    );
+    expect(css).toMatch(
+      /\.tab-context-separator\s*\{[^}]*height:\s*1px[^}]*margin:\s*4px\s+6px[^}]*background:\s*color-mix\(in\s+srgb,\s*CanvasText\s+18%,\s*transparent\)[^}]*pointer-events:\s*none/s,
+    );
+  });
+
+  it("outlines the context-selected tab without replacing the active marker", () => {
+    expect(css).toMatch(
+      /\.tab-row\[data-context-selected="true"\]\s*\{[^}]*box-shadow:\s*inset\s+0\s+0\s+0\s+1px\s+#1a73e8/s,
+    );
+    expect(css).toMatch(
+      /\.tab-row\[data-active="true"\]\[data-context-selected="true"\]\s*\{[^}]*box-shadow:\s*inset\s+2px\s+0\s+AccentColor\s*,\s*inset\s+0\s+0\s+0\s+1px\s+#1a73e8/s,
+    );
+
+    const contextRule = css.match(/\.tab-row\[data-context-selected="true"\]\s*\{[^}]*}/s)?.[0] ?? "";
+    expect(contextRule).not.toMatch(/(?:background|border|width|height|padding|margin):/);
+    expect(contextRule).not.toMatch(/inset\s+2px\s+0/);
+
+    const darkMedia = css.match(
+      /@media\s*\(prefers-color-scheme:\s*dark\)\s*\{([\s\S]*?)\n\}/s,
+    )?.[1] ?? "";
+    expect(darkMedia).toMatch(
+      /\.tab-row\[data-context-selected="true"\]\s*\{[^}]*box-shadow:\s*inset\s+0\s+0\s+0\s+1px\s+#8ab4f8/s,
+    );
+    expect(darkMedia).toMatch(
+      /\.tab-row\[data-active="true"\]\[data-context-selected="true"\]\s*\{[^}]*box-shadow:\s*inset\s+2px\s+0\s+AccentColor\s*,\s*inset\s+0\s+0\s+0\s+1px\s+#8ab4f8/s,
+    );
+  });
+
+  it("keeps the add-tab plus as an in-flow compact grid control", () => {
+    const rule = css.match(/\.new-tab-button\s*\{[^}]*}/s)?.[0] ?? "";
+    expect(rule).toMatch(/display:\s*grid/);
+    expect(rule).toMatch(/place-items:\s*center/);
+    expect(rule).toMatch(/width:\s*44px/);
+    expect(rule).toMatch(/height:\s*24px/);
+    expect(rule).toMatch(/padding:\s*0/);
+    expect(rule).toMatch(/line-height:\s*1/);
+    expect(rule).not.toMatch(/position:/);
+    expect(rule).not.toMatch(/(?:top|transform):/);
+    expect(rule).not.toMatch(/margin:\s*-[^;}]+/);
+    expect(css).not.toContain("add-tab.svg");
+  });
 });

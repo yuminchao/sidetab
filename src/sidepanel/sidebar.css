@@ -435,6 +435,14 @@ input:focus-visible {
   box-shadow: inset 2px 0 AccentColor;
 }
 
+.tab-row[data-context-selected="true"] {
+  box-shadow: inset 0 0 0 1px #1a73e8;
+}
+
+.tab-row[data-active="true"][data-context-selected="true"] {
+  box-shadow: inset 2px 0 AccentColor, inset 0 0 0 1px #1a73e8;
+}
+
 .tab-row:hover {
   background: ButtonFace;
 }
@@ -542,9 +550,16 @@ input:focus-visible {
   overflow-x: hidden;
   border: 1px solid ButtonBorder;
   border-radius: 6px;
-  background: Canvas;
+  background: color-mix(in srgb, CanvasText 4%, Canvas);
   box-shadow: 0 3px 10px rgb(0 0 0 / 22%);
   font-family: "Microsoft YaHei", "微软雅黑", "Segoe UI", system-ui, sans-serif;
+}
+
+.tab-context-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: color-mix(in srgb, CanvasText 18%, transparent);
+  pointer-events: none;
 }
 
 .tab-context-menu > button {
@@ -714,6 +729,14 @@ input:focus-visible {
 #tab-group-dialog input[type="radio"][name="tab-group-color"][value="orange"] { background: #fa7b17; }
 
 @media (prefers-color-scheme: dark) {
+  .tab-row[data-context-selected="true"] {
+    box-shadow: inset 0 0 0 1px #8ab4f8;
+  }
+
+  .tab-row[data-active="true"][data-context-selected="true"] {
+    box-shadow: inset 2px 0 AccentColor, inset 0 0 0 1px #8ab4f8;
+  }
+
   .tab-group-color[data-color="grey"] { background: #bdc1c6; }
   .tab-group-color[data-color="blue"] { background: #8ab4f8; }
   .tab-group-color[data-color="red"] { background: #f28b82; }
