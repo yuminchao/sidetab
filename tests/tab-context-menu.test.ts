@@ -55,6 +55,25 @@ describe("tab context menu", () => {
     expect(popup.style.top).toBe(`${window.innerHeight - 90}px`);
     expect(document.querySelectorAll(".tab-context-menu:not(.tab-context-submenu)")).toHaveLength(1);
     expect(document.querySelectorAll(".tab-context-submenu")).toHaveLength(1);
+    expect(Array.from(popup.children, (item) => item instanceof HTMLButtonElement
+      ? item.dataset.menuAction
+      : item.className)).toEqual([
+      "duplicate",
+      "set-pinned",
+      "add-shortcut",
+      "add-to-group",
+      "remove-from-group",
+      "group-same-site",
+      "tab-context-separator",
+      "close-below",
+      "close-same-site",
+      "restore-recently-closed",
+    ]);
+    const separator = popup.querySelector<HTMLElement>(".tab-context-separator")!;
+    expect(separator.tagName).not.toBe("BUTTON");
+    expect(separator.getAttribute("role")).toBe("separator");
+    expect(separator.textContent).toBe("");
+    expect(separator.tabIndex).toBe(-1);
     expect(
       Array.from(
         popup.querySelectorAll<HTMLButtonElement>("[role='menuitem']"),
@@ -65,7 +84,9 @@ describe("tab context menu", () => {
       "固定标签",
       "设为快捷网站",
       "添加到分组",
+      "快速分组同类网站",
       "关闭下方标签页",
+      "关闭其他同类网站标签页",
       "打开最近关闭标签页",
     ]);
     expect(document.activeElement).toBe(popup.querySelector("[data-menu-action='duplicate']"));
@@ -151,6 +172,83 @@ describe("tab context menu", () => {
     expect(document.activeElement).toBe(popup.querySelector("[data-menu-action='duplicate']"));
     popup.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
     expect(document.activeElement).toBe(popup.querySelector("[data-menu-action='add-to-group']"));
+    menu.destroy();
+  });
+
+  it("configures same-site actions on open, skips disabled actions, and dispatches mouse and keyboard commands", () => {
+    const onCommand = vi.fn();
+    const menu = createTabContextMenu(
+      { document, list, viewport: window },
+      {
+        getTab: (id) => tabs.find((tab) => tab.id === id),
+        getGroups: () => [],
+        canGroupSameSite: (id) => id === 1,
+        canCloseOtherSameSite: (id) => id === 2,
+        canCloseBelow: () => true,
+        onCommand,
+      },
+    );
+    const popup = document.querySelector<HTMLElement>(".tab-context-menu")!;
+
+    context(row(1));
+    const groupSameSite = popup.querySelector<HTMLButtonElement>("[data-menu-action='group-same-site']")!;
+    const closeSameSite = popup.querySelector<HTMLButtonElement>("[data-menu-action='close-same-site']")!;
+    expect(groupSameSite.disabled).toBe(false);
+    expect(closeSameSite.disabled).toBe(true);
+    closeSameSite.click();
+    closeSameSite.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    closeSameSite.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    expect(onCommand).not.toHaveBeenCalled();
+    groupSameSite.click();
+    expect(onCommand).toHaveBeenCalledWith({ action: "group-same-site", tabId: 1 });
+
+    context(row(2));
+    const keyboardGroupSameSite = popup.querySelector<HTMLButtonElement>("[data-menu-action='group-same-site']")!;
+    expect(keyboardGroupSameSite.disabled).toBe(true);
+    popup.querySelector<HTMLButtonElement>("[data-menu-action='remove-from-group']")!.focus();
+    popup.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(document.activeElement).toBe(popup.querySelector("[data-menu-action='close-below']"));
+    popup.querySelector<HTMLButtonElement>("[data-menu-action='close-same-site']")!.focus();
+    popup.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(onCommand).toHaveBeenLastCalledWith({ action: "close-same-site", tabId: 2 });
+    menu.destroy();
+  });
+
+  it("marks the triggering row while either menu level is open and clears it for every close path", () => {
+    const menu = createTabContextMenu(
+      { document, list, viewport: window },
+      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => groups, onCommand: vi.fn() },
+    );
+    const popup = document.querySelector<HTMLElement>(".tab-context-menu:not(.tab-context-submenu)")!;
+    const submenu = document.querySelector<HTMLElement>(".tab-context-submenu")!;
+    const reopen = () => {
+      context(row(1));
+      expect(row(1).dataset.contextSelected).toBe("true");
+    };
+    const expectCleared = () => expect(row(1).hasAttribute("data-context-selected")).toBe(false);
+
+    reopen();
+    (popup.querySelector("[data-menu-action='add-to-group']") as HTMLButtonElement).click();
+    expect(submenu.hidden).toBe(false);
+    expect(row(1).dataset.contextSelected).toBe("true");
+    (popup.querySelector("[data-menu-action='set-pinned']") as HTMLButtonElement).click(); expectCleared();
+    reopen(); document.body.dispatchEvent(new Event("pointerdown", { bubbles: true })); expectCleared();
+    reopen(); popup.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); expectCleared();
+    reopen(); list.dispatchEvent(new Event("scroll")); expectCleared();
+    reopen(); window.dispatchEvent(new Event("resize")); expectCleared();
+    reopen(); menu.closeForTab(1); expectCleared();
+    reopen(); context(row(2)); expectCleared(); expect(row(2).dataset.contextSelected).toBe("true");
+    menu.destroy();
+    expect(row(2).hasAttribute("data-context-selected")).toBe(false);
+  });
+
+  it("marks the Shift+F10 target row", () => {
+    const menu = createTabContextMenu(
+      { document, list, viewport: window },
+      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => [], onCommand: vi.fn() },
+    );
+    row(1).dispatchEvent(new KeyboardEvent("keydown", { key: "F10", shiftKey: true, bubbles: true, cancelable: true }));
+    expect(row(1).dataset.contextSelected).toBe("true");
     menu.destroy();
   });
 

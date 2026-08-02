@@ -5,7 +5,9 @@ export type TabContextCommand =
   | { action: "duplicate"; tabId: number }
   | { action: "set-pinned"; tabId: number; pinned: boolean }
   | { action: "add-shortcut"; tabId: number }
+  | { action: "group-same-site"; tabId: number }
   | { action: "close-below"; tabId: number }
+  | { action: "close-same-site"; tabId: number }
   | { action: "create-group"; tabId: number }
   | { action: "add-to-group"; tabId: number; groupId: number }
   | { action: "remove-from-group"; tabId: number }
@@ -17,6 +19,8 @@ export function createTabContextMenu(
     getTab(id: number): TabViewModel | undefined;
     getGroups(): readonly TabGroupViewModel[];
     canCloseBelow?(id: number): boolean;
+    canGroupSameSite?(id: number): boolean;
+    canCloseOtherSameSite?(id: number): boolean;
     getRecentlyClosedSessionId?(): string | undefined;
     onCommand(command: TabContextCommand): void;
   },
@@ -37,6 +41,12 @@ export function createTabContextMenu(
   const addToGroup = createItem("add-to-group", "添加到分组");
   addToGroup.setAttribute("aria-haspopup", "menu");
   addToGroup.setAttribute("aria-expanded", "false");
+  const groupSameSite = createItem("group-same-site", "快速分组同类网站");
+  const closeSameSite = createItem("close-same-site", "关闭其他同类网站标签页");
+  const separator = elements.document.createElement("div");
+  separator.className = "tab-context-separator";
+  separator.setAttribute("role", "separator");
+  separator.tabIndex = -1;
   const removeFromGroup = createItem("remove-from-group", "从分组中移除");
   const closeBelow = createItem("close-below", "关闭下方标签页");
   const restoreRecentlyClosed = createItem(
@@ -49,7 +59,10 @@ export function createTabContextMenu(
     addShortcut,
     addToGroup,
     removeFromGroup,
+    groupSameSite,
+    separator,
     closeBelow,
+    closeSameSite,
     restoreRecentlyClosed,
   );
   elements.document.body.append(menu, submenu);
@@ -57,6 +70,7 @@ export function createTabContextMenu(
   let openTabId: number | undefined;
   let openGroupId = -1;
   let returnFocus: HTMLElement | undefined;
+  let contextSelectedRow: HTMLElement | undefined;
 
   function createItem(action: string, label: string): HTMLButtonElement {
     const button = elements.document.createElement("button");
@@ -77,6 +91,8 @@ export function createTabContextMenu(
   }
 
   function close(restoreFocus = false): void {
+    contextSelectedRow?.removeAttribute("data-context-selected");
+    contextSelectedRow = undefined;
     if (menu.hidden && submenu.hidden) return;
     closeSubmenu();
     menu.hidden = true;
@@ -136,6 +152,11 @@ export function createTabContextMenu(
   }
 
   function open(tab: TabViewModel, x: number, y: number, focusTarget: HTMLElement): void {
+    if (contextSelectedRow !== focusTarget) {
+      contextSelectedRow?.removeAttribute("data-context-selected");
+      focusTarget.dataset.contextSelected = "true";
+      contextSelectedRow = focusTarget;
+    }
     closeSubmenu();
     openTabId = tab.id;
     openGroupId = tab.groupId;
@@ -143,7 +164,9 @@ export function createTabContextMenu(
     setPinned.textContent = tab.pinned ? "取消固定" : "固定标签";
     setPinned.dataset.nextPinned = String(!tab.pinned);
     removeFromGroup.hidden = !isValidTabGroupId(tab.groupId);
+    groupSameSite.disabled = !callbacks.canGroupSameSite?.(tab.id);
     closeBelow.disabled = !callbacks.canCloseBelow?.(tab.id);
+    closeSameSite.disabled = !callbacks.canCloseOtherSameSite?.(tab.id);
     const sessionId = callbacks.getRecentlyClosedSessionId?.();
     restoreRecentlyClosed.disabled = !sessionId;
     if (sessionId) {
@@ -211,8 +234,14 @@ export function createTabContextMenu(
       case "add-shortcut":
         command = { action: "add-shortcut", tabId: openTabId };
         break;
+      case "group-same-site":
+        command = { action: "group-same-site", tabId: openTabId };
+        break;
       case "close-below":
         command = { action: "close-below", tabId: openTabId };
+        break;
+      case "close-same-site":
+        command = { action: "close-same-site", tabId: openTabId };
         break;
       case "restore-recently-closed": {
         const sessionId = button.dataset.sessionId;
