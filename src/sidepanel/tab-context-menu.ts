@@ -46,7 +46,6 @@ export function createTabContextMenu(
   const separator = elements.document.createElement("div");
   separator.className = "tab-context-separator";
   separator.setAttribute("role", "separator");
-  separator.tabIndex = -1;
   const removeFromGroup = createItem("remove-from-group", "从分组中移除");
   const closeBelow = createItem("close-below", "关闭下方标签页");
   const restoreRecentlyClosed = createItem(

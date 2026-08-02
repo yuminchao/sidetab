@@ -73,7 +73,11 @@ describe("tab context menu", () => {
     expect(separator.tagName).not.toBe("BUTTON");
     expect(separator.getAttribute("role")).toBe("separator");
     expect(separator.textContent).toBe("");
-    expect(separator.tabIndex).toBe(-1);
+    expect(separator.hasAttribute("tabindex")).toBe(false);
+    const duplicate = popup.querySelector<HTMLButtonElement>("[data-menu-action='duplicate']")!;
+    duplicate.focus();
+    separator.focus();
+    expect(document.activeElement).toBe(duplicate);
     expect(
       Array.from(
         popup.querySelectorAll<HTMLButtonElement>("[role='menuitem']"),
@@ -89,7 +93,7 @@ describe("tab context menu", () => {
       "关闭其他同类网站标签页",
       "打开最近关闭标签页",
     ]);
-    expect(document.activeElement).toBe(popup.querySelector("[data-menu-action='duplicate']"));
+    expect(document.activeElement).toBe(duplicate);
 
     (popup.querySelector("[data-menu-action='duplicate']") as HTMLElement).click();
     expect(onCommand).toHaveBeenCalledWith({ action: "duplicate", tabId: 1 });
@@ -392,6 +396,7 @@ describe("tab context menu", () => {
     context(row(1));
     popup.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(popup.hidden).toBe(true);
+    expect(document.activeElement).toBe(row(1));
     menu.destroy();
   });
 
