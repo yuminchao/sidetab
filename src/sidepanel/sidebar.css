@@ -1014,6 +1014,15 @@ input:focus-visible {
 }
 
 @media (forced-colors: active) {
+  .tab-row[data-context-selected="true"] {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
+
+  .tab-context-separator {
+    background: CanvasText;
+  }
+
   #tab-group-dialog input[type="radio"][name="tab-group-color"] {
     -webkit-appearance: auto;
     appearance: auto;

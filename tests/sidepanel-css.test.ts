@@ -87,6 +87,9 @@ describe("side panel responsive CSS", () => {
         "line-height": "1",
         cursor: "pointer",
       });
+    expect(Object.keys(declarations)).not.toContain("position");
+    expect(Object.keys(declarations)).not.toContain("top");
+    expect(Object.keys(declarations)).not.toContain("transform");
     expect(css).not.toMatch(/\.new-tab-button::(?:before|after)/);
     expect(rule.toString()).not.toMatch(/(?:mask|url\s*\()/);
     expect(css).not.toContain("add-tab.svg");
@@ -325,6 +328,12 @@ describe("side panel responsive CSS", () => {
     expect(forcedColors).toMatch(
       /\.group-menu-color\s*{[^}]*border:\s*2px\s+solid\s+ButtonText[^}]*forced-color-adjust:\s*auto/s,
     );
+    expect(forcedColors).toMatch(
+      /\.tab-row\[data-context-selected="true"\]\s*{[^}]*outline:\s*1px\s+solid\s+Highlight[^}]*outline-offset:\s*-1px/s,
+    );
+    expect(forcedColors).toMatch(
+      /\.tab-context-separator\s*{[^}]*background:\s*CanvasText/s,
+    );
   });
 
   it("fits the tab-group dialog within a 180px panel", () => {
@@ -418,17 +427,4 @@ describe("side panel responsive CSS", () => {
     );
   });
 
-  it("keeps the add-tab plus as an in-flow compact grid control", () => {
-    const rule = css.match(/\.new-tab-button\s*\{[^}]*}/s)?.[0] ?? "";
-    expect(rule).toMatch(/display:\s*grid/);
-    expect(rule).toMatch(/place-items:\s*center/);
-    expect(rule).toMatch(/width:\s*44px/);
-    expect(rule).toMatch(/height:\s*24px/);
-    expect(rule).toMatch(/padding:\s*0/);
-    expect(rule).toMatch(/line-height:\s*1/);
-    expect(rule).not.toMatch(/position:/);
-    expect(rule).not.toMatch(/(?:top|transform):/);
-    expect(rule).not.toMatch(/margin:\s*-[^;}]+/);
-    expect(css).not.toContain("add-tab.svg");
-  });
 });
