@@ -5,6 +5,7 @@ import {
   type ShortcutSettings,
 } from "../src/sidepanel/shortcut-model";
 import { startSidebar, type SidebarDependencies } from "../src/sidepanel/sidebar";
+import { TabStore } from "../src/sidepanel/tab-store";
 import { createFakeChrome, deferred, fakeGroup, fakeTab } from "./helpers/fake-chrome";
 
 function installFixture(): void {
@@ -1346,6 +1347,26 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
+  it("builds one tab snapshot when opening a tab context menu", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://example.com/target" }),
+        fakeTab({ id: 2, index: 1, url: "https://example.com/other" }),
+      ],
+    });
+    const list = vi.spyOn(TabStore.prototype, "list");
+    const cleanup = await startSidebar(fake);
+    list.mockClear();
+
+    try {
+      openTabContextMenu(1);
+      expect(list).toHaveBeenCalledOnce();
+    } finally {
+      cleanup();
+      list.mockRestore();
+    }
+  });
+
   it("disables both same-site commands for a lone ordinary HTTP tab", async () => {
     const fake = createFakeChrome({
       tabs: [
@@ -1671,15 +1692,25 @@ describe("sidebar lifecycle", () => {
 
     openTabContextMenu(1);
     click(contextMenuItem("group-same-site"));
-    openTabContextMenu(2);
+    fake.events.onCreated.emit(
+      fakeTab({ id: 3, index: 2, url: "https://example.com/third", groupId: -1 }),
+    );
+    openTabContextMenu(3);
     expect(contextMenuItem("group-same-site").disabled).toBe(true);
     expect(contextMenuItem("close-same-site").disabled).toBe(false);
     click(contextMenuItem("group-same-site"));
 
     expect(fake.methods.group).toHaveBeenCalledOnce();
+    expect(fake.methods.group).toHaveBeenCalledWith({
+      tabIds: [1, 2],
+      createProperties: { windowId: 10 },
+    });
     pendingGroup.resolve(777);
-    await flush();
-    expect(fake.methods.groupUpdate).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(fake.methods.groupUpdate).toHaveBeenCalledOnce());
+    await vi.waitFor(() => {
+      openTabContextMenu(3);
+      expect(contextMenuItem("group-same-site").disabled).toBe(false);
+    });
     cleanup();
   });
 

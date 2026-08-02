@@ -30,6 +30,7 @@ import { TabStore } from "./tab-store";
 import {
   createSameSiteGroupPlan,
   getOtherSameSiteTabIds,
+  getSameSiteMenuAvailability,
 } from "./same-site-tab-model";
 
 export type SidebarDependencies = {
@@ -434,16 +435,22 @@ async function startSidebarInternal(
   const contextMenu = createTabContextMenu(
     { document: deps.document, list: elements.list, viewport: deps.document.defaultView! },
     {
-      getTab: (id) => tabStore.list().find((tab) => tab.id === id),
-      getGroups: () => groupStore.list(),
-      canCloseBelow: (id) => getClosableTabsBelow(tabStore.list(), id).length > 0,
-      canGroupSameSite: (id) => {
-        const plan = createSameSiteGroupPlan(tabStore.list(), id);
-        return plan !== undefined
-          && plan.tabIds.every((tabId) => !groupTabBusy.has(tabId));
+      getContext(id) {
+        const tabs = tabStore.list();
+        const tab = tabs.find((candidate) => candidate.id === id);
+        if (!tab) return undefined;
+        const sameSite = getSameSiteMenuAvailability(
+          tabs,
+          id,
+          (tabId) => groupTabBusy.has(tabId),
+        );
+        return {
+          tab,
+          canCloseBelow: getClosableTabsBelow(tabs, id).length > 0,
+          ...sameSite,
+        };
       },
-      canCloseOtherSameSite: (id) =>
-        getOtherSameSiteTabIds(tabStore.list(), id).length > 0,
+      getGroups: () => groupStore.list(),
       getRecentlyClosedSessionId: () => recentlyClosed.getSessionId(),
       onCommand(command) {
         if (command.action === "add-shortcut") {

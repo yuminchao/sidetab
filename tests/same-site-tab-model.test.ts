@@ -3,6 +3,7 @@ import {
   createSameSiteGroupPlan,
   getHttpHostname,
   getOtherSameSiteTabIds,
+  getSameSiteMenuAvailability,
 } from "../src/sidepanel/same-site-tab-model";
 import type { TabViewModel } from "../src/sidepanel/tab-model";
 
@@ -56,6 +57,60 @@ describe("getOtherSameSiteTabIds", () => {
 
     expect(getOtherSameSiteTabIds(tabs, 99)).toEqual([]);
     expect(getOtherSameSiteTabIds(tabs, 1)).toEqual([]);
+  });
+});
+
+describe("getSameSiteMenuAvailability", () => {
+  it("matches the existing close and group rules for every target state", () => {
+    const tabs = [
+      tab({ id: 1, url: "https://example.com/target" }),
+      tab({ id: 2, url: "https://example.com/grouped", groupId: 7 }),
+      tab({ id: 3, url: "https://example.com/pinned", pinned: true }),
+      tab({ id: 4, url: "chrome://newtab/" }),
+      tab({ id: 5, url: "https://example.com/other-window", windowId: 11 }),
+      tab({ id: 6, url: "https://example.com/ordinary" }),
+    ];
+
+    for (const tabId of [1, 2, 3, 4, 5, 99]) {
+      expect(getSameSiteMenuAvailability(tabs, tabId)).toEqual({
+        canCloseOtherSameSite: getOtherSameSiteTabIds(tabs, tabId).length > 0,
+        canGroupSameSite: createSameSiteGroupPlan(tabs, tabId) !== undefined,
+      });
+    }
+  });
+
+  it("keeps close available but disables grouping when another candidate is busy", () => {
+    const tabs = [
+      tab({ id: 1, url: "https://example.com/target" }),
+      tab({ id: 2, url: "https://example.com/busy" }),
+      tab({ id: 3, url: "https://example.com/grouped", groupId: 7 }),
+    ];
+
+    expect(getSameSiteMenuAvailability(tabs, 1, (tabId) => tabId === 2)).toEqual({
+      canCloseOtherSameSite: true,
+      canGroupSameSite: false,
+    });
+  });
+
+  it("reads each item once while calculating both states for a 500-tab snapshot", () => {
+    const source = Array.from({ length: 500 }, (_, id) => tab({
+      id: id + 1,
+      index: id,
+      url: id % 2 === 0 ? `https://example.com/${id}` : `https://other.example/${id}`,
+    }));
+    let itemReads = 0;
+    const tabs = new Proxy(source, {
+      get(target, property, receiver) {
+        if (typeof property === "string" && /^\d+$/.test(property)) itemReads += 1;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    expect(getSameSiteMenuAvailability(tabs, 1)).toEqual({
+      canCloseOtherSameSite: true,
+      canGroupSameSite: true,
+    });
+    expect(itemReads).toBe(500);
   });
 });
 

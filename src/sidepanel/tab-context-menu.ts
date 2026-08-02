@@ -13,14 +13,18 @@ export type TabContextCommand =
   | { action: "remove-from-group"; tabId: number }
   | { action: "restore-recently-closed"; sessionId: string };
 
+export type TabContextMenuContext = {
+  tab: TabViewModel;
+  canCloseBelow: boolean;
+  canGroupSameSite: boolean;
+  canCloseOtherSameSite: boolean;
+};
+
 export function createTabContextMenu(
   elements: { document: Document; list: HTMLElement; viewport: Window },
   callbacks: {
-    getTab(id: number): TabViewModel | undefined;
+    getContext(id: number): TabContextMenuContext | undefined;
     getGroups(): readonly TabGroupViewModel[];
-    canCloseBelow?(id: number): boolean;
-    canGroupSameSite?(id: number): boolean;
-    canCloseOtherSameSite?(id: number): boolean;
     getRecentlyClosedSessionId?(): string | undefined;
     onCommand(command: TabContextCommand): void;
   },
@@ -150,7 +154,13 @@ export function createTabContextMenu(
     if (focusFirst) getAvailableItems(submenu)[0]?.focus();
   }
 
-  function open(tab: TabViewModel, x: number, y: number, focusTarget: HTMLElement): void {
+  function open(
+    context: TabContextMenuContext,
+    x: number,
+    y: number,
+    focusTarget: HTMLElement,
+  ): void {
+    const { tab } = context;
     if (contextSelectedRow !== focusTarget) {
       contextSelectedRow?.removeAttribute("data-context-selected");
       focusTarget.dataset.contextSelected = "true";
@@ -163,9 +173,9 @@ export function createTabContextMenu(
     setPinned.textContent = tab.pinned ? "取消固定" : "固定标签";
     setPinned.dataset.nextPinned = String(!tab.pinned);
     removeFromGroup.hidden = !isValidTabGroupId(tab.groupId);
-    groupSameSite.disabled = !callbacks.canGroupSameSite?.(tab.id);
-    closeBelow.disabled = !callbacks.canCloseBelow?.(tab.id);
-    closeSameSite.disabled = !callbacks.canCloseOtherSameSite?.(tab.id);
+    groupSameSite.disabled = !context.canGroupSameSite;
+    closeBelow.disabled = !context.canCloseBelow;
+    closeSameSite.disabled = !context.canCloseOtherSameSite;
     const sessionId = callbacks.getRecentlyClosedSessionId?.();
     restoreRecentlyClosed.disabled = !sessionId;
     if (sessionId) {
@@ -182,30 +192,32 @@ export function createTabContextMenu(
     duplicate.focus();
   }
 
-  const tabFromRow = (target: EventTarget | null): { row: HTMLElement; tab: TabViewModel } | undefined => {
+  const contextFromRow = (
+    target: EventTarget | null,
+  ): { row: HTMLElement; context: TabContextMenuContext } | undefined => {
     if (!(target instanceof Element)) return undefined;
     const row = target.closest<HTMLElement>(".tab-row[data-tab-id]");
     if (!row || !elements.list.contains(row)) return undefined;
     const tabId = Number(row.dataset.tabId);
     if (!Number.isInteger(tabId)) return undefined;
-    const tab = callbacks.getTab(tabId);
-    return tab ? { row, tab } : undefined;
+    const context = callbacks.getContext(tabId);
+    return context ? { row, context } : undefined;
   };
 
   const onContextMenu = (event: MouseEvent): void => {
-    const match = tabFromRow(event.target);
+    const match = contextFromRow(event.target);
     if (!match) return;
     event.preventDefault();
-    open(match.tab, event.clientX, event.clientY, match.row);
+    open(match.context, event.clientX, event.clientY, match.row);
   };
 
   const onListKeyDown = (event: KeyboardEvent): void => {
     if (event.key !== "F10" || !event.shiftKey) return;
-    const match = tabFromRow(event.target);
+    const match = contextFromRow(event.target);
     if (!match) return;
     event.preventDefault();
     const rect = match.row.getBoundingClientRect();
-    open(match.tab, rect.left, rect.bottom, match.row);
+    open(match.context, rect.left, rect.bottom, match.row);
   };
 
   const onMenuClick = (event: MouseEvent): void => {

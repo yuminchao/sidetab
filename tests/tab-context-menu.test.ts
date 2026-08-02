@@ -31,6 +31,24 @@ function context(target: Element, x = 20, y = 30): MouseEvent {
   return event;
 }
 
+function menuContext(
+  id: number,
+  availability: Partial<{
+    canCloseBelow: boolean;
+    canGroupSameSite: boolean;
+    canCloseOtherSameSite: boolean;
+  }> = {},
+) {
+  const tab = tabs.find((candidate) => candidate.id === id);
+  return tab && {
+    tab,
+    canCloseBelow: false,
+    canGroupSameSite: false,
+    canCloseOtherSameSite: false,
+    ...availability,
+  };
+}
+
 describe("tab context menu", () => {
   let list: HTMLElement;
 
@@ -43,7 +61,7 @@ describe("tab context menu", () => {
     const onCommand = vi.fn();
     const menu = createTabContextMenu(
       { document, list, viewport: window },
-      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => [], onCommand },
+      { getContext: menuContext, getGroups: () => [], onCommand },
     );
     const popup = document.querySelector<HTMLElement>(".tab-context-menu")!;
     vi.spyOn(popup, "getBoundingClientRect").mockReturnValue({ top: 0, left: 0, right: 120, bottom: 90, width: 120, height: 90, x: 0, y: 0, toJSON: () => ({}) });
@@ -105,7 +123,7 @@ describe("tab context menu", () => {
     const onCommand = vi.fn();
     const menu = createTabContextMenu(
       { document, list, viewport: window },
-      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => [], onCommand },
+      { getContext: menuContext, getGroups: () => [], onCommand },
     );
     const popup = document.querySelector<HTMLElement>(".tab-context-menu")!;
 
@@ -129,9 +147,8 @@ describe("tab context menu", () => {
     const menu = createTabContextMenu(
       { document, list, viewport: window },
       {
-        getTab: (id) => tabs.find((tab) => tab.id === id),
+        getContext: (id) => menuContext(id, { canCloseBelow: id === 1 }),
         getGroups: () => [],
-        canCloseBelow: (id) => id === 1,
         onCommand,
       },
     );
@@ -152,9 +169,8 @@ describe("tab context menu", () => {
     const menu = createTabContextMenu(
       { document, list, viewport: window },
       {
-        getTab: (id) => tabs.find((tab) => tab.id === id),
+        getContext: menuContext,
         getGroups: () => [],
-        canCloseBelow: () => false,
         onCommand,
       },
     );
@@ -184,11 +200,12 @@ describe("tab context menu", () => {
     const menu = createTabContextMenu(
       { document, list, viewport: window },
       {
-        getTab: (id) => tabs.find((tab) => tab.id === id),
+        getContext: (id) => menuContext(id, {
+          canGroupSameSite: id === 1,
+          canCloseOtherSameSite: id === 2,
+          canCloseBelow: true,
+        }),
         getGroups: () => [],
-        canGroupSameSite: (id) => id === 1,
-        canCloseOtherSameSite: (id) => id === 2,
-        canCloseBelow: () => true,
         onCommand,
       },
     );
@@ -218,10 +235,41 @@ describe("tab context menu", () => {
     menu.destroy();
   });
 
+  it("reads all tab action availability from one context callback per open", () => {
+    const getContext = vi.fn((id: number) => {
+      const tab = tabs.find((candidate) => candidate.id === id);
+      return tab && {
+        tab,
+        canCloseBelow: true,
+        canGroupSameSite: true,
+        canCloseOtherSameSite: false,
+      };
+    });
+    const menu = createTabContextMenu(
+      { document, list, viewport: window },
+      { getContext, getGroups: () => [], onCommand: vi.fn() },
+    );
+
+    context(row(1));
+
+    expect(getContext).toHaveBeenCalledOnce();
+    expect(getContext).toHaveBeenCalledWith(1);
+    expect(document.querySelector<HTMLButtonElement>(
+      "[data-menu-action='close-below']",
+    )?.disabled).toBe(false);
+    expect(document.querySelector<HTMLButtonElement>(
+      "[data-menu-action='group-same-site']",
+    )?.disabled).toBe(false);
+    expect(document.querySelector<HTMLButtonElement>(
+      "[data-menu-action='close-same-site']",
+    )?.disabled).toBe(true);
+    menu.destroy();
+  });
+
   it("marks the triggering row while either menu level is open and clears it for every close path", () => {
     const menu = createTabContextMenu(
       { document, list, viewport: window },
-      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => groups, onCommand: vi.fn() },
+      { getContext: menuContext, getGroups: () => groups, onCommand: vi.fn() },
     );
     const popup = document.querySelector<HTMLElement>(".tab-context-menu:not(.tab-context-submenu)")!;
     const submenu = document.querySelector<HTMLElement>(".tab-context-submenu")!;
@@ -249,7 +297,7 @@ describe("tab context menu", () => {
   it("marks the Shift+F10 target row", () => {
     const menu = createTabContextMenu(
       { document, list, viewport: window },
-      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => [], onCommand: vi.fn() },
+      { getContext: menuContext, getGroups: () => [], onCommand: vi.fn() },
     );
     row(1).dispatchEvent(new KeyboardEvent("keydown", { key: "F10", shiftKey: true, bubbles: true, cancelable: true }));
     expect(row(1).dataset.contextSelected).toBe("true");
@@ -261,9 +309,8 @@ describe("tab context menu", () => {
     const menu = createTabContextMenu(
       { document, list, viewport: window },
       {
-        getTab: (id) => tabs.find((tab) => tab.id === id),
+        getContext: (id) => menuContext(id, { canCloseBelow: true }),
         getGroups: () => [],
-        canCloseBelow: () => true,
         onCommand,
       },
     );
@@ -284,9 +331,8 @@ describe("tab context menu", () => {
     const menu = createTabContextMenu(
       { document, list, viewport: window },
       {
-        getTab: (id) => tabs.find((tab) => tab.id === id),
+        getContext: (id) => menuContext(id, { canCloseBelow: true }),
         getGroups: () => [],
-        canCloseBelow: () => true,
         getRecentlyClosedSessionId: () => undefined,
         onCommand,
       },
@@ -313,7 +359,7 @@ describe("tab context menu", () => {
     const menu = createTabContextMenu(
       { document, list, viewport: window },
       {
-        getTab: (id) => tabs.find((tab) => tab.id === id),
+        getContext: menuContext,
         getGroups: () => [],
         getRecentlyClosedSessionId: () => currentSessionId,
         onCommand,
@@ -342,9 +388,8 @@ describe("tab context menu", () => {
     const menu = createTabContextMenu(
       { document, list, viewport: window },
       {
-        getTab: (id) => tabs.find((tab) => tab.id === id),
+        getContext: menuContext,
         getGroups: () => [],
-        canCloseBelow: () => false,
         getRecentlyClosedSessionId: () => "keyboard-session",
         onCommand,
       },
@@ -370,7 +415,7 @@ describe("tab context menu", () => {
       const onCommand = vi.fn();
       const menu = createTabContextMenu(
         { document, list, viewport: window },
-        { getTab: (tabId) => tabs.find((tab) => tab.id === tabId), getGroups: () => [], onCommand },
+        { getContext: menuContext, getGroups: () => [], onCommand },
       );
       context(row(id));
       const button = document.querySelector<HTMLElement>("[data-menu-action='set-pinned']")!;
@@ -385,7 +430,7 @@ describe("tab context menu", () => {
     const onCommand = vi.fn();
     const menu = createTabContextMenu(
       { document, list, viewport: window },
-      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => [], onCommand },
+      { getContext: menuContext, getGroups: () => [], onCommand },
     );
     row(1).dispatchEvent(new KeyboardEvent("keydown", { key: "F10", shiftKey: true, bubbles: true, cancelable: true }));
     const popup = document.querySelector<HTMLElement>(".tab-context-menu")!;
@@ -403,7 +448,7 @@ describe("tab context menu", () => {
   it("closes on outside input, scroll, resize, target removal, and destroy", () => {
     const menu = createTabContextMenu(
       { document, list, viewport: window },
-      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => [], onCommand: vi.fn() },
+      { getContext: menuContext, getGroups: () => [], onCommand: vi.fn() },
     );
     const popup = document.querySelector<HTMLElement>(".tab-context-menu")!;
     const reopen = () => { context(row(1)); expect(popup.hidden).toBe(false); };
@@ -419,7 +464,7 @@ describe("tab context menu", () => {
     const onCommand = vi.fn();
     createTabContextMenu(
       { document, list, viewport: window },
-      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => groups, onCommand },
+      { getContext: menuContext, getGroups: () => groups, onCommand },
     );
 
     context(row(2));
@@ -455,7 +500,7 @@ describe("tab context menu", () => {
     let availableGroups = groups.slice(0, 1);
     const menu = createTabContextMenu(
       { document, list, viewport: window },
-      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => availableGroups, onCommand },
+      { getContext: menuContext, getGroups: () => availableGroups, onCommand },
     );
     const popup = document.querySelector<HTMLElement>(".tab-context-menu:not(.tab-context-submenu)")!;
     const submenu = document.querySelector<HTMLElement>(".tab-context-submenu")!;
@@ -479,7 +524,7 @@ describe("tab context menu", () => {
   it("opens the submenu on hover and flips it left and upward when space is constrained", () => {
     createTabContextMenu(
       { document, list, viewport: window },
-      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => groups.slice(0, 2), onCommand: vi.fn() },
+      { getContext: menuContext, getGroups: () => groups.slice(0, 2), onCommand: vi.fn() },
     );
     context(row(1));
     const popup = document.querySelector<HTMLElement>(".tab-context-menu:not(.tab-context-submenu)")!;
@@ -499,7 +544,7 @@ describe("tab context menu", () => {
     const onCommand = vi.fn();
     createTabContextMenu(
       { document, list, viewport: window },
-      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => groups.slice(0, 3), onCommand },
+      { getContext: menuContext, getGroups: () => groups.slice(0, 3), onCommand },
     );
     context(row(2));
     const popup = document.querySelector<HTMLElement>(".tab-context-menu:not(.tab-context-submenu)")!;
@@ -541,7 +586,7 @@ describe("tab context menu", () => {
   it("closes both menu levels on outside input, scroll, resize, target removal, and destroy", () => {
     const menu = createTabContextMenu(
       { document, list, viewport: window },
-      { getTab: (id) => tabs.find((tab) => tab.id === id), getGroups: () => groups, onCommand: vi.fn() },
+      { getContext: menuContext, getGroups: () => groups, onCommand: vi.fn() },
     );
     const popup = document.querySelector<HTMLElement>(".tab-context-menu:not(.tab-context-submenu)")!;
     const submenu = document.querySelector<HTMLElement>(".tab-context-submenu")!;
