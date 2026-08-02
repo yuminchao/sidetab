@@ -437,8 +437,11 @@ async function startSidebarInternal(
       getTab: (id) => tabStore.list().find((tab) => tab.id === id),
       getGroups: () => groupStore.list(),
       canCloseBelow: (id) => getClosableTabsBelow(tabStore.list(), id).length > 0,
-      canGroupSameSite: (id) =>
-        createSameSiteGroupPlan(tabStore.list(), id) !== undefined,
+      canGroupSameSite: (id) => {
+        const plan = createSameSiteGroupPlan(tabStore.list(), id);
+        return plan !== undefined
+          && plan.tabIds.every((tabId) => !groupTabBusy.has(tabId));
+      },
       canCloseOtherSameSite: (id) =>
         getOtherSameSiteTabIds(tabStore.list(), id).length > 0,
       getRecentlyClosedSessionId: () => recentlyClosed.getSessionId(),

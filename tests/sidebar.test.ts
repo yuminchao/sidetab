@@ -1346,6 +1346,21 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
+  it("disables both same-site commands for a lone ordinary HTTP tab", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, url: "https://example.com/only", groupId: -1 }),
+      ],
+    });
+    const cleanup = await startSidebar(fake);
+
+    openTabContextMenu(1);
+
+    expect(contextMenuItem("group-same-site").disabled).toBe(true);
+    expect(contextMenuItem("close-same-site").disabled).toBe(true);
+    cleanup();
+  });
+
   it("recomputes same-site close targets from created, updated, and removed tab events", async () => {
     const fake = createFakeChrome({
       tabs: [
@@ -1657,6 +1672,8 @@ describe("sidebar lifecycle", () => {
     openTabContextMenu(1);
     click(contextMenuItem("group-same-site"));
     openTabContextMenu(2);
+    expect(contextMenuItem("group-same-site").disabled).toBe(true);
+    expect(contextMenuItem("close-same-site").disabled).toBe(false);
     click(contextMenuItem("group-same-site"));
 
     expect(fake.methods.group).toHaveBeenCalledOnce();
