@@ -40,6 +40,69 @@ describe("tab group actions", () => {
     expect(update).toHaveBeenCalledWith(7, { title: "Work", color: "blue" });
   });
 
+  it("creates one same-site group and saves its hostname with the grey color", async () => {
+    const { actions, group, update } = createApis();
+
+    await expect(actions.createSameSite({
+      tabIds: [3, 4, 5],
+      windowId: 10,
+      hostname: "example.com",
+    })).resolves.toBe(7);
+
+    expect(group).toHaveBeenCalledOnce();
+    expect(group).toHaveBeenCalledWith({
+      tabIds: [3, 4, 5],
+      createProperties: { windowId: 10 },
+    });
+    expect(update).toHaveBeenCalledOnce();
+    expect(update).toHaveBeenCalledWith(7, { title: "example.com", color: "grey" });
+  });
+
+  it("maps same-site group creation failures without updating metadata", async () => {
+    const { actions, group, update } = createApis();
+    const cause = new Error("chrome failed");
+    group.mockRejectedValueOnce(cause);
+
+    await expect(actions.createSameSite({
+      tabIds: [3, 4],
+      windowId: 10,
+      hostname: "example.com",
+    })).rejects.toMatchObject({ message: "无法快速分组同类网站", cause });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects an invalid group ID from same-site creation before updating metadata: %s",
+    async (invalidGroupId) => {
+      const { actions, group, update } = createApis();
+      group.mockResolvedValueOnce(invalidGroupId);
+
+      await expect(actions.createSameSite({
+        tabIds: [3, 4],
+        windowId: 10,
+        hostname: "example.com",
+      })).rejects.toThrow("标签组 ID 无效");
+      expect(update).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reports a partial same-site creation when metadata update rejects", async () => {
+    const { actions, update } = createApis();
+    const cause = new Error("chrome failed");
+    update.mockRejectedValueOnce(cause);
+
+    await expect(actions.createSameSite({
+      tabIds: [3, 4],
+      windowId: 10,
+      hostname: "example.com",
+    })).rejects.toMatchObject({
+      message: "分组已创建，但无法保存名称或颜色",
+      groupId: 7,
+      partial: true,
+      cause,
+    });
+  });
+
   it("maps a group creation rejection without updating metadata", async () => {
     const { actions, group, update } = createApis();
     const cause = new Error("chrome failed");

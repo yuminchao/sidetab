@@ -151,6 +151,32 @@ describe("tab actions", () => {
     await expect(actions.closeMany([3, 4, 5])).rejects.toThrow("无法关闭下方标签页");
   });
 
+  it("closes same-site tabs with one remove call", async () => {
+    const remove = vi.fn().mockResolvedValue(undefined);
+
+    await createTabActions(tabApi({ remove })).closeOtherSameSite([3, 4, 5]);
+
+    expect(remove).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledWith([3, 4, 5]);
+  });
+
+  it("does not remove tabs when closeOtherSameSite receives no tab IDs", async () => {
+    const remove = vi.fn().mockResolvedValue(undefined);
+
+    await createTabActions(tabApi({ remove })).closeOtherSameSite([]);
+
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["synchronous throw", () => vi.fn(() => { throw new Error("chrome failed"); })],
+    ["promise rejection", () => vi.fn().mockRejectedValue(new Error("chrome failed"))],
+  ])("maps a closeOtherSameSite %s to its specific user-facing error", async (_case, makeRemove) => {
+    const actions = createTabActions(tabApi({ remove: makeRemove() }));
+
+    await expect(actions.closeOtherSameSite([3, 4, 5])).rejects.toThrow("无法关闭其他同类网站标签页");
+  });
+
   it("duplicates exactly the requested tab", async () => {
     const duplicate = vi.fn().mockResolvedValue(tab);
 

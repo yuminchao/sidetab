@@ -7,6 +7,11 @@ type TabGroupActions = {
     title: string;
     color: TabGroupColor;
   }): Promise<number>;
+  createSameSite(input: {
+    tabIds: [number, number, ...number[]];
+    windowId: number;
+    hostname: string;
+  }): Promise<number>;
   updateCreated(groupId: number, title: string, color: TabGroupColor): Promise<void>;
   add(tabId: number, groupId: number): Promise<void>;
   remove(tabId: number): Promise<void>;
@@ -60,6 +65,22 @@ export function createTabGroupActions(
 
       assertValidTabGroupId(groupId);
       await updateCreated(groupId, input.title, input.color);
+      return groupId;
+    },
+
+    async createSameSite(input): Promise<number> {
+      let groupId: number;
+      try {
+        groupId = await tabs.group({
+          tabIds: input.tabIds,
+          createProperties: { windowId: input.windowId },
+        });
+      } catch (cause) {
+        throw new Error("无法快速分组同类网站", { cause });
+      }
+
+      assertValidTabGroupId(groupId);
+      await updateCreated(groupId, input.hostname, "grey");
       return groupId;
     },
 

@@ -51,6 +51,18 @@ export function createTabActions(api: TabsActionApi) {
       }
     },
 
+    async closeOtherSameSite(tabIds: number[]): Promise<void> {
+      if (tabIds.length === 0) {
+        return;
+      }
+
+      try {
+        await api.remove(tabIds);
+      } catch {
+        throw new Error("无法关闭其他同类网站标签页");
+      }
+    },
+
     async duplicate(tabId: number): Promise<void> {
       try {
         await api.duplicate(tabId);
