@@ -150,14 +150,10 @@ function createGroupRow(group: TabGroupViewModel): HTMLElement {
   chevron.setAttribute("aria-hidden", "true");
   chevron.textContent = "›";
 
-  const color = document.createElement("span");
-  color.className = "tab-group-color";
-  color.setAttribute("aria-hidden", "true");
-
   const title = document.createElement("span");
   title.className = "tab-group-title";
 
-  main.append(chevron, color, title);
+  main.append(chevron, title);
   row.append(main);
   updateGroupRow(row, group);
   return row;
@@ -165,16 +161,15 @@ function createGroupRow(group: TabGroupViewModel): HTMLElement {
 
 function updateGroupRow(row: HTMLElement, group: TabGroupViewModel): void {
   const main = row.querySelector<HTMLButtonElement>(".tab-group-main");
-  const color = row.querySelector<HTMLElement>(".tab-group-color");
   const title = row.querySelector<HTMLElement>(".tab-group-title");
-  if (!main || !color || !title) return;
+  if (!main || !title) return;
 
   const displayTitle = group.title || "未命名分组";
   row.dataset.groupId = String(group.id);
+  row.dataset.groupColor = group.color;
   row.dataset.collapsed = String(group.collapsed);
   main.setAttribute("aria-expanded", String(!group.collapsed));
   main.setAttribute("aria-label", `${displayTitle}，${group.collapsed ? "已折叠" : "已展开"}`);
-  color.dataset.color = group.color;
   title.textContent = displayTitle;
 }
 

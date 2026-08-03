@@ -106,15 +106,17 @@ describe("tab renderer", () => {
     const row = list.querySelector<HTMLElement>(".tab-group-row");
     const button = row?.querySelector<HTMLButtonElement>(".tab-group-main");
     const chevron = row?.querySelector<HTMLElement>(".tab-group-chevron");
-    const color = row?.querySelector<HTMLElement>(".tab-group-color");
     expect(row?.getAttribute("role")).toBe("listitem");
-    expect(row?.dataset).toMatchObject({ groupId: "3", collapsed: "true" });
+    expect(row?.dataset).toMatchObject({
+      groupId: "3",
+      groupColor: "purple",
+      collapsed: "true",
+    });
     expect(button?.dataset.action).toBe("toggle-group");
     expect(button?.getAttribute("aria-expanded")).toBe("false");
     expect(button?.ariaLabel).toBe("未命名分组，已折叠");
     expect(chevron?.getAttribute("aria-hidden")).toBe("true");
-    expect(color?.dataset.color).toBe("purple");
-    expect(color?.getAttribute("aria-hidden")).toBe("true");
+    expect(row?.querySelector(".tab-group-color")).toBeNull();
     expect(row?.querySelector(".tab-group-title")?.textContent).toBe("未命名分组");
     expect(row?.querySelector(".tab-group-count")).toBeNull();
     expect(row?.draggable).toBe(false);
@@ -125,6 +127,7 @@ describe("tab renderer", () => {
     renderer.render([groupItem(), tabItem({ groupId: 3 })]);
     const row = list.firstElementChild as HTMLElement;
     const button = row.querySelector(".tab-group-main");
+    const title = row.querySelector(".tab-group-title");
     const tabRow = list.lastElementChild;
 
     renderer.patchGroup(group({ title: "Updated", color: "orange", collapsed: true }));
@@ -132,10 +135,12 @@ describe("tab renderer", () => {
 
     expect(list.firstElementChild).toBe(row);
     expect(row.querySelector(".tab-group-main")).toBe(button);
+    expect(row.querySelector(".tab-group-title")).toBe(title);
     expect(list.lastElementChild).toBe(tabRow);
     expect(row.dataset.collapsed).toBe("true");
+    expect(row.dataset.groupColor).toBe("orange");
     expect(row.querySelector(".tab-group-title")?.textContent).toBe("Updated");
-    expect((row.querySelector(".tab-group-color") as HTMLElement).dataset.color).toBe("orange");
+    expect(row.querySelector(".tab-group-color")).toBeNull();
     expect((button as HTMLButtonElement).getAttribute("aria-expanded")).toBe("false");
     expect((button as HTMLButtonElement).ariaLabel).toBe("Updated，已折叠");
   });

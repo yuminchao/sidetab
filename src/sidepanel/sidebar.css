@@ -301,19 +301,19 @@ input:focus-visible {
 
 .tab-group-row {
   width: 100%;
-  height: 28px;
+  height: 20px;
   min-width: 0;
 }
 
 .tab-group-main {
   display: grid;
-  grid-template-columns: 12px 8px minmax(0, 1fr);
+  grid-template-columns: 12px minmax(0, 1fr);
   gap: 6px;
   align-items: center;
   width: 100%;
-  height: 28px;
+  height: 20px;
   min-width: 0;
-  padding: 2px 6px;
+  padding: 0 6px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -324,12 +324,16 @@ input:focus-visible {
   background: color-mix(in srgb, CanvasText 8%, transparent);
 }
 
+.tab-group-main:active:not(:disabled) {
+  background: color-mix(in srgb, CanvasText 13%, transparent);
+}
+
 .tab-group-chevron {
   display: grid;
   place-items: center;
   width: 12px;
   height: 12px;
-  color: GrayText;
+  color: currentColor;
   font-size: 12px;
   line-height: 1;
   transform: rotate(90deg);
@@ -339,29 +343,25 @@ input:focus-visible {
   transform: none;
 }
 
-.tab-group-color {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
 .tab-group-title {
   min-width: 0;
   overflow: hidden;
   font-family: "Microsoft YaHei", "微软雅黑", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.tab-group-color[data-color="grey"] { background: #80868b; }
-.tab-group-color[data-color="blue"] { background: #1a73e8; }
-.tab-group-color[data-color="red"] { background: #d93025; }
-.tab-group-color[data-color="yellow"] { background: #f9ab00; }
-.tab-group-color[data-color="green"] { background: #188038; }
-.tab-group-color[data-color="pink"] { background: #d01884; }
-.tab-group-color[data-color="purple"] { background: #a142f4; }
-.tab-group-color[data-color="cyan"] { background: #007b83; }
-.tab-group-color[data-color="orange"] { background: #fa7b17; }
+.tab-group-row[data-group-color="grey"] { background: #80868b; color: white; }
+.tab-group-row[data-group-color="blue"] { background: #1a73e8; color: white; }
+.tab-group-row[data-group-color="red"] { background: #d93025; color: white; }
+.tab-group-row[data-group-color="yellow"] { background: #f9ab00; color: #202124; }
+.tab-group-row[data-group-color="green"] { background: #188038; color: white; }
+.tab-group-row[data-group-color="pink"] { background: #d01884; color: white; }
+.tab-group-row[data-group-color="purple"] { background: #a142f4; color: #202124; }
+.tab-group-row[data-group-color="cyan"] { background: #007b83; color: white; }
+.tab-group-row[data-group-color="orange"] { background: #fa7b17; color: #202124; }
 
 .new-tab-button {
   display: grid;
@@ -737,15 +737,15 @@ input:focus-visible {
     box-shadow: inset 2px 0 AccentColor, inset 0 0 0 1px #8ab4f8;
   }
 
-  .tab-group-color[data-color="grey"] { background: #bdc1c6; }
-  .tab-group-color[data-color="blue"] { background: #8ab4f8; }
-  .tab-group-color[data-color="red"] { background: #f28b82; }
-  .tab-group-color[data-color="yellow"] { background: #fdd663; }
-  .tab-group-color[data-color="green"] { background: #81c995; }
-  .tab-group-color[data-color="pink"] { background: #ff8bcb; }
-  .tab-group-color[data-color="purple"] { background: #c58af9; }
-  .tab-group-color[data-color="cyan"] { background: #78d9ec; }
-  .tab-group-color[data-color="orange"] { background: #fcad70; }
+  .tab-group-row[data-group-color="grey"] { background: #bdc1c6; color: #202124; }
+  .tab-group-row[data-group-color="blue"] { background: #8ab4f8; color: #202124; }
+  .tab-group-row[data-group-color="red"] { background: #f28b82; color: #202124; }
+  .tab-group-row[data-group-color="yellow"] { background: #fdd663; color: #202124; }
+  .tab-group-row[data-group-color="green"] { background: #81c995; color: #202124; }
+  .tab-group-row[data-group-color="pink"] { background: #ff8bcb; color: #202124; }
+  .tab-group-row[data-group-color="purple"] { background: #c58af9; color: #202124; }
+  .tab-group-row[data-group-color="cyan"] { background: #78d9ec; color: #202124; }
+  .tab-group-row[data-group-color="orange"] { background: #fcad70; color: #202124; }
 
   .group-menu-color[data-color="grey"] { background: #bdc1c6; }
   .group-menu-color[data-color="blue"] { background: #8ab4f8; }

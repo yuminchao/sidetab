@@ -193,16 +193,17 @@ describe("side panel responsive CSS", () => {
 
   it("styles compact group rows, controls, and titles", () => {
     expect(css).toMatch(
-      /\.tab-group-row\s*{[^}]*height:\s*28px[^}]*min-width:\s*0/s,
+      /\.tab-group-row\s*{[^}]*height:\s*20px[^}]*min-width:\s*0/s,
     );
     expect(css).toMatch(
-      /\.tab-group-main\s*{[^}]*grid-template-columns:\s*12px\s+8px\s+minmax\(0,\s*1fr\)[^}]*width:\s*100%[^}]*height:\s*28px[^}]*border:\s*0/s,
+      /\.tab-group-main\s*{[^}]*grid-template-columns:\s*12px\s+minmax\(0,\s*1fr\)[^}]*width:\s*100%[^}]*height:\s*20px[^}]*padding:\s*0\s+6px[^}]*border:\s*0/s,
     );
     expect(css).toMatch(/\.tab-group-chevron\s*{[^}]*width:\s*12px[^}]*height:\s*12px/s);
-    expect(css).toMatch(/\.tab-group-color\s*{[^}]*width:\s*8px[^}]*height:\s*8px/s);
+    expect(css).not.toMatch(/\.tab-group-color\s*{/);
     expect(css).toMatch(
-      /\.tab-group-title\s*{[^}]*min-width:\s*0[^}]*font-family:\s*"Microsoft YaHei",\s*"微软雅黑",\s*"Segoe UI",\s*system-ui,\s*sans-serif[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s,
+      /\.tab-group-title\s*{[^}]*min-width:\s*0[^}]*font-family:\s*"Microsoft YaHei",\s*"微软雅黑",\s*"Segoe UI",\s*system-ui,\s*sans-serif[^}]*font-size:\s*14px[^}]*line-height:\s*20px[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s,
     );
+    expect(css).not.toMatch(/\.tab-group-title\s*{[^}]*var\(--tab-title-font-size\)/s);
     expect(css).not.toMatch(/\.tab-group-count\s*{/);
   });
 
@@ -211,12 +212,39 @@ describe("side panel responsive CSS", () => {
       /@media\s*\(prefers-color-scheme:\s*dark\)\s*\{([\s\S]*?)\n\}/s,
     )?.[1] ?? "";
     expect(darkMedia).not.toBe("");
-    for (const color of [
-      "grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange",
-    ]) {
-      const selector = new RegExp(`\\.tab-group-color\\[data-color=["']${color}["']\\]\\s*{[^}]*background:`, "s");
+    const lightColors = {
+      grey: ["#80868b", "white"],
+      blue: ["#1a73e8", "white"],
+      red: ["#d93025", "white"],
+      yellow: ["#f9ab00", "#202124"],
+      green: ["#188038", "white"],
+      pink: ["#d01884", "white"],
+      purple: ["#a142f4", "#202124"],
+      cyan: ["#007b83", "white"],
+      orange: ["#fa7b17", "#202124"],
+    } as const;
+    const darkColors = {
+      grey: "#bdc1c6",
+      blue: "#8ab4f8",
+      red: "#f28b82",
+      yellow: "#fdd663",
+      green: "#81c995",
+      pink: "#ff8bcb",
+      purple: "#c58af9",
+      cyan: "#78d9ec",
+      orange: "#fcad70",
+    } as const;
+    for (const [color, [background, foreground]] of Object.entries(lightColors)) {
+      const selector = new RegExp(
+        `\\.tab-group-row\\[data-group-color=["']${color}["']\\]\\s*{[^}]*background:\\s*${background}[^}]*color:\\s*${foreground}`,
+        "s",
+      );
+      const darkSelector = new RegExp(
+        `\\.tab-group-row\\[data-group-color=["']${color}["']\\]\\s*{[^}]*background:\\s*${darkColors[color as keyof typeof darkColors]}[^}]*color:\\s*#202124`,
+        "s",
+      );
       expect(css).toMatch(selector);
-      expect(darkMedia).toMatch(selector);
+      expect(darkMedia).toMatch(darkSelector);
       expect(darkMedia).toMatch(
         new RegExp(`\\.group-menu-color\\[data-color=["']${color}["']\\]\\s*{[^}]*background:`, "s"),
       );
@@ -224,6 +252,12 @@ describe("side panel responsive CSS", () => {
         new RegExp(`#tab-group-dialog\\s+input\\[type=["']radio["']\\]\\[name=["']tab-group-color["']\\]\\[value=["']${color}["']\\]\\s*{[^}]*background:`, "s"),
       );
     }
+    expect(css).toMatch(
+      /\.tab-group-main:hover:not\(:disabled\)\s*{[^}]*background:\s*color-mix\([^}]*transparent\)/s,
+    );
+    expect(css).toMatch(
+      /\.tab-group-main:active:not\(:disabled\)\s*{[^}]*background:\s*color-mix\([^}]*transparent\)/s,
+    );
   });
 
   it("shares bounded menu foundations while keeping submenu rules differential", () => {
