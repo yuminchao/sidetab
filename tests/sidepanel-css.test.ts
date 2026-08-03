@@ -461,4 +461,35 @@ describe("side panel responsive CSS", () => {
     );
   });
 
+  it("styles the group context target and fixed color submenu without changing row size", () => {
+    expect(css).toMatch(
+      /\.tab-group-color-submenu\s*>\s*button\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*8px\s+minmax\(0,\s*1fr\)[^}]*gap:\s*6px/s,
+    );
+    expect(css).toMatch(
+      /\.tab-group-row\[data-context-selected="true"\]\s*{[^}]*box-shadow:\s*inset\s+0\s+0\s+0\s+1px\s+#1a73e8/s,
+    );
+    expect(css).toMatch(
+      /\.tab-group-row\[data-context-selected="true"\]\[data-group-color="blue"\]\s*{[^}]*box-shadow:\s*inset\s+0\s+0\s+0\s+1px\s+#1a73e8\s*,\s*inset\s+0\s+0\s+0\s+2px\s+Canvas/s,
+    );
+    const groupContextRule = css.match(
+      /\.tab-group-row\[data-context-selected="true"\]\s*{[^}]*}/s,
+    )?.[0] ?? "";
+    expect(groupContextRule).not.toMatch(/(?:background|border|width|height|padding|margin):/);
+
+    const darkMedia = css.match(
+      /@media\s*\(prefers-color-scheme:\s*dark\)\s*\{([\s\S]*?)\n\}/s,
+    )?.[1] ?? "";
+    expect(darkMedia).toMatch(
+      /\.tab-group-row\[data-context-selected="true"\]\s*{[^}]*box-shadow:\s*inset\s+0\s+0\s+0\s+1px\s+#8ab4f8/s,
+    );
+    expect(darkMedia).toMatch(
+      /\.tab-group-row\[data-context-selected="true"\]\[data-group-color="blue"\]\s*{[^}]*#8ab4f8[^}]*Canvas/s,
+    );
+
+    const forcedColors = css.slice(css.indexOf("@media (forced-colors: active)"));
+    expect(forcedColors).toMatch(
+      /\.tab-group-row\[data-context-selected="true"\]\s*{[^}]*outline:\s*1px\s+solid\s+Highlight[^}]*outline-offset:\s*-1px/s,
+    );
+  });
+
 });
