@@ -30,9 +30,11 @@ describe("tab group context menu", () => {
 
   beforeEach(() => {
     document.body.innerHTML = `
-      <div id="list">
-        <div class="tab-group-row" data-group-id="7" data-group-color="blue">
-          <button class="tab-group-main">工作</button>
+      <div id="tab-scroll">
+        <div id="list">
+          <div class="tab-group-row" data-group-id="7" data-group-color="blue">
+            <button class="tab-group-main">工作</button>
+          </div>
         </div>
       </div>`;
     list = document.querySelector("#list")!;
@@ -161,6 +163,11 @@ describe("tab group context menu", () => {
     expect(submenu.hidden).toBe(true);
     expect(document.activeElement).toBe(colorTrigger);
 
+    submenu.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(document.activeElement).toBe(row.querySelector(".tab-group-main"));
+
+    context(row);
+    colorTrigger.focus();
     menu.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
     submenu.querySelector<HTMLButtonElement>("[data-color='red']")!.focus();
     submenu.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
@@ -198,7 +205,7 @@ describe("tab group context menu", () => {
     document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
     assertClosed();
     context(row);
-    list.dispatchEvent(new Event("scroll"));
+    list.parentElement!.dispatchEvent(new Event("scroll"));
     assertClosed();
     context(row);
     window.dispatchEvent(new Event("resize"));
@@ -209,6 +216,7 @@ describe("tab group context menu", () => {
     context(row);
     menu.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     assertClosed();
+    expect(document.activeElement).toBe(row.querySelector(".tab-group-main"));
     context(row);
     controller.destroy();
     expect(document.querySelector(".tab-group-context-menu")).toBeNull();

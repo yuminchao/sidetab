@@ -53,6 +53,7 @@ export function createTabGroupContextMenu(
   const dissolve = createItem("dissolve", "解散分组");
   menu.append(newTab, rename, setColor, separator, dissolve);
   elements.document.body.append(menu, submenu);
+  const scrollContainer = elements.list.parentElement ?? elements.list;
 
   let openGroupId: number | undefined;
   let returnFocus: HTMLElement | undefined;
@@ -140,7 +141,7 @@ export function createTabGroupContextMenu(
     callbacks.onBeforeOpen();
     close();
     openGroupId = group.id;
-    returnFocus = row;
+    returnFocus = row.querySelector<HTMLElement>(".tab-group-main") ?? row;
     row.dataset.contextSelected = "true";
     contextSelectedRow = row;
     const busy = callbacks.isGroupBusy(group.id);
@@ -286,7 +287,7 @@ export function createTabGroupContextMenu(
   submenu.addEventListener("keydown", onSubmenuKeyDown);
   elements.list.addEventListener("contextmenu", onContextMenu);
   elements.list.addEventListener("keydown", onListKeyDown);
-  elements.list.addEventListener("scroll", onEnvironmentalClose);
+  scrollContainer.addEventListener("scroll", onEnvironmentalClose);
   elements.document.addEventListener("pointerdown", onDocumentPointerDown);
   elements.viewport.addEventListener("resize", onEnvironmentalClose);
 
@@ -304,7 +305,7 @@ export function createTabGroupContextMenu(
       submenu.removeEventListener("keydown", onSubmenuKeyDown);
       elements.list.removeEventListener("contextmenu", onContextMenu);
       elements.list.removeEventListener("keydown", onListKeyDown);
-      elements.list.removeEventListener("scroll", onEnvironmentalClose);
+      scrollContainer.removeEventListener("scroll", onEnvironmentalClose);
       elements.document.removeEventListener("pointerdown", onDocumentPointerDown);
       elements.viewport.removeEventListener("resize", onEnvironmentalClose);
       menu.remove();
