@@ -16,13 +16,13 @@ function parseCsp(value: string): Record<string, string[]> {
 }
 
 describe("extension manifest", () => {
-  it("keeps the npm and extension release versions aligned at 0.8.2", () => {
+  it("keeps the npm and extension release versions aligned at 0.9.0", () => {
     const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
     const packageLock = JSON.parse(readFileSync("package-lock.json", "utf8"));
-    expect(manifest.version).toBe("0.8.2");
-    expect(packageJson.version).toBe("0.8.2");
-    expect(packageLock.version).toBe("0.8.2");
-    expect(packageLock.packages[""].version).toBe("0.8.2");
+    expect(manifest.version).toBe("0.9.0");
+    expect(packageJson.version).toBe("0.9.0");
+    expect(packageLock.version).toBe("0.9.0");
+    expect(packageLock.packages[""].version).toBe("0.9.0");
   });
 
   it("documents the current release archive, permissions, and file count", () => {
@@ -109,22 +109,26 @@ describe("extension manifest", () => {
     }
   });
 
-  it("records the 0.8.2 release scope and performance boundaries first", () => {
+  it("records the 0.9.0 release scope and performance boundaries first", () => {
     const updateLog = readFileSync("update.log", "utf8");
 
-    expect(updateLog.split(/\r?\n/, 1)[0]).toBe("0.8.2");
+    expect(updateLog.split(/\r?\n/, 1)[0]).toBe("0.9.0");
     for (const detail of [
-      "收藏夹",
-      "最多 5 条",
-      "快捷入口默认开启",
-      "显式关闭",
-      "文本 `+`",
-      "14 个审核文件",
-      "不遍历收藏夹树",
-      "不缓存完整收藏夹树",
-      "不注册收藏夹监听器",
-      "必需权限",
-      "重新启用扩展",
+      "关闭其他同类网站标签页",
+      "快速分组同类网站",
+      "标签组右键菜单",
+      "重命名分组",
+      "修改颜色",
+      "解散分组",
+      "20px",
+      "14px",
+      "错误恢复",
+      "执行瞬间重算",
+      "最少 API 调用",
+      "无新增权限",
+      "无新增缓存",
+      "无新增轮询",
+      "无新增查询",
     ]) {
       expect(updateLog).toContain(detail);
     }
