@@ -381,6 +381,32 @@ describe("side panel responsive CSS", () => {
     expect(narrow180).toMatch(/#tab-group-dialog\s+form\s*{[^}]*padding:\s*8px/s);
   });
 
+  it("styles the name-only group rename dialog compactly at narrow widths", () => {
+    expect(css).toMatch(
+      /#tab-group-rename-dialog\s*{[^}]*width:\s*min\(300px,\s*calc\(100vw\s*-\s*8px\)\)[^}]*max-width:\s*300px[^}]*overflow-x:\s*hidden[^}]*font-family:\s*"Microsoft YaHei",\s*"微软雅黑",\s*"Segoe UI",\s*system-ui,\s*sans-serif/s,
+    );
+    expect(css).toMatch(
+      /#tab-group-rename-form\s*{[^}]*display:\s*grid[^}]*gap:\s*10px[^}]*min-width:\s*0[^}]*padding:\s*12px/s,
+    );
+    expect(css).toMatch(
+      /#tab-group-rename-name\s*{[^}]*width:\s*100%[^}]*height:\s*32px[^}]*padding:\s*0\s+7px/s,
+    );
+    expect(css).toMatch(
+      /#tab-group-rename-error\s*{[^}]*margin:\s*0[^}]*color:\s*MarkText[^}]*background:\s*Mark[^}]*overflow-wrap:\s*anywhere/s,
+    );
+    expect(css).toMatch(/#tab-group-rename-error:empty\s*{[^}]*display:\s*none/s);
+    expect(css).toMatch(/#tab-group-rename-dialog\s+\.dialog-actions\s*{[^}]*justify-content:\s*flex-end/s);
+
+    const narrow180 = css.slice(
+      css.indexOf("@media (max-width: 180px)"),
+      css.indexOf("@media (pointer: coarse)"),
+    );
+    expect(narrow180).toMatch(
+      /#tab-group-rename-dialog\s*{[^}]*width:\s*calc\(100vw\s*-\s*8px\)[^}]*max-width:\s*calc\(100vw\s*-\s*8px\)/s,
+    );
+    expect(narrow180).toMatch(/#tab-group-rename-form\s*{[^}]*padding:\s*8px/s);
+  });
+
   it("supports 180px and 240px panels without positive minimum widths", () => {
     expect(css).toContain("@media (max-width: 240px)");
     expect(css).toContain("@media (max-width: 180px)");

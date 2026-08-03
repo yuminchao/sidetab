@@ -1,20 +1,26 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  PartialTabGroupAddError,
   PartialTabGroupCreationError,
   createTabGroupActions,
 } from "../src/sidepanel/tab-group-actions";
 
 function createApis() {
+  const create = vi.fn().mockResolvedValue({ id: 999 });
   const group = vi.fn().mockResolvedValue(7);
   const ungroup = vi.fn().mockResolvedValue(undefined);
   const update = vi.fn().mockResolvedValue(undefined);
 
   return {
+    create,
     group,
     ungroup,
     update,
     actions: createTabGroupActions(
-      { group, ungroup } as unknown as Pick<typeof chrome.tabs, "group" | "ungroup">,
+      { create, group, ungroup } as unknown as Pick<
+        typeof chrome.tabs,
+        "create" | "group" | "ungroup"
+      >,
       { update } as unknown as Pick<typeof chrome.tabGroups, "update">,
     ),
   };
@@ -82,6 +88,142 @@ describe("tab group actions", () => {
         windowId: 10,
         hostname: "example.com",
       })).rejects.toThrow("标签组 ID 无效");
+      expect(update).not.toHaveBeenCalled();
+    },
+  );
+
+  it("creates an active tab after the group's last tab and adds it to the group", async () => {
+    const { actions, create, group } = createApis();
+
+    await actions.createTabInGroup({ groupId: 7, windowId: 10, index: 6 });
+
+    expect(create).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledWith({ windowId: 10, index: 6, active: true });
+    expect(group).toHaveBeenCalledOnce();
+    expect(group).toHaveBeenCalledWith({ tabIds: 999, groupId: 7 });
+  });
+
+  it("does not add a tab to the group when tab creation rejects", async () => {
+    const { actions, create, group } = createApis();
+    const cause = new Error("chrome failed");
+    create.mockRejectedValueOnce(cause);
+
+    await expect(
+      actions.createTabInGroup({ groupId: 7, windowId: 10, index: 6 }),
+    ).rejects.toMatchObject({ message: "无法在分组中新建标签页", cause });
+    expect(group).not.toHaveBeenCalled();
+  });
+
+  it("rejects a created tab without an ID before adding it to the group", async () => {
+    const { actions, create, group } = createApis();
+    create.mockResolvedValueOnce({});
+
+    await expect(
+      actions.createTabInGroup({ groupId: 7, windowId: 10, index: 6 }),
+    ).rejects.toThrow("新标签页缺少 ID");
+    expect(group).not.toHaveBeenCalled();
+  });
+
+  it("reports a partial add when a created tab cannot be added to the group", async () => {
+    const { actions, group } = createApis();
+    const cause = new Error("chrome failed");
+    group.mockRejectedValueOnce(cause);
+
+    const operation = actions.createTabInGroup({ groupId: 7, windowId: 10, index: 6 });
+
+    await expect(operation).rejects.toMatchObject({
+      message: "标签页已创建，但无法加入分组",
+      tabId: 999,
+      partial: true,
+      cause,
+    });
+    await expect(operation).rejects.toBeInstanceOf(PartialTabGroupAddError);
+  });
+
+  it("renames a group", async () => {
+    const { actions, update } = createApis();
+
+    await actions.rename(7, "Renamed");
+
+    expect(update).toHaveBeenCalledOnce();
+    expect(update).toHaveBeenCalledWith(7, { title: "Renamed" });
+  });
+
+  it("maps a rename rejection", async () => {
+    const { actions, update } = createApis();
+    const cause = new Error("chrome failed");
+    update.mockRejectedValueOnce(cause);
+
+    await expect(actions.rename(7, "Renamed")).rejects.toMatchObject({
+      message: "无法重命名标签组",
+      cause,
+    });
+  });
+
+  it("updates a group's color", async () => {
+    const { actions, update } = createApis();
+
+    await actions.setColor(7, "red");
+
+    expect(update).toHaveBeenCalledOnce();
+    expect(update).toHaveBeenCalledWith(7, { color: "red" });
+  });
+
+  it("maps a color update rejection", async () => {
+    const { actions, update } = createApis();
+    const cause = new Error("chrome failed");
+    update.mockRejectedValueOnce(cause);
+
+    await expect(actions.setColor(7, "red")).rejects.toMatchObject({
+      message: "无法修改标签组颜色",
+      cause,
+    });
+  });
+
+  it("dissolves a group with one batch call", async () => {
+    const { actions, ungroup } = createApis();
+
+    await actions.dissolve([1, 2, 3]);
+
+    expect(ungroup).toHaveBeenCalledOnce();
+    expect(ungroup).toHaveBeenCalledWith([1, 2, 3]);
+  });
+
+  it("silently skips dissolving an empty group", async () => {
+    const { actions, ungroup } = createApis();
+
+    await expect(actions.dissolve([])).resolves.toBeUndefined();
+    expect(ungroup).not.toHaveBeenCalled();
+  });
+
+  it("maps a dissolve rejection", async () => {
+    const { actions, ungroup } = createApis();
+    const cause = new Error("chrome failed");
+    ungroup.mockRejectedValueOnce(cause);
+
+    await expect(actions.dissolve([1, 2, 3])).rejects.toMatchObject({
+      message: "无法解散标签组",
+      cause,
+    });
+  });
+
+  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects an invalid group ID before running management APIs: %s",
+    async (invalidGroupId) => {
+      const { actions, create, group, update } = createApis();
+
+      await expect(
+        actions.createTabInGroup({ groupId: invalidGroupId, windowId: 10, index: 6 }),
+      ).rejects.toThrow("标签组 ID 无效");
+      await expect(actions.rename(invalidGroupId, "Renamed")).rejects.toThrow(
+        "标签组 ID 无效",
+      );
+      await expect(actions.setColor(invalidGroupId, "red")).rejects.toThrow(
+        "标签组 ID 无效",
+      );
+
+      expect(create).not.toHaveBeenCalled();
+      expect(group).not.toHaveBeenCalled();
       expect(update).not.toHaveBeenCalled();
     },
   );

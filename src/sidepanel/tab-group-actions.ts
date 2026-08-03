@@ -12,10 +12,18 @@ type TabGroupActions = {
     windowId: number;
     hostname: string;
   }): Promise<number>;
+  createTabInGroup(input: {
+    groupId: number;
+    windowId: number;
+    index: number;
+  }): Promise<void>;
   updateCreated(groupId: number, title: string, color: TabGroupColor): Promise<void>;
   add(tabId: number, groupId: number): Promise<void>;
   remove(tabId: number): Promise<void>;
   setCollapsed(groupId: number, collapsed: boolean): Promise<void>;
+  rename(groupId: number, title: string): Promise<void>;
+  setColor(groupId: number, color: TabGroupColor): Promise<void>;
+  dissolve(tabIds: number[]): Promise<void>;
 };
 
 export class PartialTabGroupCreationError extends Error {
@@ -27,6 +35,15 @@ export class PartialTabGroupCreationError extends Error {
   }
 }
 
+export class PartialTabGroupAddError extends Error {
+  readonly partial = true;
+
+  constructor(readonly tabId: number, options?: ErrorOptions) {
+    super("标签页已创建，但无法加入分组", options);
+    this.name = "PartialTabGroupAddError";
+  }
+}
+
 function assertValidTabGroupId(groupId: number): void {
   if (!isValidTabGroupId(groupId)) {
     throw new Error("标签组 ID 无效");
@@ -34,7 +51,7 @@ function assertValidTabGroupId(groupId: number): void {
 }
 
 export function createTabGroupActions(
-  tabs: Pick<typeof chrome.tabs, "group" | "ungroup">,
+  tabs: Pick<typeof chrome.tabs, "create" | "group" | "ungroup">,
   groups: Pick<typeof chrome.tabGroups, "update">,
 ): TabGroupActions {
   const updateCreated = async (
@@ -84,6 +101,31 @@ export function createTabGroupActions(
       return groupId;
     },
 
+    async createTabInGroup(input): Promise<void> {
+      assertValidTabGroupId(input.groupId);
+
+      let tab: chrome.tabs.Tab;
+      try {
+        tab = await tabs.create({
+          windowId: input.windowId,
+          index: input.index,
+          active: true,
+        });
+      } catch (cause) {
+        throw new Error("无法在分组中新建标签页", { cause });
+      }
+
+      if (tab.id === undefined) {
+        throw new Error("新标签页缺少 ID");
+      }
+
+      try {
+        await tabs.group({ tabIds: tab.id, groupId: input.groupId });
+      } catch (cause) {
+        throw new PartialTabGroupAddError(tab.id, { cause });
+      }
+    },
+
     updateCreated,
 
     async add(tabId, groupId): Promise<void> {
@@ -111,6 +153,36 @@ export function createTabGroupActions(
         await groups.update(groupId, { collapsed });
       } catch (cause) {
         throw new Error("无法更新标签组折叠状态", { cause });
+      }
+    },
+
+    async rename(groupId, title): Promise<void> {
+      assertValidTabGroupId(groupId);
+
+      try {
+        await groups.update(groupId, { title });
+      } catch (cause) {
+        throw new Error("无法重命名标签组", { cause });
+      }
+    },
+
+    async setColor(groupId, color): Promise<void> {
+      assertValidTabGroupId(groupId);
+
+      try {
+        await groups.update(groupId, { color });
+      } catch (cause) {
+        throw new Error("无法修改标签组颜色", { cause });
+      }
+    },
+
+    async dissolve(tabIds): Promise<void> {
+      if (tabIds.length === 0) return;
+
+      try {
+        await tabs.ungroup(tabIds as [number, ...number[]]);
+      } catch (cause) {
+        throw new Error("无法解散标签组", { cause });
       }
     },
   };

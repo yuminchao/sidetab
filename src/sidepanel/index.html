@@ -172,6 +172,25 @@
       </form>
     </dialog>
 
+    <dialog id="tab-group-rename-dialog" aria-labelledby="tab-group-rename-title">
+      <form id="tab-group-rename-form" method="dialog" novalidate>
+        <header class="dialog-header">
+          <h2 id="tab-group-rename-title">重命名分组</h2>
+        </header>
+
+        <label for="tab-group-rename-name">
+          <span>名称</span>
+          <input id="tab-group-rename-name" type="text" autocomplete="off" />
+        </label>
+
+        <p id="tab-group-rename-error" role="alert"></p>
+        <div class="dialog-actions dialog-actions-primary">
+          <button id="tab-group-rename-cancel" type="button">取消</button>
+          <button id="tab-group-rename-save" class="primary-button" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
     <script type="module" src="./sidebar.js"></script>
   </body>
 </html>

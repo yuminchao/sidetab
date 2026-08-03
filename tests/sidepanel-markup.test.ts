@@ -89,4 +89,28 @@ describe("side panel settings markup", () => {
       expect(radio.getAttribute("aria-label")).not.toBe("");
     }
   });
+
+  it("provides an independent name-only tab group rename dialog", () => {
+    const dialog = document.querySelector<HTMLDialogElement>("#tab-group-rename-dialog");
+    const form = dialog?.querySelector<HTMLFormElement>("#tab-group-rename-form");
+    const title = dialog?.querySelector<HTMLElement>("#tab-group-rename-title");
+    const name = form?.querySelector<HTMLInputElement>("#tab-group-rename-name");
+    const label = form?.querySelector<HTMLLabelElement>("label[for='tab-group-rename-name']");
+    const error = form?.querySelector<HTMLElement>("#tab-group-rename-error");
+    const cancel = form?.querySelector<HTMLButtonElement>("#tab-group-rename-cancel");
+    const save = form?.querySelector<HTMLButtonElement>("#tab-group-rename-save");
+
+    expect(dialog).not.toBeNull();
+    expect(dialog).not.toBe(document.querySelector("#tab-group-dialog"));
+    expect(dialog?.getAttribute("aria-labelledby")).toBe("tab-group-rename-title");
+    expect(title?.textContent).toBe("重命名分组");
+    expect(form?.getAttribute("method")).toBe("dialog");
+    expect(form?.hasAttribute("novalidate")).toBe(true);
+    expect(label?.textContent).toContain("名称");
+    expect(name).toMatchObject({ type: "text", autocomplete: "off", required: false });
+    expect(error?.getAttribute("role")).toBe("alert");
+    expect(cancel).toMatchObject({ type: "button", textContent: "取消" });
+    expect(save).toMatchObject({ type: "submit", textContent: "保存" });
+    expect(dialog?.querySelector("fieldset, input[type='radio'], .settings-card")).toBeNull();
+  });
 });

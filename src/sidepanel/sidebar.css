@@ -810,6 +810,56 @@ input:focus-visible {
   justify-content: flex-end;
 }
 
+#tab-group-rename-dialog {
+  width: min(300px, calc(100vw - 8px));
+  max-width: 300px;
+  max-height: calc(100vh - 8px);
+  padding: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border: 1px solid ButtonBorder;
+  border-radius: 8px;
+  background: Canvas;
+  color: CanvasText;
+  font-family: "Microsoft YaHei", "微软雅黑", "Segoe UI", system-ui, sans-serif;
+}
+
+#tab-group-rename-dialog::backdrop {
+  background: rgb(0 0 0 / 28%);
+}
+
+#tab-group-rename-form {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+}
+
+#tab-group-rename-name {
+  width: 100%;
+  height: 32px;
+  padding: 0 7px;
+  border: 1px solid ButtonBorder;
+  border-radius: 5px;
+  background: Field;
+}
+
+#tab-group-rename-error {
+  margin: 0;
+  color: MarkText;
+  background: Mark;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+#tab-group-rename-error:empty {
+  display: none;
+}
+
+#tab-group-rename-dialog .dialog-actions {
+  justify-content: flex-end;
+}
+
 #shortcut-dialog {
   width: min(360px, calc(100vw - 8px));
   max-width: calc(100vw - 8px);
@@ -1029,6 +1079,15 @@ input:focus-visible {
   }
 
   #tab-group-dialog form {
+    padding: 8px;
+  }
+
+  #tab-group-rename-dialog {
+    width: calc(100vw - 8px);
+    max-width: calc(100vw - 8px);
+  }
+
+  #tab-group-rename-form {
     padding: 8px;
   }
 }
