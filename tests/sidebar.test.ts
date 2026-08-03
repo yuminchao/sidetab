@@ -1626,7 +1626,7 @@ describe("sidebar lifecycle", () => {
     expect(groupRow(7)).toBe(originalGroup);
     expect(row(1)).toBe(originalGroupedTab);
     expect(groupRow(7).querySelector(".tab-group-title")?.textContent).toBe("Renamed");
-    expect(groupRow(7).querySelector<HTMLElement>(".tab-group-color")?.dataset.color).toBe("red");
+    expect(groupRow(7).dataset.groupColor).toBe("red");
 
     fake.groupEvents.onUpdated.emit(fakeGroup({ id: 7, title: "Renamed", collapsed: true }));
     expect(groupRow(7)).toBe(originalGroup);
@@ -1788,9 +1788,7 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.query).toHaveBeenCalledTimes(2);
     expect(fake.methods.groupQuery).toHaveBeenCalledTimes(2);
     expect(groupRow(777).querySelector(".tab-group-title")?.textContent).toBe("未命名分组");
-    expect(groupRow(777).querySelector<HTMLElement>(".tab-group-color")?.dataset.color).toBe(
-      "grey",
-    );
+    expect(groupRow(777).dataset.groupColor).toBe("grey");
     cleanup();
   });
 
@@ -1887,7 +1885,7 @@ describe("sidebar lifecycle", () => {
     resyncGroups.resolve([fakeGroup({ id: 777, title: "Older metadata", color: "grey" })]);
 
     await vi.waitFor(() => expect(groupRow(777).querySelector(".tab-group-title")?.textContent).toBe("Project"));
-    expect(groupRow(777).querySelector<HTMLElement>(".tab-group-color")?.dataset.color).toBe("blue");
+    expect(groupRow(777).dataset.groupColor).toBe("blue");
     expect(fake.methods.group).toHaveBeenCalledOnce();
     expect(fake.methods.groupUpdate).toHaveBeenCalledTimes(2);
     cleanup();
