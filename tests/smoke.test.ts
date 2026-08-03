@@ -111,6 +111,8 @@ describe("extension manifest", () => {
 
   it("records the 0.9.0 release scope and performance boundaries first", () => {
     const updateLog = readFileSync("update.log", "utf8");
+    const nextVersion = updateLog.search(/\r?\n(?=\d+\.\d+\.\d+\r?$)/m);
+    const currentRelease = nextVersion === -1 ? updateLog : updateLog.slice(0, nextVersion);
 
     expect(updateLog.split(/\r?\n/, 1)[0]).toBe("0.9.0");
     for (const detail of [
@@ -130,7 +132,7 @@ describe("extension manifest", () => {
       "无新增轮询",
       "无新增查询",
     ]) {
-      expect(updateLog).toContain(detail);
+      expect(currentRelease).toContain(detail);
     }
   });
 
