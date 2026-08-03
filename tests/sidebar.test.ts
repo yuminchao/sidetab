@@ -52,8 +52,16 @@ function installFixture(): void {
         <button id="tab-group-cancel" type="button"></button>
         <button id="tab-group-create" type="submit"></button>
       </form>
+    </dialog>
+    <dialog id="tab-group-rename-dialog">
+      <form id="tab-group-rename-form">
+        <input id="tab-group-rename-name" />
+        <p id="tab-group-rename-error"></p>
+        <button id="tab-group-rename-cancel" type="button"></button>
+        <button id="tab-group-rename-save" type="submit"></button>
+      </form>
     </dialog>`;
-  for (const id of ["shortcut-dialog", "tab-group-dialog"]) {
+  for (const id of ["shortcut-dialog", "tab-group-dialog", "tab-group-rename-dialog"]) {
     const dialog = element<HTMLDialogElement>(id);
     dialog.showModal = vi.fn(() => dialog.setAttribute("open", ""));
     dialog.close = vi.fn(() => {
@@ -103,6 +111,16 @@ function openTabContextMenu(tabId: number): void {
   row(tabId).dispatchEvent(
     new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
   );
+}
+
+function openGroupContextMenu(groupId: number): void {
+  groupRow(groupId).dispatchEvent(
+    new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+  );
+}
+
+function groupContextMenuItem(action: string): HTMLButtonElement {
+  return document.querySelector<HTMLButtonElement>(`[data-group-menu-action='${action}']`)!;
 }
 
 function mixedTabs(): chrome.tabs.Tab[] {
@@ -2151,6 +2169,293 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
+  it("keeps tab and group context menus mutually exclusive", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, groupId: -1 }),
+        fakeTab({ id: 2, index: 1, groupId: 7 }),
+      ],
+      groups: [fakeGroup({ id: 7 })],
+    });
+    const cleanup = await startSidebar(fake);
+    const tabMenu = document.querySelector<HTMLElement>(
+      ".tab-context-menu:not(.tab-context-submenu):not(.tab-group-context-menu)",
+    )!;
+    const groupMenu = document.querySelector<HTMLElement>(".tab-group-context-menu")!;
+
+    openTabContextMenu(1);
+    expect(tabMenu.hidden).toBe(false);
+    openGroupContextMenu(7);
+    expect(tabMenu.hidden).toBe(true);
+    expect(groupMenu.hidden).toBe(false);
+
+    openTabContextMenu(2);
+    expect(groupMenu.hidden).toBe(true);
+    expect(tabMenu.hidden).toBe(false);
+    cleanup();
+  });
+
+  it("creates an active tab after the latest group tail and adds it to that group", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, groupId: -1 }),
+        fakeTab({ id: 2, index: 1, groupId: 7 }),
+        fakeTab({ id: 3, index: 3, groupId: 7 }),
+      ],
+      groups: [fakeGroup({ id: 7 })],
+    });
+    const cleanup = await startSidebar(fake);
+
+    openGroupContextMenu(7);
+    click(groupContextMenuItem("new-tab"));
+    await flush();
+
+    expect(fake.methods.create).toHaveBeenCalledWith({ windowId: 10, index: 4, active: true });
+    expect(fake.methods.group).toHaveBeenCalledWith({ tabIds: 999, groupId: 7 });
+    cleanup();
+  });
+
+  it("opens rename from the latest group title and saves the trimmed value", async () => {
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 2, index: 0, groupId: 7 })],
+      groups: [fakeGroup({ id: 7, title: "Initial" })],
+    });
+    const cleanup = await startSidebar(fake);
+    fake.groupEvents.onUpdated.emit(fakeGroup({ id: 7, title: "Latest" }));
+
+    openGroupContextMenu(7);
+    click(groupContextMenuItem("rename"));
+    const dialog = element<HTMLDialogElement>("tab-group-rename-dialog");
+    const name = element<HTMLInputElement>("tab-group-rename-name");
+    expect(dialog.open).toBe(true);
+    expect(name.value).toBe("Latest");
+
+    name.value = "  Renamed  ";
+    element<HTMLFormElement>("tab-group-rename-form").dispatchEvent(
+      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+    );
+    await flush();
+    expect(fake.methods.groupUpdate).toHaveBeenCalledWith(7, { title: "Renamed" });
+    await vi.waitFor(() => expect(dialog.open).toBe(false));
+    cleanup();
+  });
+
+  it("updates a newly selected group color and dissolves all latest members in one call", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 2, index: 0, groupId: 7 }),
+        fakeTab({ id: 3, index: 1, groupId: 7 }),
+      ],
+      groups: [fakeGroup({ id: 7, color: "blue", collapsed: true })],
+    });
+    const cleanup = await startSidebar(fake);
+
+    openGroupContextMenu(7);
+    click(groupContextMenuItem("set-color"));
+    click(document.querySelector(".tab-group-color-submenu [data-color='red']")!);
+    await flush();
+    expect(fake.methods.groupUpdate).toHaveBeenCalledWith(7, { color: "red" });
+
+    openGroupContextMenu(7);
+    fake.events.onCreated.emit(fakeTab({ id: 4, index: 2, groupId: 7 }));
+    click(groupContextMenuItem("dissolve"));
+    await flush();
+    expect(fake.methods.ungroup).toHaveBeenCalledTimes(1);
+    expect(fake.methods.ungroup).toHaveBeenCalledWith([2, 3, 4]);
+    expect(fake.methods.remove).not.toHaveBeenCalled();
+    expect(fake.methods.move).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("revalidates color at dispatch time and waits for Chrome events before patching the row", async () => {
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 2, index: 0, groupId: 7 })],
+      groups: [fakeGroup({ id: 7, color: "blue" })],
+    });
+    const cleanup = await startSidebar(fake);
+
+    openGroupContextMenu(7);
+    click(groupContextMenuItem("set-color"));
+    fake.groupEvents.onUpdated.emit(fakeGroup({ id: 7, color: "red" }));
+    click(document.querySelector(".tab-group-color-submenu [data-color='red']")!);
+    await flush();
+    expect(fake.methods.groupUpdate).not.toHaveBeenCalled();
+    expect(groupRow(7).dataset.groupColor).toBe("red");
+
+    openGroupContextMenu(7);
+    click(groupContextMenuItem("set-color"));
+    click(document.querySelector(".tab-group-color-submenu [data-color='green']")!);
+    await flush();
+    expect(fake.methods.groupUpdate).toHaveBeenCalledWith(7, { color: "green" });
+    expect(groupRow(7).dataset.groupColor).toBe("red");
+    fake.groupEvents.onUpdated.emit(fakeGroup({ id: 7, color: "green" }));
+    expect(groupRow(7).dataset.groupColor).toBe("green");
+    cleanup();
+  });
+
+  it("keeps a partially created tab, reports the domain error, and resyncs once", async () => {
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 2, index: 0, groupId: 7 })],
+      groups: [fakeGroup({ id: 7 })],
+    });
+    const cleanup = await startSidebar(fake);
+    fake.methods.group.mockRejectedValueOnce(new Error("group failed"));
+
+    openGroupContextMenu(7);
+    click(groupContextMenuItem("new-tab"));
+
+    await vi.waitFor(() => {
+      expect(element("status-message").textContent).toContain(
+        "标签页已创建，但无法加入分组",
+      );
+      expect(fake.methods.query).toHaveBeenCalledTimes(2);
+      expect(fake.methods.groupQuery).toHaveBeenCalledTimes(2);
+    });
+    expect(fake.methods.create).toHaveBeenCalledOnce();
+    expect(fake.methods.group).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it("reports a create failure without grouping and keeps a failed rename editable", async () => {
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 2, index: 0, groupId: 7 })],
+      groups: [fakeGroup({ id: 7, title: "Work" })],
+    });
+    const cleanup = await startSidebar(fake);
+    fake.methods.create.mockRejectedValueOnce(new Error("create failed"));
+
+    openGroupContextMenu(7);
+    click(groupContextMenuItem("new-tab"));
+    await vi.waitFor(() => {
+      expect(element("status-message").textContent).toContain(
+        "无法在分组中新建标签页",
+      );
+      expect(fake.methods.query).toHaveBeenCalledTimes(2);
+    });
+    expect(fake.methods.group).not.toHaveBeenCalled();
+
+    fake.methods.groupUpdate.mockRejectedValueOnce(new Error("rename failed"));
+    openGroupContextMenu(7);
+    click(groupContextMenuItem("rename"));
+    const dialog = element<HTMLDialogElement>("tab-group-rename-dialog");
+    const name = element<HTMLInputElement>("tab-group-rename-name");
+    name.value = "  Keep me  ";
+    element<HTMLFormElement>("tab-group-rename-form").dispatchEvent(
+      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+    );
+    await vi.waitFor(() => {
+      expect(element("tab-group-rename-error").textContent).toBe("无法重命名标签组");
+      expect(fake.methods.query).toHaveBeenCalledTimes(3);
+      expect(fake.methods.groupQuery).toHaveBeenCalledTimes(3);
+    });
+    expect(dialog.open).toBe(true);
+    expect(name.value).toBe("  Keep me  ");
+    expect(fake.methods.groupUpdate).toHaveBeenCalledWith(7, { title: "Keep me" });
+    cleanup();
+  });
+
+  it("deduplicates management commands per group without blocking another group", async () => {
+    const pendingCreate = deferred<chrome.tabs.Tab>();
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 2, index: 0, groupId: 7 }),
+        fakeTab({ id: 3, index: 1, groupId: 8 }),
+      ],
+      groups: [fakeGroup({ id: 7 }), fakeGroup({ id: 8, title: "Other" })],
+    });
+    fake.methods.create.mockReturnValueOnce(pendingCreate.promise);
+    const cleanup = await startSidebar(fake);
+
+    openGroupContextMenu(7);
+    click(groupContextMenuItem("new-tab"));
+    openGroupContextMenu(7);
+    expect(groupContextMenuItem("new-tab").disabled).toBe(true);
+    click(groupContextMenuItem("new-tab"));
+    openGroupContextMenu(8);
+    click(groupContextMenuItem("new-tab"));
+
+    expect(fake.methods.create).toHaveBeenCalledTimes(2);
+    click(groupRow(7).querySelector("[data-action='toggle-group']")!);
+    expect(fake.methods.groupUpdate).not.toHaveBeenCalled();
+    pendingCreate.resolve(fakeTab({ id: 1001, index: 1, groupId: -1 }));
+    await flush();
+    cleanup();
+  });
+
+  it("keeps rename open when a same-group toggle becomes busy before save", async () => {
+    const pendingToggle = deferred<chrome.tabGroups.TabGroup | undefined>();
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 2, index: 0, groupId: 7 })],
+      groups: [fakeGroup({ id: 7, title: "Work" })],
+    });
+    const cleanup = await startSidebar(fake);
+
+    openGroupContextMenu(7);
+    click(groupContextMenuItem("rename"));
+    fake.methods.groupUpdate.mockReturnValueOnce(pendingToggle.promise);
+    click(groupRow(7).querySelector("[data-action='toggle-group']")!);
+
+    const dialog = element<HTMLDialogElement>("tab-group-rename-dialog");
+    element<HTMLInputElement>("tab-group-rename-name").value = "Busy rename";
+    element<HTMLFormElement>("tab-group-rename-form").dispatchEvent(
+      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+    );
+    await flush();
+
+    expect(fake.methods.groupUpdate).toHaveBeenCalledTimes(1);
+    expect(fake.methods.groupUpdate).toHaveBeenCalledWith(7, { collapsed: true });
+    expect(dialog.open).toBe(true);
+
+    pendingToggle.resolve(fakeGroup({ id: 7, collapsed: true }));
+    await flush();
+    cleanup();
+  });
+
+  it("closes group transient UI when its group is removed", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 2, index: 0, groupId: 7 }),
+        fakeTab({ id: 3, index: 1, groupId: 8 }),
+      ],
+      groups: [fakeGroup({ id: 7 }), fakeGroup({ id: 8, title: "Other" })],
+    });
+    const cleanup = await startSidebar(fake);
+    const groupMenu = document.querySelector<HTMLElement>(".tab-group-context-menu")!;
+
+    openGroupContextMenu(7);
+    expect(groupMenu.hidden).toBe(false);
+    fake.groupEvents.onRemoved.emit(fakeGroup({ id: 7 }));
+    expect(groupMenu.hidden).toBe(true);
+
+    openGroupContextMenu(8);
+    click(groupContextMenuItem("rename"));
+    expect(element<HTMLDialogElement>("tab-group-rename-dialog").open).toBe(true);
+    fake.groupEvents.onRemoved.emit(fakeGroup({ id: 8 }));
+    expect(element<HTMLDialogElement>("tab-group-rename-dialog").open).toBe(false);
+    cleanup();
+  });
+
+  it("ignores a late group-command rejection after cleanup", async () => {
+    const pendingCreate = deferred<chrome.tabs.Tab>();
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 2, index: 0, groupId: 7 })],
+      groups: [fakeGroup({ id: 7 })],
+    });
+    fake.methods.create.mockReturnValueOnce(pendingCreate.promise);
+    const cleanup = await startSidebar(fake);
+
+    openGroupContextMenu(7);
+    click(groupContextMenuItem("new-tab"));
+    cleanup();
+    pendingCreate.reject(new Error("late failure"));
+    await flush();
+
+    expect(element("status-message").textContent).toBe("");
+    expect(fake.methods.query).toHaveBeenCalledOnce();
+    expect(document.querySelector(".tab-group-context-menu")).toBeNull();
+    expect(element<HTMLDialogElement>("tab-group-rename-dialog").open).toBe(false);
+  });
+
   it("closes a tab on middle click and removes the handler during cleanup", async () => {
     const fake = createFakeChrome({ tabs: [fakeTab({ id: 12 })] });
     const cleanup = await startSidebar(fake);
@@ -2750,6 +3055,12 @@ describe("sidebar lifecycle", () => {
     "tab-group-error",
     "tab-group-cancel",
     "tab-group-create",
+    "tab-group-rename-dialog",
+    "tab-group-rename-form",
+    "tab-group-rename-name",
+    "tab-group-rename-error",
+    "tab-group-rename-cancel",
+    "tab-group-rename-save",
   ])("rejects a missing required element with its id: %s", async (id) => {
     element(id).remove();
     const fake = createFakeChrome();

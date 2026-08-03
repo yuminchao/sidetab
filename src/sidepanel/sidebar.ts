@@ -19,8 +19,10 @@ import { createTabContextMenu } from "./tab-context-menu";
 import { createTabDragController } from "./tab-drag-controller";
 import { subscribeToTabEvents } from "./tab-events";
 import { createTabGroupActions } from "./tab-group-actions";
+import { createTabGroupContextMenu } from "./tab-group-context-menu";
 import { createTabGroupDialog } from "./tab-group-dialog";
 import { subscribeToTabGroupEvents } from "./tab-group-events";
+import { createTabGroupRenameDialog } from "./tab-group-rename-dialog";
 import { TabGroupStore } from "./tab-group-store";
 import { buildTabListItems } from "./tab-list-model";
 import { createTabMiddleClickController } from "./tab-middle-click";
@@ -74,6 +76,12 @@ type SidebarElements = {
   groupError: HTMLElement;
   groupCancel: HTMLButtonElement;
   groupCreate: HTMLButtonElement;
+  groupRenameDialog: HTMLDialogElement;
+  groupRenameForm: HTMLFormElement;
+  groupRenameName: HTMLInputElement;
+  groupRenameError: HTMLElement;
+  groupRenameCancel: HTMLButtonElement;
+  groupRenameSave: HTMLButtonElement;
 };
 
 export function startSidebar(deps: SidebarDependencies): Promise<() => void> {
@@ -122,6 +130,7 @@ async function startSidebarInternal(
   let restoreRecentlyClosedBusy = false;
   const groupTabBusy = new Set<number>();
   const groupToggleBusy = new Set<number>();
+  const groupCommandBusy = new Set<number>();
   const statusSlots = {
     tabs: "",
     groups: "",
@@ -432,6 +441,7 @@ async function startSidebarInternal(
     tabRenderer.setDragEnabled(!reorderBusy);
   };
 
+  let groupContextMenu: ReturnType<typeof createTabGroupContextMenu> | undefined;
   const contextMenu = createTabContextMenu(
     { document: deps.document, list: elements.list, viewport: deps.document.defaultView! },
     {
@@ -452,6 +462,7 @@ async function startSidebarInternal(
       },
       getGroups: () => groupStore.list(),
       getRecentlyClosedSessionId: () => recentlyClosed.getSessionId(),
+      onBeforeOpen: () => groupContextMenu?.close(),
       onCommand(command) {
         if (command.action === "add-shortcut") {
           void addTabShortcut(command.tabId);
@@ -517,6 +528,93 @@ async function startSidebarInternal(
     },
   );
 
+  const executeGroupCommand = async (
+    groupId: number,
+    start: () => Promise<void>,
+  ): Promise<void> => {
+    if (!active || groupCommandBusy.has(groupId) || groupToggleBusy.has(groupId)) return;
+    groupCommandBusy.add(groupId);
+    const generation = ++operationGeneration;
+    try {
+      await start();
+      if (active && generation === operationGeneration) setStatus("operation", "");
+    } catch (error) {
+      if (active) {
+        if (generation === operationGeneration) {
+          setStatus(
+            "operation",
+            error instanceof Error ? error.message : "标签组操作失败",
+          );
+        }
+        void resyncTabsAndGroups();
+      }
+      throw error;
+    } finally {
+      groupCommandBusy.delete(groupId);
+    }
+  };
+
+  const groupRenameDialog = createTabGroupRenameDialog(
+    {
+      dialog: elements.groupRenameDialog,
+      form: elements.groupRenameForm,
+      name: elements.groupRenameName,
+      error: elements.groupRenameError,
+      cancel: elements.groupRenameCancel,
+      save: elements.groupRenameSave,
+    },
+    {
+      async onSave({ groupId, title }) {
+        if (!groupStore.get(groupId)) return;
+        if (groupCommandBusy.has(groupId) || groupToggleBusy.has(groupId)) {
+          throw new Error("标签组操作正在进行");
+        }
+        await executeGroupCommand(groupId, () => groupActions.rename(groupId, title));
+      },
+    },
+  );
+
+  groupContextMenu = createTabGroupContextMenu(
+    { document: deps.document, list: elements.list, viewport: deps.document.defaultView! },
+    {
+      getGroup: (groupId) => groupStore.get(groupId),
+      isGroupBusy: (groupId) =>
+        groupCommandBusy.has(groupId) || groupToggleBusy.has(groupId),
+      onBeforeOpen: () => contextMenu.close(),
+      onCommand(command) {
+        const group = groupStore.get(command.groupId);
+        if (!group) return;
+        if (command.action === "rename") {
+          groupRenameDialog.open(group.id, group.title);
+          return;
+        }
+        if (command.action === "new-tab") {
+          const members = tabStore.list().filter((tab) => tab.groupId === group.id);
+          if (members.length === 0) return;
+          const index = Math.max(...members.map((tab) => tab.index)) + 1;
+          void executeGroupCommand(group.id, () => groupActions.createTabInGroup({
+            groupId: group.id,
+            windowId: group.windowId,
+            index,
+          })).catch(() => undefined);
+          return;
+        }
+        if (command.action === "set-color") {
+          if (group.color === command.color) return;
+          void executeGroupCommand(group.id, () =>
+            groupActions.setColor(group.id, command.color)).catch(() => undefined);
+          return;
+        }
+        const tabIds = tabStore.list()
+          .filter((tab) => tab.groupId === group.id)
+          .map((tab) => tab.id);
+        if (tabIds.length === 0) return;
+        void executeGroupCommand(group.id, () => groupActions.dissolve(tabIds))
+          .catch(() => undefined);
+      },
+    },
+  );
+
   const dragController = createTabDragController(
     { list: elements.list },
     {
@@ -556,6 +654,7 @@ async function startSidebarInternal(
 
   const onTabScroll = (): void => {
     contextMenu.close();
+    groupContextMenu?.close();
     dragController.cancel();
     historySearch.close();
   };
@@ -607,9 +706,13 @@ async function startSidebarInternal(
     );
     elements.settingsButton.removeEventListener("click", blockPendingSettings, true);
     contextMenu.destroy();
+    groupContextMenu?.destroy();
+    groupContextMenu = undefined;
     recentlyClosed.destroy();
     groupDialog.close();
     groupDialog.destroy();
+    groupRenameDialog.close();
+    groupRenameDialog.destroy();
     dragController.destroy();
     middleClickController.destroy();
     historySearch.destroy();
@@ -633,7 +736,11 @@ async function startSidebarInternal(
     ) {
       const groupId = Number(groupRow.dataset.groupId);
       const group = Number.isInteger(groupId) ? groupStore.get(groupId) : undefined;
-      if (!group || groupToggleBusy.has(group.id)) return;
+      if (
+        !group ||
+        groupToggleBusy.has(group.id) ||
+        groupCommandBusy.has(group.id)
+      ) return;
       groupToggleBusy.add(group.id);
       runTabOperation(
         groupActions.setCollapsed(group.id, !group.collapsed),
@@ -846,6 +953,8 @@ async function startSidebarInternal(
       );
     },
     removed(groupId: number) {
+      groupContextMenu?.closeForGroup(groupId);
+      groupRenameDialog.closeForGroup(groupId);
       applyEvent(
         () => {
           groupStore.remove(groupId);
@@ -1100,6 +1209,24 @@ function getSidebarElements(document: Document): SidebarElements {
     groupError: requireElement(document, "tab-group-error", HTMLElement),
     groupCancel: requireElement(document, "tab-group-cancel", HTMLButtonElement),
     groupCreate: requireElement(document, "tab-group-create", HTMLButtonElement),
+    groupRenameDialog: requireElement(
+      document,
+      "tab-group-rename-dialog",
+      HTMLDialogElement,
+    ),
+    groupRenameForm: requireElement(document, "tab-group-rename-form", HTMLFormElement),
+    groupRenameName: requireElement(document, "tab-group-rename-name", HTMLInputElement),
+    groupRenameError: requireElement(document, "tab-group-rename-error", HTMLElement),
+    groupRenameCancel: requireElement(
+      document,
+      "tab-group-rename-cancel",
+      HTMLButtonElement,
+    ),
+    groupRenameSave: requireElement(
+      document,
+      "tab-group-rename-save",
+      HTMLButtonElement,
+    ),
   };
 }
 

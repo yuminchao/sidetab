@@ -119,6 +119,41 @@ describe("tab context menu", () => {
     menu.destroy();
   });
 
+  it("calls the optional before-open hook once for each valid mouse or keyboard open", () => {
+    const onBeforeOpen = vi.fn();
+    const menu = createTabContextMenu(
+      { document, list, viewport: window },
+      {
+        getContext: menuContext,
+        getGroups: () => [],
+        onBeforeOpen,
+        onCommand: vi.fn(),
+      },
+    );
+
+    context(row(1));
+    expect(onBeforeOpen).toHaveBeenCalledTimes(1);
+
+    row(2).dispatchEvent(new KeyboardEvent("keydown", {
+      key: "F10",
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    }));
+    expect(onBeforeOpen).toHaveBeenCalledTimes(2);
+
+    context(list);
+    list.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "F10",
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    }));
+    expect(onBeforeOpen).toHaveBeenCalledTimes(2);
+
+    menu.destroy();
+  });
+
   it("dispatches add-shortcut from mouse and keyboard", () => {
     const onCommand = vi.fn();
     const menu = createTabContextMenu(

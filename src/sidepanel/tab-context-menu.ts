@@ -26,6 +26,7 @@ export function createTabContextMenu(
     getContext(id: number): TabContextMenuContext | undefined;
     getGroups(): readonly TabGroupViewModel[];
     getRecentlyClosedSessionId?(): string | undefined;
+    onBeforeOpen?(): void;
     onCommand(command: TabContextCommand): void;
   },
 ) {
@@ -161,6 +162,7 @@ export function createTabContextMenu(
     focusTarget: HTMLElement,
   ): void {
     const { tab } = context;
+    callbacks.onBeforeOpen?.();
     if (contextSelectedRow !== focusTarget) {
       contextSelectedRow?.removeAttribute("data-context-selected");
       focusTarget.dataset.contextSelected = "true";

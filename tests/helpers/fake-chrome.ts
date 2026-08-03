@@ -81,17 +81,53 @@ export function createFakeChrome(options: {
     if (!tab) throw new Error("tab not found");
     return tab;
   });
-  const update = vi.fn(async (tabId: number, properties: chrome.tabs.UpdateProperties) =>
-    fakeTab({ id: tabId, ...properties }),
-  );
+  const update = vi.fn(async (tabId: number, properties: chrome.tabs.UpdateProperties) => {
+    const index = tabState.findIndex((candidate) => candidate.id === tabId);
+    const current = tabState[index];
+    if (!current) throw new Error("tab not found");
+    if (properties.active) {
+      tabState = tabState.map((tab) =>
+        tab.windowId === current.windowId ? { ...tab, active: false } : tab,
+      );
+    }
+    const updated = { ...tabState[index], ...properties } as chrome.tabs.Tab;
+    tabState[index] = updated;
+    return updated;
+  });
   const remove = vi.fn(async () => undefined);
   const duplicate = vi.fn(async (tabId: number) => fakeTab({ id: tabId + 1000 }));
   const move = vi.fn(async (tabId: number, moveProperties: chrome.tabs.MoveProperties) =>
     fakeTab({ id: tabId, index: moveProperties.index as number }),
   );
-  const create = vi.fn(async (properties: chrome.tabs.CreateProperties) =>
-    fakeTab({ id: 999, url: properties.url, active: properties.active ?? true }),
-  );
+  let nextTabId = Math.max(998, ...tabState.map((tab) => tab.id ?? 0)) + 1;
+  const create = vi.fn(async (properties: chrome.tabs.CreateProperties) => {
+    const windowId = properties.windowId ?? options.currentWindow?.id ?? 10;
+    const windowTabs = tabState.filter((tab) => tab.windowId === windowId);
+    const requestedIndex = properties.index ?? windowTabs.length;
+    const index = Math.max(0, Math.min(requestedIndex, windowTabs.length));
+    const active = properties.active ?? true;
+    if (active) {
+      tabState = tabState.map((tab) =>
+        tab.windowId === windowId ? { ...tab, active: false } : tab,
+      );
+    }
+    tabState = tabState.map((tab) =>
+      tab.windowId === windowId && tab.index >= index
+        ? { ...tab, index: tab.index + 1 }
+        : tab,
+    );
+    const created = fakeTab({
+      id: nextTabId++,
+      windowId,
+      index,
+      url: properties.url,
+      active,
+      pinned: properties.pinned ?? false,
+      groupId: -1,
+    });
+    tabState.push(created);
+    return created;
+  });
   const removeEmptyGroups = (groupIds: ReadonlySet<number>): void => {
     groupState = groupState.filter((group) =>
       !groupIds.has(group.id) || tabState.some((tab) => tab.groupId === group.id),
