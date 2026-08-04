@@ -16,13 +16,36 @@ function parseCsp(value: string): Record<string, string[]> {
 }
 
 describe("extension manifest", () => {
-  it("keeps the npm and extension release versions aligned at 0.9.0", () => {
+  it("keeps the npm and extension release versions aligned at 0.10.0", () => {
     const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
     const packageLock = JSON.parse(readFileSync("package-lock.json", "utf8"));
-    expect(manifest.version).toBe("0.9.0");
-    expect(packageJson.version).toBe("0.9.0");
-    expect(packageLock.version).toBe("0.9.0");
-    expect(packageLock.packages[""].version).toBe("0.9.0");
+    expect(manifest.version).toBe("0.10.0");
+    expect(packageJson.version).toBe("0.10.0");
+    expect(packageLock.version).toBe("0.10.0");
+    expect(packageLock.packages[""].version).toBe("0.10.0");
+  });
+
+  it("records the 0.10.0 search and grouped drag release scope", () => {
+    const readme = readFileSync("README.md", "utf8");
+    const checklist = readFileSync("docs/chrome-web-store-checklist.md", "utf8");
+    const updateLog = readFileSync("update.log", "utf8");
+    expect(readme).toContain("release/sidetab-lite-0.10.0.zip");
+    for (const detail of [
+      "收藏夹",
+      "历史记录",
+      "来源标签",
+      "连续分组容器",
+      "整体拖动",
+      "chrome.tabGroups.move()",
+      "执行瞬间重算",
+      "无新增权限",
+      "无新增查询",
+      "无新增轮询",
+      "0.10.0",
+    ]) {
+      expect(updateLog).toContain(detail);
+    }
+    expect(checklist).toContain("0.10.0");
   });
 
   it("documents the current release archive, permissions, and file count", () => {
@@ -109,28 +132,23 @@ describe("extension manifest", () => {
     }
   });
 
-  it("records the 0.9.0 release scope and performance boundaries first", () => {
+  it("records the 0.10.0 release scope and performance boundaries first", () => {
     const updateLog = readFileSync("update.log", "utf8");
     const nextVersion = updateLog.search(/\r?\n(?=\d+\.\d+\.\d+\r?$)/m);
     const currentRelease = nextVersion === -1 ? updateLog : updateLog.slice(0, nextVersion);
 
-    expect(updateLog.split(/\r?\n/, 1)[0]).toBe("0.9.0");
+    expect(updateLog.split(/\r?\n/, 1)[0]).toBe("0.10.0");
     for (const detail of [
-      "关闭其他同类网站标签页",
-      "快速分组同类网站",
-      "标签组右键菜单",
-      "重命名分组",
-      "修改颜色",
-      "解散分组",
-      "20px",
-      "14px",
-      "错误恢复",
+      "收藏夹",
+      "历史记录",
+      "来源标签",
+      "连续分组容器",
+      "整体拖动",
+      "chrome.tabGroups.move()",
       "执行瞬间重算",
-      "最少 API 调用",
       "无新增权限",
-      "无新增缓存",
-      "无新增轮询",
       "无新增查询",
+      "无新增轮询",
     ]) {
       expect(currentRelease).toContain(detail);
     }

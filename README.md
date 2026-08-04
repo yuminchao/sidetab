@@ -10,7 +10,9 @@ SideTab Lite 是一个 Chrome 侧边栏标签页管理扩展。它支持切换�
 4. 点击“加载已解压的扩展程序”，选择本项目的 `dist` 目录。
 5. 点击工具栏中的 SideTab Lite 图标打开侧边栏。
 
-`release/sidetab-lite-0.9.0.zip` 用于上传 Chrome Web Store 或传递构建产物。Chrome 通常不能直接双击 ZIP 安装扩展；本地测试请加载已解压的 `dist` 目录。
+`release/sidetab-lite-0.10.0.zip` 用于上传 Chrome Web Store 或传递构建产物。Chrome 通常不能直接双击 ZIP 安装扩展；本地测试请加载已解压的 `dist` 目录。
+
+0.10.0 发布重点：搜索结果明确标注收藏夹或历史记录等来源标签；同色标签连续排列在连续分组容器中，拖动容器即可整体拖动分组。批量操作会在执行瞬间重算最新状态，并通过 Chrome 事件保持界面同步。
 
 ## 开发与打包
 
