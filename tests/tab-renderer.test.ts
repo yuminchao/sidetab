@@ -122,6 +122,70 @@ describe("tab renderer", () => {
     expect(row?.draggable).toBe(false);
   });
 
+  it("writes group decoration datasets when creating a tab row", () => {
+    const renderer = createTabRenderer({ list, empty });
+
+    renderer.render([{
+      kind: "tab",
+      tab: tab({ groupId: 3 }),
+      group: { groupId: 3, color: "cyan", position: "single" },
+    }]);
+
+    expect((list.firstElementChild as HTMLElement).dataset).toMatchObject({
+      groupId: "3",
+      groupColor: "cyan",
+      groupPosition: "single",
+    });
+  });
+
+  it("keeps group decoration while patching tab state", () => {
+    const renderer = createTabRenderer({ list, empty });
+    renderer.render([{
+      kind: "tab",
+      tab: tab({ groupId: 3 }),
+      group: { groupId: 3, color: "blue", position: "first" },
+    }]);
+    const row = list.firstElementChild as HTMLElement;
+
+    renderer.patchTab(tab({ groupId: -1, title: "Patched", active: true }));
+
+    expect(list.firstElementChild).toBe(row);
+    expect(row.querySelector(".tab-title")?.textContent).toBe("Patched");
+    expect(row.dataset).toMatchObject({
+      groupId: "3",
+      groupColor: "blue",
+      groupPosition: "first",
+    });
+  });
+
+  it("synchronizes and clears decoration only during a full render while reusing the row", () => {
+    const renderer = createTabRenderer({ list, empty });
+    renderer.render([{
+      kind: "tab",
+      tab: tab({ groupId: 3 }),
+      group: { groupId: 3, color: "blue", position: "first" },
+    }]);
+    const row = list.firstElementChild as HTMLElement;
+
+    renderer.render([{
+      kind: "tab",
+      tab: tab({ groupId: 4 }),
+      group: { groupId: 4, color: "pink", position: "last" },
+    }]);
+    expect(list.firstElementChild).toBe(row);
+    expect(row.dataset).toMatchObject({
+      groupId: "4",
+      groupColor: "pink",
+      groupPosition: "last",
+    });
+
+    renderer.render([tabItem({ groupId: -1 })]);
+    expect(list.firstElementChild).toBe(row);
+    expect(row.dataset.groupId).toBeUndefined();
+    expect(row.dataset.groupColor).toBeUndefined();
+    expect(row.dataset.groupPosition).toBeUndefined();
+  });
+
   it("patches a group row in place and ignores a missing group", () => {
     const renderer = createTabRenderer({ list, empty });
     renderer.render([groupItem(), tabItem({ groupId: 3 })]);

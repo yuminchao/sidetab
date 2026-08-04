@@ -265,9 +265,9 @@ describe("sidebar lifecycle", () => {
     const cleanup = await started;
     const itemOrder = Array.from(element("tab-list").children, (item) => {
       const row = item as HTMLElement;
-      return row.dataset.groupId === undefined
-        ? `tab:${row.dataset.tabId}`
-        : `group:${row.dataset.groupId}`;
+      return row.dataset.tabId === undefined
+        ? `group:${row.dataset.groupId}`
+        : `tab:${row.dataset.tabId}`;
     });
     expect(itemOrder).toEqual(["group:8", "tab:2", "tab:1", "tab:3"]);
     expect(groupRow(8).querySelector(".tab-group-title")?.textContent).toBe("Moved latest");

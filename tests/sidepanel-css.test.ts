@@ -45,6 +45,37 @@ describe("side panel responsive CSS", () => {
     expect(css).not.toContain('url("/assets/icons/pin.svg")');
   });
 
+  it("joins expanded group headers and members without changing tab row height", () => {
+    expect(css).toMatch(/\.tab-group-main\s*{[^}]*border-radius:\s*8px/s);
+    expect(css).toMatch(
+      /\.tab-group-row\[data-collapsed=["']false["']\]\s+\.tab-group-main\s*{[^}]*border-radius:\s*8px\s+8px\s+0\s+0/s,
+    );
+    expect(css).toMatch(
+      /\.tab-row\[data-group-id\]\s*{[^}]*height:\s*var\(--tab-row-height\)[^}]*box-sizing:\s*border-box[^}]*border-inline:\s*2px\s+solid\s+var\(--member-group-color\)/s,
+    );
+    expect(css).toMatch(
+      /\.tab-row\[data-group-position=["'](?:last|single)["']\][^}]*{[^}]*border-bottom:\s*2px\s+solid\s+var\(--member-group-color\)[^}]*border-radius:\s*0\s+0\s+8px\s+8px/s,
+    );
+    expect(css).not.toMatch(/\.tab-row\[data-group-id\]\s*{[^}]*border-(?:top|block):/s);
+  });
+
+  it("maps every Chrome group color to the member border color", () => {
+    for (const color of [
+      "grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange",
+    ]) {
+      expect(css).toMatch(
+        new RegExp(`\\.tab-row\\[data-group-color=["']${color}["']\\]\\s*\\{[^}]*--member-group-color:`, "s"),
+      );
+    }
+  });
+
+  it("keeps member group borders visible in forced colors", () => {
+    const forcedColors = css.slice(css.indexOf("@media (forced-colors: active)"));
+    expect(forcedColors).toMatch(
+      /\.tab-row\[data-group-id\]\s*{[^}]*--member-group-color:\s*(?:CanvasText|Highlight)/s,
+    );
+  });
+
   it("reserves the pin column for every tab and hides ordinary pins without removing them", () => {
     expect(css).toMatch(
       /\.tab-main\s*{[^}]*grid-template-columns:\s*12px\s+16px\s+minmax\(0,\s*1fr\)/s,

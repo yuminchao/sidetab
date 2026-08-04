@@ -1,8 +1,14 @@
-import type { TabGroupViewModel } from "./tab-group-model";
+import type { TabGroupColor, TabGroupViewModel } from "./tab-group-model";
 import type { TabViewModel } from "./tab-model";
 
+export type TabGroupDecoration = {
+  groupId: number;
+  color: TabGroupColor;
+  position: "first" | "middle" | "last" | "single";
+};
+
 export type TabListItem =
-  | { kind: "tab"; tab: TabViewModel }
+  | { kind: "tab"; tab: TabViewModel; group?: TabGroupDecoration }
   | { kind: "group"; group: TabGroupViewModel };
 
 export function buildTabListItems(
@@ -17,6 +23,15 @@ export function buildTabListItems(
   const items: TabListItem[] = [];
   const emittedGroupIds = new Set<number>();
   const orderedTabs = [...tabs].sort(compareTabs);
+  const memberCounts = new Map<number, number>();
+  for (const tab of orderedTabs) {
+    if (tab.pinned) continue;
+    const group = groupsById.get(tab.groupId);
+    if (group && !group.collapsed) {
+      memberCounts.set(group.id, (memberCounts.get(group.id) ?? 0) + 1);
+    }
+  }
+  const emittedMembers = new Map<number, number>();
 
   for (const tab of orderedTabs) {
     if (tab.pinned) {
@@ -35,7 +50,21 @@ export function buildTabListItems(
       items.push({ kind: "group", group });
     }
     if (!group.collapsed) {
-      items.push({ kind: "tab", tab });
+      const ordinal = (emittedMembers.get(group.id) ?? 0) + 1;
+      emittedMembers.set(group.id, ordinal);
+      const count = memberCounts.get(group.id) ?? 0;
+      const position = count === 1
+        ? "single"
+        : ordinal === 1
+          ? "first"
+          : ordinal === count
+            ? "last"
+            : "middle";
+      items.push({
+        kind: "tab",
+        tab,
+        group: { groupId: group.id, color: group.color, position },
+      });
     }
   }
 

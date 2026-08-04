@@ -116,6 +116,99 @@ describe("buildTabListItems", () => {
     ]);
   });
 
+  it("decorates three expanded group members by position", () => {
+    const items = buildTabListItems(
+      [
+        tab({ id: 1, index: 0, groupId: 7 }),
+        tab({ id: 2, index: 1, groupId: 7 }),
+        tab({ id: 3, index: 2, groupId: 7 }),
+      ],
+      [group({ color: "green" })],
+    );
+
+    expect(items.filter((item) => item.kind === "tab")).toMatchObject([
+      { group: { groupId: 7, color: "green", position: "first" } },
+      { group: { groupId: 7, color: "green", position: "middle" } },
+      { group: { groupId: 7, color: "green", position: "last" } },
+    ]);
+  });
+
+  it("decorates an only expanded group member as single", () => {
+    const items = buildTabListItems(
+      [tab({ id: 1, groupId: 7 })],
+      [group({ color: "orange" })],
+    );
+
+    expect(items[1]).toMatchObject({
+      kind: "tab",
+      group: { groupId: 7, color: "orange", position: "single" },
+    });
+  });
+
+  it("does not decorate collapsed, ungrouped, pinned, or unknown-group tabs", () => {
+    const collapsedItems = buildTabListItems(
+      [tab({ id: 1, index: 0, groupId: 7 })],
+      [group({ collapsed: true })],
+    );
+    expect(collapsedItems).toEqual([
+      { kind: "group", group: group({ collapsed: true }) },
+    ]);
+
+    const visibleItems = buildTabListItems(
+      [
+        tab({ id: 2, index: 0, pinned: true, groupId: 8 }),
+        tab({ id: 3, index: 1 }),
+        tab({ id: 4, index: 2, groupId: 99 }),
+      ],
+      [group({ id: 8 })],
+    );
+    for (const item of visibleItems) {
+      if (item.kind === "tab") expect(item).not.toHaveProperty("group");
+    }
+  });
+
+  it("counts adjacent expanded groups independently", () => {
+    const items = buildTabListItems(
+      [
+        tab({ id: 1, index: 0, groupId: 7 }),
+        tab({ id: 2, index: 1, groupId: 7 }),
+        tab({ id: 3, index: 2, groupId: 8 }),
+        tab({ id: 4, index: 3, groupId: 8 }),
+      ],
+      [group(), group({ id: 8, color: "red" })],
+    );
+
+    expect(items.filter((item) => item.kind === "tab").map((item) =>
+      item.kind === "tab" ? item.group : undefined,
+    )).toEqual([
+      { groupId: 7, color: "blue", position: "first" },
+      { groupId: 7, color: "blue", position: "last" },
+      { groupId: 8, color: "red", position: "first" },
+      { groupId: 8, color: "red", position: "last" },
+    ]);
+  });
+
+  it("reads group membership only a linear number of times for five hundred tabs", () => {
+    let groupIdReads = 0;
+    const tabs = Array.from({ length: 500 }, (_, index) => {
+      const model = tab({ id: index + 1, index });
+      Object.defineProperty(model, "groupId", {
+        configurable: true,
+        enumerable: true,
+        get() {
+          groupIdReads += 1;
+          return 7;
+        },
+      });
+      return model;
+    });
+
+    const items = buildTabListItems(tabs, [group()]);
+
+    expect(items).toHaveLength(501);
+    expect(groupIdReads).toBeLessThanOrEqual(tabs.length * 2);
+  });
+
   it("does not mutate supplied tabs or groups", () => {
     const tabs = [tab({ id: 1, groupId: 7 })];
     const groups = [group()];

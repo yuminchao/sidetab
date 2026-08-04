@@ -1,5 +1,5 @@
 import type { TabGroupViewModel } from "./tab-group-model";
-import type { TabListItem } from "./tab-list-model";
+import type { TabGroupDecoration, TabListItem } from "./tab-list-model";
 import type { TabViewModel } from "./tab-model";
 import { createFaviconCandidates } from "./favicon-model";
 
@@ -89,7 +89,12 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
       }
       for (const preparedRow of prepared) {
         if (preparedRow.item.kind === "tab") {
-          updateTabRow(preparedRow.node, preparedRow.item.tab, dragEnabled);
+          updateTabRow(
+            preparedRow.node,
+            preparedRow.item.tab,
+            dragEnabled,
+            preparedRow.item.group,
+          );
         } else {
           updateGroupRow(preparedRow.node, preparedRow.item.group);
         }
@@ -102,7 +107,7 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
     patchTab(tab) {
       const row = tabRows.get(tab.id);
       if (row) {
-        updateTabRow(row, tab, dragEnabled);
+        patchTabRow(row, tab, dragEnabled);
       }
     },
 
@@ -203,11 +208,21 @@ function createTabRow(tab: TabViewModel, dragEnabled: boolean): HTMLElement {
   close.textContent = "×";
 
   row.append(main, close);
-  updateTabRow(row, tab, dragEnabled);
+  patchTabRow(row, tab, dragEnabled);
   return row;
 }
 
-function updateTabRow(row: HTMLElement, tab: TabViewModel, dragEnabled: boolean): void {
+function updateTabRow(
+  row: HTMLElement,
+  tab: TabViewModel,
+  dragEnabled: boolean,
+  group: TabGroupDecoration | undefined,
+): void {
+  patchTabRow(row, tab, dragEnabled);
+  updateGroupDecoration(row, group);
+}
+
+function patchTabRow(row: HTMLElement, tab: TabViewModel, dragEnabled: boolean): void {
   row.dataset.tabId = String(tab.id);
   row.dataset.active = String(tab.active);
   row.dataset.pinned = String(tab.pinned);
@@ -234,6 +249,22 @@ function updateTabRow(row: HTMLElement, tab: TabViewModel, dragEnabled: boolean)
   close.title = `关闭 ${tab.title}`;
   title.textContent = tab.title;
   updateFavicon(favicon, tab);
+}
+
+function updateGroupDecoration(
+  row: HTMLElement,
+  group: TabGroupDecoration | undefined,
+): void {
+  if (!group) {
+    delete row.dataset.groupId;
+    delete row.dataset.groupColor;
+    delete row.dataset.groupPosition;
+    return;
+  }
+
+  row.dataset.groupId = String(group.groupId);
+  row.dataset.groupColor = group.color;
+  row.dataset.groupPosition = group.position;
 }
 
 function updateRowDragState(row: HTMLElement, enabled: boolean): void {
