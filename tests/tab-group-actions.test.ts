@@ -4,29 +4,73 @@ import {
   PartialTabGroupCreationError,
   createTabGroupActions,
 } from "../src/sidepanel/tab-group-actions";
+import type { TabGroupReorderPlan } from "../src/sidepanel/tab-group-reorder-model";
 
 function createApis() {
   const create = vi.fn().mockResolvedValue({ id: 999 });
   const group = vi.fn().mockResolvedValue(7);
   const ungroup = vi.fn().mockResolvedValue(undefined);
   const update = vi.fn().mockResolvedValue(undefined);
+  const groupMove = vi.fn().mockResolvedValue(undefined);
 
   return {
     create,
     group,
     ungroup,
     update,
+    groupMove,
     actions: createTabGroupActions(
       { create, group, ungroup } as unknown as Pick<
         typeof chrome.tabs,
         "create" | "group" | "ungroup"
       >,
-      { update } as unknown as Pick<typeof chrome.tabGroups, "update">,
+      { move: groupMove, update } as unknown as Pick<
+        typeof chrome.tabGroups,
+        "move" | "update"
+      >,
     ),
   };
 }
 
 describe("tab group actions", () => {
+  it("moves a whole group with exactly one tabGroups.move call", async () => {
+    const { actions, groupMove } = createApis();
+    const reorderPlan: TabGroupReorderPlan = {
+      groupId: 7,
+      targetIndex: 12,
+      windowId: 10,
+    };
+
+    await actions.move(reorderPlan);
+
+    expect(groupMove).toHaveBeenCalledOnce();
+    expect(groupMove).toHaveBeenCalledWith(7, { index: 12, windowId: 10 });
+  });
+
+  it("maps a group move rejection and preserves its cause", async () => {
+    const { actions, groupMove } = createApis();
+    const cause = new Error("chrome failed");
+    groupMove.mockRejectedValueOnce(cause);
+
+    await expect(actions.move({ groupId: 7, targetIndex: 12, windowId: 10 }))
+      .rejects.toMatchObject({ message: "无法移动标签组", cause });
+    expect(groupMove).toHaveBeenCalledOnce();
+  });
+
+  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects an invalid group ID before moving: %s",
+    async (invalidGroupId) => {
+      const { actions, groupMove } = createApis();
+
+      await expect(actions.move({
+        groupId: invalidGroupId,
+        targetIndex: 12,
+        windowId: 10,
+      })).rejects.toThrow();
+      expect(groupMove).not.toHaveBeenCalled();
+    },
+  );
+
   it("creates a group and saves its title and color", async () => {
     const { actions, group, update } = createApis();
 

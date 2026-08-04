@@ -1,6 +1,8 @@
 import { isValidTabGroupId, type TabGroupColor } from "./tab-group-model";
+import type { TabGroupReorderPlan } from "./tab-group-reorder-model";
 
 type TabGroupActions = {
+  move(plan: TabGroupReorderPlan): Promise<void>;
   create(input: {
     tabId: number;
     windowId: number;
@@ -52,7 +54,7 @@ function assertValidTabGroupId(groupId: number): void {
 
 export function createTabGroupActions(
   tabs: Pick<typeof chrome.tabs, "create" | "group" | "ungroup">,
-  groups: Pick<typeof chrome.tabGroups, "update">,
+  groups: Pick<typeof chrome.tabGroups, "move" | "update">,
 ): TabGroupActions {
   const updateCreated = async (
     groupId: number,
@@ -69,6 +71,19 @@ export function createTabGroupActions(
   };
 
   return {
+    async move(plan): Promise<void> {
+      assertValidTabGroupId(plan.groupId);
+
+      try {
+        await groups.move(plan.groupId, {
+          index: plan.targetIndex,
+          windowId: plan.windowId,
+        });
+      } catch (cause) {
+        throw new Error("无法移动标签组", { cause });
+      }
+    },
+
     async create(input): Promise<number> {
       let groupId: number;
       try {
