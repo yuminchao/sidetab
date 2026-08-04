@@ -151,6 +151,12 @@ export function createHistorySearchController(
     title.className = "history-search-title";
     title.textContent = item.title;
     option.append(title);
+
+    const source = elements.document.createElement("span");
+    source.className = "history-search-source";
+    source.dataset.source = item.source;
+    source.textContent = item.source === "bookmark" ? "收藏夹" : "历史记录";
+    option.append(source);
     return option;
   };
 

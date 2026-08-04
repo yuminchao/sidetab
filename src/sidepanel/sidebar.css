@@ -208,7 +208,7 @@ input:focus-visible {
 
 .history-search-option {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr) auto;
   gap: 6px;
   align-items: center;
   width: 100%;
@@ -241,6 +241,28 @@ input:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.history-search-source {
+  display: inline-grid;
+  place-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.history-search-source[data-source="bookmark"] {
+  background: color-mix(in srgb, AccentColor 14%, Canvas);
+  color: color-mix(in srgb, AccentColor 78%, CanvasText);
+}
+
+.history-search-source[data-source="history"] {
+  background: color-mix(in srgb, CanvasText 8%, Canvas);
+  color: GrayText;
 }
 
 .history-search-message {

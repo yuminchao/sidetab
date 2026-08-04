@@ -205,6 +205,9 @@ describe("history search controller", () => {
     const option = results.querySelector<HTMLElement>("[role='option']")!;
     expect(option.textContent).toContain("Documentation");
     expect(option.textContent).not.toContain("https://docs.example/page");
+    const source = option.querySelector<HTMLElement>(".history-search-source")!;
+    expect(source.textContent).toBe("历史记录");
+    expect(source.dataset.source).toBe("history");
     const image = option.querySelector<HTMLImageElement>("img")!;
     expect(image.getAttribute("src")).toBe("data:image/png;base64,current");
     expect(image.dataset.nextUrl).toBe("https://docs.example/favicon.ico");
@@ -342,6 +345,14 @@ describe("history search controller", () => {
     ]);
     expect(titles).not.toContain("History Duplicate");
     expect(titles.at(-1)).toBe("History 14");
+    const sources = Array.from(
+      results.querySelectorAll<HTMLElement>(".history-search-source"),
+      (element) => ({ source: element.dataset.source, text: element.textContent }),
+    );
+    expect(sources.slice(0, 5)).toEqual(
+      Array.from({ length: 5 }, () => ({ source: "bookmark", text: "收藏夹" })),
+    );
+    expect(sources[5]).toEqual({ source: "history", text: "历史记录" });
     controller.destroy();
   });
 

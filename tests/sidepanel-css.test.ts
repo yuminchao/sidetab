@@ -123,10 +123,19 @@ describe("side panel responsive CSS", () => {
       /#history-search-results\s*{[^}]*position:\s*absolute[^}]*right:\s*6px[^}]*bottom:\s*100%[^}]*left:\s*6px[^}]*max-height:\s*360px[^}]*overflow-y:\s*auto/s,
     );
     expect(css).toMatch(
-      /\.history-search-option\s*{[^}]*grid-template-columns:\s*16px\s+minmax\(0,\s*1fr\)[^}]*height:\s*30px/s,
+      /\.history-search-option\s*{[^}]*grid-template-columns:\s*16px\s+minmax\(0,\s*1fr\)\s+auto[^}]*height:\s*30px/s,
     );
     expect(css).toMatch(
-      /\.history-search-title\s*{[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s,
+      /\.history-search-title\s*{[^}]*min-width:\s*0[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s,
+    );
+    expect(css).toMatch(
+      /\.history-search-source\s*{[^}]*display:\s*inline-grid[^}]*place-items:\s*center[^}]*height:\s*18px[^}]*padding:\s*0\s+6px[^}]*border-radius:\s*9px[^}]*font-size:\s*11px[^}]*line-height:\s*18px[^}]*white-space:\s*nowrap[^}]*flex-shrink:\s*0/s,
+    );
+    expect(css).toMatch(
+      /\.history-search-source\[data-source="bookmark"\]\s*{[^}]*background:\s*[^;}]+;[^}]*color:\s*[^;}]+;/s,
+    );
+    expect(css).toMatch(
+      /\.history-search-source\[data-source="history"\]\s*{[^}]*background:\s*[^;}]+;[^}]*color:\s*GrayText\s*;/s,
     );
     expect(css).not.toMatch(/\.history-search-option\s+\.history-search-url/s);
   });
