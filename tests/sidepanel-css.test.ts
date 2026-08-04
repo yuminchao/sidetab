@@ -132,7 +132,7 @@ describe("side panel responsive CSS", () => {
       /\.history-search-source\s*{[^}]*display:\s*inline-grid[^}]*place-items:\s*center[^}]*height:\s*18px[^}]*padding:\s*0\s+6px[^}]*border-radius:\s*9px[^}]*font-size:\s*11px[^}]*line-height:\s*18px[^}]*white-space:\s*nowrap[^}]*flex-shrink:\s*0/s,
     );
     expect(css).toMatch(
-      /\.history-search-source\[data-source="bookmark"\]\s*{[^}]*background:\s*[^;}]+;[^}]*color:\s*[^;}]+;/s,
+      /\.history-search-source\[data-source="bookmark"\]\s*{[^}]*background:\s*color-mix\(in srgb,\s*#1a73e8 14%,\s*Canvas\)[^}]*color:\s*#1558b0\s*;/s,
     );
     expect(css).toMatch(
       /\.history-search-source\[data-source="history"\]\s*{[^}]*background:\s*[^;}]+;[^}]*color:\s*GrayText\s*;/s,

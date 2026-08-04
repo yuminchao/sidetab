@@ -256,8 +256,8 @@ input:focus-visible {
 }
 
 .history-search-source[data-source="bookmark"] {
-  background: color-mix(in srgb, AccentColor 14%, Canvas);
-  color: color-mix(in srgb, AccentColor 78%, CanvasText);
+  background: color-mix(in srgb, #1a73e8 14%, Canvas);
+  color: #1558b0;
 }
 
 .history-search-source[data-source="history"] {
