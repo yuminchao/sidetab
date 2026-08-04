@@ -2489,6 +2489,39 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.remove).toHaveBeenCalledOnce();
   });
 
+  it("rejects group dragging until group move integration is available", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, groupId: 7 }),
+        fakeTab({ id: 2, index: 1, groupId: -1 }),
+      ],
+      groups: [fakeGroup({ id: 7 })],
+    });
+    const cleanup = await startSidebar(fake);
+    const source = groupRow(7);
+    const target = row(2);
+    vi.spyOn(target, "getBoundingClientRect").mockReturnValue({
+      top: 0, height: 30, bottom: 30, left: 0, right: 100, width: 100,
+      x: 0, y: 0, toJSON: () => ({}),
+    });
+
+    const started = new Event("dragstart", { bubbles: true, cancelable: true });
+    source.dispatchEvent(started);
+    const over = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.defineProperty(over, "clientY", { value: 29 });
+    target.dispatchEvent(over);
+    target.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
+    await flush();
+
+    expect(started.defaultPrevented).toBe(true);
+    expect(over.defaultPrevented).toBe(false);
+    expect(element("tab-list").querySelector("[data-drag-group-source], [data-drop-placement], [data-drop-target]")).toBeNull();
+    expect(fake.methods.move).not.toHaveBeenCalled();
+    expect(fake.methods.update).not.toHaveBeenCalled();
+    expect(fake.methods.group).not.toHaveBeenCalled();
+    cleanup();
+  });
+
   it("resyncs once when a cross-group drag fails", async () => {
     const fake = createFakeChrome({
       tabs: [

@@ -29,18 +29,8 @@ type GroupDragHandlers = {
   onDrop(intent: TabDragIntent): void;
 };
 
-type LegacyTabIntent = Extract<TabDragIntent, { kind: "tab" }>;
-
 export function createTabDragController(
   { list, viewport }: { list: HTMLElement; viewport: Window },
-  { canStartGroupDrag, onDrop }: GroupDragHandlers,
-): TabDragController;
-export function createTabDragController(
-  { list }: { list: HTMLElement },
-  { onDrop }: { onDrop(intent: LegacyTabIntent): void },
-): TabDragController;
-export function createTabDragController(
-  { list, viewport = window }: { list: HTMLElement; viewport?: Window },
   {
     canStartGroupDrag = () => true,
     onDrop,

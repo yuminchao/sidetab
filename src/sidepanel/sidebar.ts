@@ -616,9 +616,11 @@ async function startSidebarInternal(
   );
 
   const dragController = createTabDragController(
-    { list: elements.list },
+    { list: elements.list, viewport: deps.document.defaultView! },
     {
+      canStartGroupDrag: () => false,
       onDrop(intent) {
+        if (intent.kind !== "tab") return;
         if (reorderBusy) return;
         const plan = createTabReorderPlan(
           tabStore.list(), intent.sourceId, intent.target,
