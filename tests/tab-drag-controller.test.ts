@@ -119,6 +119,31 @@ describe("tab drag controller", () => {
   });
 
   it.each([
+    ["group", () => groups.get(7)!, () => tabs.get(6)!],
+    ["tab", () => tabs.get(3)!, () => tabs.get(6)!],
+  ])("clears %s drag state before propagating a synchronous drop callback error", (_kind, source, target) => {
+    const callbackError = new Error("drop callback failed");
+    const reportedErrors: unknown[] = [];
+    const onError = (event: ErrorEvent): void => {
+      reportedErrors.push(event.error);
+      event.preventDefault();
+    };
+    window.addEventListener("error", onError);
+    const { controller } = create(vi.fn(() => { throw callbackError; }));
+
+    try {
+      drag(source(), "dragstart");
+      drag(target(), "dragover", 11);
+      drag(target(), "drop", 11);
+      expect(reportedErrors).toEqual([callbackError]);
+      expect(list.querySelector(dirtySelector)).toBeNull();
+    } finally {
+      window.removeEventListener("error", onError);
+      controller.destroy();
+    }
+  });
+
+  it.each([
     ["a pinned tab", () => tabs.get(1)!],
     ["its own header", () => groups.get(7)!],
     ["one of its own members", () => tabs.get(2)!],

@@ -252,13 +252,16 @@ export function createTabDragController(
       clear();
       return;
     }
+    const intent: TabDragIntent = source.kind === "tab"
+      ? { kind: "tab", sourceId: source.id, target: target.intentTarget as TabDropTarget }
+      : {
+          kind: "group",
+          sourceGroupId: source.id,
+          target: target.intentTarget as GroupDropTarget,
+        };
     event.preventDefault();
-    if (source.kind === "tab") {
-      onDrop({ kind: "tab", sourceId: source.id, target: target.intentTarget as TabDropTarget });
-    } else {
-      onDrop({ kind: "group", sourceGroupId: source.id, target: target.intentTarget as GroupDropTarget });
-    }
     clear();
+    onDrop(intent);
   };
 
   const onDragLeave = (event: DragEvent): void => {
