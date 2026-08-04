@@ -27,6 +27,8 @@ import { TabGroupStore } from "./tab-group-store";
 import { buildTabListItems } from "./tab-list-model";
 import { createTabMiddleClickController } from "./tab-middle-click";
 import { createTabReorderPlan } from "./tab-reorder-model";
+import { createTabGroupReorderPlan } from "./tab-group-reorder-model";
+import type { TabDragIntent } from "./tab-drag-controller";
 import { createTabRenderer } from "./tab-renderer";
 import { TabStore } from "./tab-store";
 import {
@@ -442,6 +444,7 @@ async function startSidebarInternal(
   };
 
   let groupContextMenu: ReturnType<typeof createTabGroupContextMenu> | undefined;
+  let dragController: ReturnType<typeof createTabDragController>;
   const contextMenu = createTabContextMenu(
     { document: deps.document, list: elements.list, viewport: deps.document.defaultView! },
     {
@@ -533,6 +536,7 @@ async function startSidebarInternal(
     start: () => Promise<void>,
   ): Promise<void> => {
     if (!active || groupCommandBusy.has(groupId) || groupToggleBusy.has(groupId)) return;
+    dragController?.cancelForGroup(groupId);
     groupCommandBusy.add(groupId);
     const generation = ++operationGeneration;
     try {
@@ -551,6 +555,7 @@ async function startSidebarInternal(
       throw error;
     } finally {
       groupCommandBusy.delete(groupId);
+      dragController?.cancelForGroup(groupId);
     }
   };
 
@@ -615,12 +620,28 @@ async function startSidebarInternal(
     },
   );
 
-  const dragController = createTabDragController(
+  dragController = createTabDragController(
     { list: elements.list, viewport: deps.document.defaultView! },
     {
-      canStartGroupDrag: () => false,
-      onDrop(intent) {
-        if (intent.kind !== "tab") return;
+      canStartGroupDrag: (groupId) =>
+        Boolean(groupStore.get(groupId))
+        && !groupCommandBusy.has(groupId)
+        && !groupToggleBusy.has(groupId),
+      onDrop(intent: TabDragIntent) {
+        if (intent.kind === "group") {
+          const groupId = intent.sourceGroupId;
+          if (groupCommandBusy.has(groupId) || groupToggleBusy.has(groupId)) return;
+          const plan = createTabGroupReorderPlan(
+            tabStore.list(),
+            groupStore.list(),
+            groupId,
+            intent.target,
+          );
+          if (!plan) return;
+          void executeGroupCommand(groupId, () => groupActions.move(plan))
+            .catch(() => undefined);
+          return;
+        }
         if (reorderBusy) return;
         const plan = createTabReorderPlan(
           tabStore.list(), intent.sourceId, intent.target,
@@ -744,9 +765,13 @@ async function startSidebarInternal(
         groupCommandBusy.has(group.id)
       ) return;
       groupToggleBusy.add(group.id);
+      dragController?.cancelForGroup(group.id);
       runTabOperation(
         groupActions.setCollapsed(group.id, !group.collapsed),
-        () => groupToggleBusy.delete(group.id),
+        () => {
+          groupToggleBusy.delete(group.id);
+          dragController?.cancelForGroup(group.id);
+        },
         () => { void resyncTabsAndGroups(); },
       );
       return;
@@ -961,6 +986,7 @@ async function startSidebarInternal(
     removed(groupId: number) {
       groupContextMenu?.closeForGroup(groupId);
       groupRenameDialog.closeForGroup(groupId);
+      dragController?.cancelForGroup(groupId);
       applyEvent(
         () => {
           groupStore.remove(groupId);

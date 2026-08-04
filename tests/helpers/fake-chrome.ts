@@ -196,6 +196,39 @@ export function createFakeChrome(options: {
     groupState[index] = updated;
     return updated;
   });
+  const groupMove = vi.fn(async (
+    groupId: number,
+    properties: chrome.tabGroups.MoveProperties,
+  ) => {
+    const groupIndex = groupState.findIndex((group) => group.id === groupId);
+    const group = groupState[groupIndex];
+    if (!group) throw new Error("group not found");
+    const members = tabState
+      .filter((tab) => tab.groupId === groupId)
+      .sort((left, right) => left.index - right.index);
+    if (members.length === 0) return group;
+    const destinationWindowId = properties.windowId ?? group.windowId;
+    const destinationTabs = tabState
+      .filter((tab) => tab.windowId === destinationWindowId && tab.groupId !== groupId)
+      .sort((left, right) => left.index - right.index);
+    const insertionIndex = Math.max(0, Math.min(properties.index, destinationTabs.length));
+    const ordered = [
+      ...destinationTabs.slice(0, insertionIndex),
+      ...members.map((tab) => ({ ...tab, windowId: destinationWindowId })),
+      ...destinationTabs.slice(insertionIndex),
+    ];
+    const otherTabs = tabState.filter(
+      (tab) => tab.groupId !== groupId && tab.windowId !== destinationWindowId,
+    );
+    tabState = [...otherTabs, ...ordered].map((tab, index, all) => {
+      const windowTabs = all.filter((candidate) => candidate.windowId === tab.windowId);
+      const windowIndex = windowTabs.indexOf(tab);
+      return { ...tab, index: windowIndex };
+    });
+    const updated = { ...group, windowId: destinationWindowId };
+    groupState[groupIndex] = updated;
+    return updated;
+  });
   const getCurrent = vi.fn(async () => options.currentWindow ?? ({ id: 10 } as chrome.windows.Window));
   const storageGet = vi.fn(async (_key: string) => options.stored ?? {});
   const storageSet = vi.fn<(items: Record<string, unknown>) => Promise<void>>(
@@ -232,6 +265,7 @@ export function createFakeChrome(options: {
       query: groupQuery,
       get: groupGet,
       update: groupUpdate,
+      move: groupMove,
     } as unknown as typeof chrome.tabGroups,
     windows: { getCurrent } as Pick<typeof chrome.windows, "getCurrent">,
     bookmarks: { search: bookmarkSearch } as Pick<typeof chrome.bookmarks, "search">,
@@ -259,6 +293,7 @@ export function createFakeChrome(options: {
       groupQuery,
       groupGet,
       groupUpdate,
+      groupMove,
       getCurrent,
       bookmarkSearch,
       historySearch,

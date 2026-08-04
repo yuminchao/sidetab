@@ -2489,7 +2489,7 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.remove).toHaveBeenCalledOnce();
   });
 
-  it("rejects group dragging until group move integration is available", async () => {
+  it("moves a group through the group move API", async () => {
     const fake = createFakeChrome({
       tabs: [
         fakeTab({ id: 1, index: 0, groupId: 7 }),
@@ -2513,12 +2513,10 @@ describe("sidebar lifecycle", () => {
     target.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
     await flush();
 
-    expect(started.defaultPrevented).toBe(true);
-    expect(over.defaultPrevented).toBe(false);
+    expect(started.defaultPrevented).toBe(false);
+    expect(over.defaultPrevented).toBe(true);
     expect(element("tab-list").querySelector("[data-drag-group-source], [data-drop-placement], [data-drop-target]")).toBeNull();
-    expect(fake.methods.move).not.toHaveBeenCalled();
-    expect(fake.methods.update).not.toHaveBeenCalled();
-    expect(fake.methods.group).not.toHaveBeenCalled();
+    expect(fake.methods.groupMove).toHaveBeenCalledWith(7, { index: 1, windowId: 10 });
     cleanup();
   });
 
