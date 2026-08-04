@@ -281,11 +281,20 @@ export function createHistorySearchController(
     }
   };
 
-  const onResultsClick = (event: MouseEvent): void => {
-    const option = event.target instanceof Element
-      ? event.target.closest<HTMLElement>("[data-history-index]")
+  const findResultOption = (target: EventTarget | null): HTMLElement | null => {
+    const option = target instanceof Element
+      ? target.closest<HTMLElement>("[data-history-index]")
       : null;
-    if (!option || !elements.results.contains(option)) return;
+    return option && elements.results.contains(option) ? option : null;
+  };
+
+  const onResultsPointerDown = (event: PointerEvent): void => {
+    if (event.button === 0 && findResultOption(event.target)) event.preventDefault();
+  };
+
+  const onResultsClick = (event: MouseEvent): void => {
+    const option = findResultOption(event.target);
+    if (!option) return;
     void openResult(Number(option.dataset.historyIndex));
   };
 
@@ -318,6 +327,7 @@ export function createHistorySearchController(
   elements.input.addEventListener("click", reopen);
   elements.input.addEventListener("input", onInput);
   elements.input.addEventListener("keydown", onKeyDown);
+  elements.results.addEventListener("pointerdown", onResultsPointerDown);
   elements.results.addEventListener("click", onResultsClick);
   elements.results.addEventListener("error", onImageError, true);
   elements.document.addEventListener("pointerdown", onDocumentPointerDown);
@@ -343,6 +353,7 @@ export function createHistorySearchController(
       elements.input.removeEventListener("click", reopen);
       elements.input.removeEventListener("input", onInput);
       elements.input.removeEventListener("keydown", onKeyDown);
+      elements.results.removeEventListener("pointerdown", onResultsPointerDown);
       elements.results.removeEventListener("click", onResultsClick);
       elements.results.removeEventListener("error", onImageError, true);
       elements.document.removeEventListener("pointerdown", onDocumentPointerDown);

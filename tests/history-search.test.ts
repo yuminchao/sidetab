@@ -160,6 +160,23 @@ async function flush(): Promise<void> {
   await Promise.resolve();
 }
 
+async function slowPrimaryClick(
+  input: HTMLInputElement,
+  target: HTMLElement,
+): Promise<MouseEvent> {
+  const pointerDown = new MouseEvent("pointerdown", {
+    button: 0,
+    bubbles: true,
+    cancelable: true,
+  });
+  target.dispatchEvent(pointerDown);
+  if (!pointerDown.defaultPrevented) input.blur();
+  await vi.advanceTimersByTimeAsync(0);
+  target.click();
+  await flush();
+  return pointerDown;
+}
+
 describe("history search controller", () => {
   let input: HTMLInputElement;
   let results: HTMLElement;
@@ -492,6 +509,7 @@ describe("history search controller", () => {
     await flush();
     expect(onOpen).toHaveBeenCalledWith("https://bookmark.example/");
     expect(onOpenError).toHaveBeenCalledWith("无法打开搜索结果");
+    expect(input.value).toBe("keep");
     expect(results.hidden).toBe(false);
 
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
@@ -688,6 +706,121 @@ describe("history search controller", () => {
     expect(onOpen).toHaveBeenCalledWith("https://one.example/");
     expect(results.hidden).toBe(true);
     controller.destroy();
+  });
+
+  it("opens a history result after a slow primary-button click", async () => {
+    vi.useFakeTimers();
+    const onOpen = vi.fn(async () => undefined);
+    const search = vi.fn(async () => [
+      historyItem("1", "https://history.example/", "History"),
+    ]);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      { bookmarks: emptyBookmarks(), history: { search }, onOpen },
+    );
+
+    input.value = "history";
+    input.focus();
+    await flush();
+    const option = results.querySelector<HTMLButtonElement>("[role='option']")!;
+    const pointerDown = await slowPrimaryClick(input, option);
+
+    expect.soft(pointerDown.defaultPrevented).toBe(true);
+    expect.soft(onOpen).toHaveBeenCalledOnce();
+    expect(onOpen).toHaveBeenCalledWith("https://history.example/");
+    expect(input.value).toBe("");
+    expect(results.hidden).toBe(true);
+    controller.destroy();
+  });
+
+  it("opens a bookmark result after a slow primary-button click", async () => {
+    vi.useFakeTimers();
+    const onOpen = vi.fn(async () => undefined);
+    const bookmarkSearch = vi.fn(async () => [
+      bookmark("bookmark", "https://bookmark.example/", "Bookmark"),
+    ]);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      {
+        bookmarks: { search: bookmarkSearch },
+        history: { search: vi.fn(async () => []) },
+        onOpen,
+      },
+    );
+
+    input.value = "bookmark";
+    input.focus();
+    await flush();
+    const option = results.querySelector<HTMLButtonElement>("[role='option']")!;
+    const pointerDown = await slowPrimaryClick(input, option);
+
+    expect.soft(pointerDown.defaultPrevented).toBe(true);
+    expect.soft(onOpen).toHaveBeenCalledOnce();
+    expect(onOpen).toHaveBeenCalledWith("https://bookmark.example/");
+    expect(input.value).toBe("");
+    expect(results.hidden).toBe(true);
+    controller.destroy();
+  });
+
+  it("does not prevent non-primary or results-background pointerdown", async () => {
+    const search = vi.fn(async () => [
+      historyItem("1", "https://history.example/", "History"),
+    ]);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      {
+        bookmarks: emptyBookmarks(),
+        history: { search },
+        onOpen: vi.fn(async () => undefined),
+      },
+    );
+
+    input.focus();
+    await flush();
+    const option = results.querySelector<HTMLButtonElement>("[role='option']")!;
+    const nonPrimary = new MouseEvent("pointerdown", {
+      button: 1,
+      bubbles: true,
+      cancelable: true,
+    });
+    option.dispatchEvent(nonPrimary);
+    const background = new MouseEvent("pointerdown", {
+      button: 0,
+      bubbles: true,
+      cancelable: true,
+    });
+    results.dispatchEvent(background);
+
+    expect(nonPrimary.defaultPrevented).toBe(false);
+    expect(background.defaultPrevented).toBe(false);
+    controller.destroy();
+  });
+
+  it("stops preventing result pointerdown after destroy", async () => {
+    const search = vi.fn(async () => [
+      historyItem("1", "https://history.example/", "History"),
+    ]);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      {
+        bookmarks: emptyBookmarks(),
+        history: { search },
+        onOpen: vi.fn(async () => undefined),
+      },
+    );
+
+    input.focus();
+    await flush();
+    const option = results.querySelector<HTMLButtonElement>("[role='option']")!;
+    controller.destroy();
+    const pointerDown = new MouseEvent("pointerdown", {
+      button: 0,
+      bubbles: true,
+      cancelable: true,
+    });
+    option.dispatchEvent(pointerDown);
+
+    expect(pointerDown.defaultPrevented).toBe(false);
   });
 
   it("clears a pending blur close when destroyed", async () => {
