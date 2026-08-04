@@ -1627,7 +1627,7 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
-  it("renders grouped tabs and patches metadata without rebuilding the list", async () => {
+  it("renders grouped tabs and rebuilds decoration only for structural metadata", async () => {
     const fake = createFakeChrome({
       tabs: [
         fakeTab({ id: 1, index: 0, groupId: 7, title: "Grouped" }),
@@ -1638,6 +1638,23 @@ describe("sidebar lifecycle", () => {
     const cleanup = await startSidebar(fake);
     const originalGroup = groupRow(7);
     const originalGroupedTab = row(1);
+    const list = element("tab-list");
+    const nativeChildren = Object.getOwnPropertyDescriptor(Element.prototype, "children")?.get;
+    if (!nativeChildren) throw new Error("missing native children getter");
+    let childrenReads = 0;
+    Object.defineProperty(list, "children", {
+      configurable: true,
+      get() {
+        childrenReads += 1;
+        return nativeChildren.call(list);
+      },
+    });
+
+    fake.groupEvents.onUpdated.emit(fakeGroup({ id: 7, title: "Renamed", color: "blue" }));
+
+    expect(childrenReads).toBe(0);
+    expect(groupRow(7).querySelector(".tab-group-title")?.textContent).toBe("Renamed");
+    Reflect.deleteProperty(list, "children");
 
     fake.groupEvents.onUpdated.emit(fakeGroup({ id: 7, title: "Renamed", color: "red" }));
 
@@ -1645,6 +1662,7 @@ describe("sidebar lifecycle", () => {
     expect(row(1)).toBe(originalGroupedTab);
     expect(groupRow(7).querySelector(".tab-group-title")?.textContent).toBe("Renamed");
     expect(groupRow(7).dataset.groupColor).toBe("red");
+    expect(row(1).dataset.groupColor).toBe("red");
 
     fake.groupEvents.onUpdated.emit(fakeGroup({ id: 7, title: "Renamed", collapsed: true }));
     expect(groupRow(7)).toBe(originalGroup);

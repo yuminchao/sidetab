@@ -936,7 +936,11 @@ async function startSidebarInternal(
         },
         () => {
           if (!model) return;
-          if (!previous || previous.collapsed !== model.collapsed) {
+          if (
+            !previous ||
+            previous.collapsed !== model.collapsed ||
+            previous.color !== model.color
+          ) {
             renderTabList();
           } else {
             tabRenderer.patchGroup(model);
