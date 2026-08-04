@@ -74,7 +74,7 @@
 
 ## 构建产物
 
-- [ ] 本次待上传文件为 `release/sidetab-lite-0.9.0.zip`。
+- [ ] 本次待上传文件为 `release/sidetab-lite-0.10.0.zip`。
 - [ ] `npm run package` 完整通过。
 - [ ] `dist` 和 ZIP 精确包含 14 个审核文件，图标资源为 4 个 PNG 与 4 个 SVG（固定、网络兜底、搜索、设置），不包含 `assets/icons/add-tab.svg` 及 `assets/shortcuts/openai.png`、`google.png`、`github.png`。
 - [ ] ZIP 根目录直接包含 `manifest.json`，不包含 `dist/` 顶层目录。

@@ -30,6 +30,7 @@ describe("extension manifest", () => {
     const checklist = readFileSync("docs/chrome-web-store-checklist.md", "utf8");
     const updateLog = readFileSync("update.log", "utf8");
     expect(readme).toContain("release/sidetab-lite-0.10.0.zip");
+    expect(checklist).toContain("release/sidetab-lite-0.10.0.zip");
     for (const detail of [
       "收藏夹",
       "历史记录",
@@ -41,6 +42,10 @@ describe("extension manifest", () => {
       "无新增权限",
       "无新增查询",
       "无新增轮询",
+      "失败只执行一次合并重同步",
+      "O(n)",
+      "无长期缓存",
+      "无远程代码",
       "0.10.0",
     ]) {
       expect(updateLog).toContain(detail);
@@ -149,6 +154,10 @@ describe("extension manifest", () => {
       "无新增权限",
       "无新增查询",
       "无新增轮询",
+      "失败只执行一次合并重同步",
+      "O(n)",
+      "无长期缓存",
+      "无远程代码",
     ]) {
       expect(currentRelease).toContain(detail);
     }
