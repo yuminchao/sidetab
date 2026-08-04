@@ -4,6 +4,23 @@ import { describe, expect, it } from "vitest";
 
 const css = readFileSync("src/sidepanel/sidebar.css", "utf8");
 
+function relativeLuminance(hex: string): number {
+  const channels = hex.match(/[0-9a-f]{2}/gi)?.map((channel) => parseInt(channel, 16) / 255);
+  if (!channels || channels.length !== 3) throw new Error(`Invalid hex color: ${hex}`);
+  const linear = channels.map((channel) =>
+    channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
+  );
+  return 0.2126 * linear[0]! + 0.7152 * linear[1]! + 0.0722 * linear[2]!;
+}
+
+function contrastRatio(first: string, second: string): number {
+  const firstLuminance = relativeLuminance(first);
+  const secondLuminance = relativeLuminance(second);
+  const lighter = Math.max(firstLuminance, secondLuminance);
+  const darker = Math.min(firstLuminance, secondLuminance);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
 describe("side panel responsive CSS", () => {
   it("stacks editor fields and actions by 340px", () => {
     const mediaStart = css.indexOf("@media (max-width: 340px)");
@@ -138,6 +155,16 @@ describe("side panel responsive CSS", () => {
       /\.history-search-source\[data-source="history"\]\s*{[^}]*background:\s*[^;}]+;[^}]*color:\s*GrayText\s*;/s,
     );
     expect(css).not.toMatch(/\.history-search-option\s+\.history-search-url/s);
+  });
+
+  it("uses a high-contrast fixed blue bookmark source in dark mode", () => {
+    const darkBackground = "#174ea6";
+    const darkColor = "#d2e3fc";
+
+    expect(css).toMatch(
+      /@media\s*\(prefers-color-scheme:\s*dark\)\s*{[\s\S]*?\.history-search-source\[data-source="bookmark"\]\s*{[^}]*background:\s*#174ea6\s*;[^}]*color:\s*#d2e3fc\s*;/s,
+    );
+    expect(contrastRatio(darkBackground, darkColor)).toBeGreaterThanOrEqual(4.5);
   });
 
   it("uses a compact bottom toolbar and reveals close controls accessibly", () => {
