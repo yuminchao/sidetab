@@ -730,6 +730,18 @@ describe("tab renderer", () => {
     expect(groupRow.draggable).toBe(false);
   });
 
+  it("keeps group rows draggable when only tab dragging is disabled", () => {
+    const renderer = createTabRenderer({ list, empty });
+    renderer.render([groupItem(), tabItem({ groupId: 3 })]);
+    const groupRow = list.firstElementChild as HTMLElement;
+    const tabRow = list.lastElementChild as HTMLElement;
+
+    renderer.setTabDragEnabled(false);
+
+    expect(tabRow.draggable).toBe(false);
+    expect(groupRow.draggable).toBe(true);
+  });
+
   it("does not expose tab title text in the favicon fallback", () => {
     const renderer = createTabRenderer({ list, empty });
 

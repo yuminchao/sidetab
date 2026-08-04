@@ -2551,7 +2551,9 @@ describe("sidebar lifecycle", () => {
         fakeTab({ id: 1, index: 0, pinned: true }),
         fakeTab({ id: 2, index: 1 }),
         fakeTab({ id: 3, index: 2 }),
+        fakeTab({ id: 4, index: 3, groupId: 7 }),
       ],
+      groups: [fakeGroup({ id: 7 })],
     });
     fake.methods.move.mockReturnValueOnce(pendingMove.promise);
     const cleanup = await startSidebar(fake);
@@ -2569,6 +2571,7 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.update).toHaveBeenCalledWith(3, { pinned: true });
     expect(fake.methods.move).toHaveBeenCalledWith(3, { index: 1 });
     expect(row(1).draggable).toBe(false);
+    expect(groupRow(7).draggable).toBe(true);
 
     pendingMove.resolve(fakeTab({ id: 3, index: 1, pinned: true }));
     await flush();

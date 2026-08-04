@@ -440,7 +440,7 @@ async function startSidebarInternal(
   };
 
   const updateDragEnabled = (): void => {
-    tabRenderer.setDragEnabled(!reorderBusy);
+    tabRenderer.setTabDragEnabled(!reorderBusy);
   };
 
   let groupContextMenu: ReturnType<typeof createTabGroupContextMenu> | undefined;

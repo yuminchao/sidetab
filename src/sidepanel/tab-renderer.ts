@@ -14,11 +14,13 @@ export type TabRenderer = {
   patchGroup(group: TabGroupViewModel): void;
   removeTab(id: number): void;
   setDragEnabled(enabled: boolean): void;
+  setTabDragEnabled(enabled: boolean): void;
   destroy(): void;
 };
 
 export function createTabRenderer({ list, empty }: TabRendererElements): TabRenderer {
   let dragEnabled = true;
+  let tabDragEnabled = true;
   let tabRows = new Map<number, HTMLElement>();
   let groupRows = new Map<number, HTMLElement>();
   const onFaviconError = (event: Event) => {
@@ -62,7 +64,7 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
           if (nextTabRows.has(item.tab.id)) {
             throw new Error(`重复标签 ID: ${item.tab.id}`);
           }
-          const row = tabRows.get(item.tab.id) ?? createTabRow(item.tab, dragEnabled);
+          const row = tabRows.get(item.tab.id) ?? createTabRow(item.tab, tabDragEnabled);
           nextTabRows.set(item.tab.id, row);
           prepared.push({ node: row, item });
         } else {
@@ -92,7 +94,7 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
           updateTabRow(
             preparedRow.node,
             preparedRow.item.tab,
-            dragEnabled,
+            tabDragEnabled,
             preparedRow.item.group,
           );
         } else {
@@ -107,7 +109,7 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
     patchTab(tab) {
       const row = tabRows.get(tab.id);
       if (row) {
-        patchTabRow(row, tab, dragEnabled);
+        patchTabRow(row, tab, tabDragEnabled);
       }
     },
 
@@ -127,10 +129,18 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
 
     setDragEnabled(enabled) {
       dragEnabled = enabled;
+      tabDragEnabled = enabled;
       for (const row of tabRows.values()) {
         updateRowDragState(row, enabled);
       }
       for (const row of groupRows.values()) {
+        updateRowDragState(row, enabled);
+      }
+    },
+
+    setTabDragEnabled(enabled) {
+      tabDragEnabled = enabled;
+      for (const row of tabRows.values()) {
         updateRowDragState(row, enabled);
       }
     },
