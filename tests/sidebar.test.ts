@@ -2520,6 +2520,40 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
+  it("releases a pending group move when Chrome emits moved first", async () => {
+    const pending = deferred<chrome.tabGroups.TabGroup>();
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 1, index: 0, groupId: 7 }), fakeTab({ id: 2, index: 1 })],
+      groups: [fakeGroup({ id: 7 })],
+    });
+    fake.methods.groupMove.mockReturnValueOnce(pending.promise);
+    const cleanup = await startSidebar(fake);
+    const target = row(2);
+    vi.spyOn(target, "getBoundingClientRect").mockReturnValue({
+      top: 0, height: 30, bottom: 30, left: 0, right: 100, width: 100,
+      x: 0, y: 0, toJSON: () => ({}),
+    });
+    const drop = (): void => {
+      groupRow(7).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
+      const over = new Event("dragover", { bubbles: true, cancelable: true });
+      Object.defineProperty(over, "clientY", { value: 29 });
+      target.dispatchEvent(over);
+      target.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
+    };
+
+    drop();
+    await flush();
+    expect(fake.methods.groupMove).toHaveBeenCalledOnce();
+    fake.groupEvents.onMoved.emit(fakeGroup({ id: 7 }));
+    drop();
+    await flush();
+    expect(fake.methods.groupMove).toHaveBeenCalledTimes(2);
+    pending.resolve(fakeGroup({ id: 7 }));
+    await flush();
+    expect(fake.methods.groupQuery).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
   it("resyncs once when a cross-group drag fails", async () => {
     const fake = createFakeChrome({
       tabs: [

@@ -133,6 +133,8 @@ async function startSidebarInternal(
   const groupTabBusy = new Set<number>();
   const groupToggleBusy = new Set<number>();
   const groupCommandBusy = new Set<number>();
+  const pendingGroupMoves = new Map<number, number>();
+  const groupMovesCompletedByEvent = new Map<number, number>();
   const statusSlots = {
     tabs: "",
     groups: "",
@@ -534,27 +536,44 @@ async function startSidebarInternal(
   const executeGroupCommand = async (
     groupId: number,
     start: () => Promise<void>,
+    moveGroupId?: number,
   ): Promise<void> => {
     if (!active || groupCommandBusy.has(groupId) || groupToggleBusy.has(groupId)) return;
     dragController?.cancelForGroup(groupId);
     groupCommandBusy.add(groupId);
     const generation = ++operationGeneration;
+    let completedByEvent = false;
     try {
       await start();
-      if (active && generation === operationGeneration) setStatus("operation", "");
+      if (
+        active
+        && generation === operationGeneration
+        && !(groupMovesCompletedByEvent.get(groupId) ?? 0)
+      ) setStatus("operation", "");
+      const completed = groupMovesCompletedByEvent.get(groupId) ?? 0;
+      completedByEvent = completed > 0;
+      if (completedByEvent) groupMovesCompletedByEvent.set(groupId, completed - 1);
     } catch (error) {
       if (active) {
-        if (generation === operationGeneration) {
+        const completed = groupMovesCompletedByEvent.get(groupId) ?? 0;
+        completedByEvent = completed > 0;
+        if (completedByEvent) groupMovesCompletedByEvent.set(groupId, completed - 1);
+        if (generation === operationGeneration && !completedByEvent) {
           setStatus(
             "operation",
             error instanceof Error ? error.message : "标签组操作失败",
           );
         }
-        void resyncTabsAndGroups();
+        if (!completedByEvent) void resyncTabsAndGroups();
       }
       throw error;
     } finally {
-      groupCommandBusy.delete(groupId);
+      if (moveGroupId !== undefined && !completedByEvent) {
+        const pending = pendingGroupMoves.get(moveGroupId) ?? 0;
+        if (pending <= 1) pendingGroupMoves.delete(moveGroupId);
+        else pendingGroupMoves.set(moveGroupId, pending - 1);
+      }
+      if (!(pendingGroupMoves.get(groupId) ?? 0)) groupCommandBusy.delete(groupId);
       dragController?.cancelForGroup(groupId);
     }
   };
@@ -638,7 +657,8 @@ async function startSidebarInternal(
             intent.target,
           );
           if (!plan) return;
-          void executeGroupCommand(groupId, () => groupActions.move(plan))
+          pendingGroupMoves.set(groupId, (pendingGroupMoves.get(groupId) ?? 0) + 1);
+          void executeGroupCommand(groupId, () => groupActions.move(plan), groupId)
             .catch(() => undefined);
           return;
         }
@@ -714,6 +734,8 @@ async function startSidebarInternal(
       return;
     }
     active = false;
+    pendingGroupMoves.clear();
+    groupMovesCompletedByEvent.clear();
     unsubscribeTabs();
     unsubscribeGroups();
     bufferingEvents = false;
@@ -979,6 +1001,17 @@ async function startSidebarInternal(
       applyEvent(
         () => {
           if (currentWindowId !== undefined) groupStore.put(group, currentWindowId);
+          const pending = pendingGroupMoves.get(group.id) ?? 0;
+          if (pending > 0) {
+            if (pending === 1) pendingGroupMoves.delete(group.id);
+            else pendingGroupMoves.set(group.id, pending - 1);
+            groupCommandBusy.delete(group.id);
+            groupMovesCompletedByEvent.set(
+              group.id,
+              (groupMovesCompletedByEvent.get(group.id) ?? 0) + 1,
+            );
+            dragController?.cancelForGroup(group.id);
+          }
         },
         renderTabList,
       );
