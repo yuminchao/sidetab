@@ -119,7 +119,8 @@ describe("tab renderer", () => {
     expect(row?.querySelector(".tab-group-color")).toBeNull();
     expect(row?.querySelector(".tab-group-title")?.textContent).toBe("未命名分组");
     expect(row?.querySelector(".tab-group-count")).toBeNull();
-    expect(row?.draggable).toBe(false);
+    expect(row?.draggable).toBe(true);
+    expect(button?.draggable).toBe(false);
   });
 
   it("writes group decoration datasets when creating a tab row", () => {
@@ -229,7 +230,7 @@ describe("tab renderer", () => {
     expect(list.children[0]).toBe(groupRow);
     expect(list.children[1]).toBe(firstTabRow);
     expect(secondTabRow.isConnected).toBe(false);
-    expect(groupRow.draggable).toBe(false);
+    expect(groupRow.draggable).toBe(true);
     expect(groupRow.title).toBe("");
     expect(firstTabRow.querySelector(".tab-title")?.textContent).toBe("Updated");
     expect(firstTabRow.draggable).toBe(true);
@@ -708,6 +709,25 @@ describe("tab renderer", () => {
     renderer.patchTab(tab({ title: "Patched" }));
     expect(rerendered.draggable).toBe(true);
     expect(rerendered.title).toBe("");
+  });
+
+  it("toggles drag availability for created and reused group rows", () => {
+    const renderer = createTabRenderer({ list, empty });
+    renderer.setDragEnabled(false);
+    renderer.render([groupItem(), tabItem({ groupId: 3 })]);
+    const groupRow = list.firstElementChild as HTMLElement;
+    const groupMain = groupRow.querySelector<HTMLElement>(".tab-group-main")!;
+    expect(groupRow.draggable).toBe(false);
+    expect(groupMain.draggable).toBe(false);
+
+    renderer.setDragEnabled(true);
+    renderer.render([groupItem({ title: "Reused" }), tabItem({ groupId: 3 })]);
+    expect(list.firstElementChild).toBe(groupRow);
+    expect(groupRow.draggable).toBe(true);
+    expect(groupMain.draggable).toBe(false);
+
+    renderer.setDragEnabled(false);
+    expect(groupRow.draggable).toBe(false);
   });
 
   it("does not expose tab title text in the favicon fallback", () => {

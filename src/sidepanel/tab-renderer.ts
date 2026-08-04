@@ -69,7 +69,7 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
           if (nextGroupRows.has(item.group.id)) {
             throw new Error(`重复分组 ID: ${item.group.id}`);
           }
-          const row = groupRows.get(item.group.id) ?? createGroupRow(item.group);
+          const row = groupRows.get(item.group.id) ?? createGroupRow(item.group, dragEnabled);
           nextGroupRows.set(item.group.id, row);
           prepared.push({ node: row, item });
         }
@@ -96,7 +96,7 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
             preparedRow.item.group,
           );
         } else {
-          updateGroupRow(preparedRow.node, preparedRow.item.group);
+          updateGroupRow(preparedRow.node, preparedRow.item.group, dragEnabled);
         }
       }
       tabRows = nextTabRows;
@@ -114,7 +114,7 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
     patchGroup(group) {
       const row = groupRows.get(group.id);
       if (row) {
-        updateGroupRow(row, group);
+        updateGroupRow(row, group, dragEnabled);
       }
     },
 
@@ -130,6 +130,9 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
       for (const row of tabRows.values()) {
         updateRowDragState(row, enabled);
       }
+      for (const row of groupRows.values()) {
+        updateRowDragState(row, enabled);
+      }
     },
 
     destroy() {
@@ -140,7 +143,7 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
   };
 }
 
-function createGroupRow(group: TabGroupViewModel): HTMLElement {
+function createGroupRow(group: TabGroupViewModel, dragEnabled: boolean): HTMLElement {
   const row = document.createElement("div");
   row.className = "tab-group-row";
   row.setAttribute("role", "listitem");
@@ -160,11 +163,15 @@ function createGroupRow(group: TabGroupViewModel): HTMLElement {
 
   main.append(chevron, title);
   row.append(main);
-  updateGroupRow(row, group);
+  updateGroupRow(row, group, dragEnabled);
   return row;
 }
 
-function updateGroupRow(row: HTMLElement, group: TabGroupViewModel): void {
+function updateGroupRow(
+  row: HTMLElement,
+  group: TabGroupViewModel,
+  dragEnabled: boolean,
+): void {
   const main = row.querySelector<HTMLButtonElement>(".tab-group-main");
   const title = row.querySelector<HTMLElement>(".tab-group-title");
   if (!main || !title) return;
@@ -173,6 +180,7 @@ function updateGroupRow(row: HTMLElement, group: TabGroupViewModel): void {
   row.dataset.groupId = String(group.id);
   row.dataset.groupColor = group.color;
   row.dataset.collapsed = String(group.collapsed);
+  updateRowDragState(row, dragEnabled);
   main.setAttribute("aria-expanded", String(!group.collapsed));
   main.setAttribute("aria-label", `${displayTitle}，${group.collapsed ? "已折叠" : "已展开"}`);
   title.textContent = displayTitle;

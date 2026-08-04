@@ -522,6 +522,21 @@ describe("side panel responsive CSS", () => {
     expect(css).toMatch(/\.tab-row\[data-drag-source="true"\]\s*\{[^}]*opacity:/s);
   });
 
+  it("styles group drag sources and block boundaries without layout shifts", () => {
+    expect(css).toMatch(
+      /\.tab-group-row\[data-drag-group-source="true"\],\s*\.tab-row\[data-drag-group-source="true"\]\s*\{[^}]*opacity:\s*0\.55/s,
+    );
+    expect(css).toMatch(/\.tab-group-row\[data-drop-placement="before"\]::before/s);
+    expect(css).toMatch(/\.tab-group-row\[data-drop-placement="after"\]::after/s);
+    const indicatorRule = css.match(
+      /\.tab-row\[data-drop-placement="before"\]::before,[\s\S]*?\{[^}]*}/s,
+    )?.[0] ?? "";
+    expect(indicatorRule).toMatch(/position:\s*absolute/);
+    expect(indicatorRule).toMatch(/height:\s*2px/);
+    expect(indicatorRule).toMatch(/background:\s*AccentColor/);
+    expect(indicatorRule).not.toMatch(/(?:margin|padding|width):/);
+  });
+
   it("uses adaptive menu surfaces and inert context separators", () => {
     expect(css).toMatch(
       /\.tab-context-menu\s*\{[^}]*background:\s*color-mix\(in\s+srgb,\s*CanvasText\s+4%,\s*Canvas\)/s,
