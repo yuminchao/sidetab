@@ -326,7 +326,20 @@ describe("sidebar lifecycle", () => {
     await vi.waitFor(() =>
       expect(element("status-message").textContent).toBe("无法读取当前窗口的标签分组"));
     openTabContextMenu(8);
-    expect(contextMenuItem("group-same-site").disabled).toBe(true);
+    const quickGroup = contextMenuItem("group-same-site");
+    expect(quickGroup.disabled).toBe(true);
+    const statusBefore = element("status-message").textContent;
+    const tabQueriesBefore = fake.methods.query.mock.calls.length;
+    const groupQueriesBefore = fake.methods.groupQuery.mock.calls.length;
+    quickGroup.disabled = false;
+    click(quickGroup);
+    await flush();
+
+    expect(fake.methods.group).not.toHaveBeenCalled();
+    expect(fake.methods.groupUpdate).not.toHaveBeenCalled();
+    expect(element("status-message").textContent).toBe(statusBefore);
+    expect(fake.methods.query).toHaveBeenCalledTimes(tabQueriesBefore);
+    expect(fake.methods.groupQuery).toHaveBeenCalledTimes(groupQueriesBefore);
     expect(fake.events.onCreated.listenerCount).toBe(1);
     expect(fake.groupEvents.onCreated.listenerCount).toBe(1);
     cleanup();
