@@ -292,6 +292,64 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
+  it("keeps the current status when a later group reconciliation fails", async () => {
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 1 })] });
+    const cleanup = await startSidebar(fake);
+    await flush();
+    fake.methods.groupQuery.mockRejectedValueOnce(new Error("groups unavailable"));
+    fake.methods.get.mockRejectedValueOnce(new Error("replacement missing"));
+
+    fake.events.onReplaced.emit(2, 1);
+
+    await vi.waitFor(() => expect(fake.methods.groupQuery).toHaveBeenCalledTimes(2));
+    expect(element("status-message").textContent).toBe("");
+    expect(rowIds()).toEqual([1]);
+    cleanup();
+  });
+
+  it("contains a synchronous later reconciliation failure", async () => {
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 1 })] });
+    const unhandled: PromiseRejectionEvent[] = [];
+    const onUnhandled = (event: PromiseRejectionEvent): void => {
+      event.preventDefault();
+      unhandled.push(event);
+    };
+    window.addEventListener("unhandledrejection", onUnhandled);
+    const cleanup = await startSidebar(fake);
+    await flush();
+    fake.methods.get.mockRejectedValueOnce(new Error("replacement missing"));
+    fake.methods.query.mockImplementationOnce(() => {
+      throw new Error("synchronous reconciliation failure");
+    });
+
+    fake.events.onReplaced.emit(2, 1);
+    await flush();
+
+    expect(unhandled).toEqual([]);
+    expect(rowIds()).toEqual([1]);
+    window.removeEventListener("unhandledrejection", onUnhandled);
+    cleanup();
+  });
+
+  it("uses the fallback tab query once before a later full reconciliation", async () => {
+    const reconciliation = deferred<chrome.tabs.Tab[]>();
+    const fallbackTabs = [fakeTab({ id: 1, title: "Fallback" })];
+    const fake = createFakeChrome();
+    fake.methods.getCurrent.mockResolvedValueOnce({ id: 10 } as chrome.windows.Window);
+    fake.methods.query
+      .mockResolvedValueOnce(fallbackTabs)
+      .mockReturnValueOnce(reconciliation.promise);
+
+    const cleanup = await startSidebar(fake);
+
+    expect(fake.methods.query).toHaveBeenCalledTimes(2);
+    expect(fake.methods.query).toHaveBeenNthCalledWith(1, { windowId: 10 });
+    expect(row(1).querySelector(".tab-title")?.textContent).toBe("Fallback");
+    reconciliation.resolve([fakeTab({ id: 2, title: "Reconciled" })]);
+    await vi.waitFor(() => expect(rowIds()).toEqual([2]));
+    cleanup();
+  });
+
   it("loads the populated current window and renders initial state", async () => {
     const fake = createFakeChrome({
       tabs: [
@@ -3055,9 +3113,10 @@ describe("sidebar lifecycle", () => {
     expect(document.documentElement.dataset.ready).toBeUndefined();
   });
 
-  it("auto entry cleans deferred query listeners after an early pagehide and ignores its late result", async () => {
+  it("auto entry ignores a late fallback query after pagehide", async () => {
     const query = deferred<chrome.tabs.Tab[]>();
     const fake = createFakeChrome();
+    fake.methods.getCurrent.mockResolvedValueOnce({ id: 10 } as chrome.windows.Window);
     fake.methods.query.mockReturnValueOnce(query.promise);
     vi.stubGlobal("chrome", {
       tabs: fake.tabs,
@@ -3081,7 +3140,67 @@ describe("sidebar lifecycle", () => {
 
     expect(rowIds()).toEqual([]);
     for (const event of Object.values(fake.events)) expect(event.listenerCount).toBe(0);
+    expect(document.documentElement.dataset.ready).toBeUndefined();
+  });
+
+  it("auto entry ignores late tab and group reconciliation after pagehide", async () => {
+    const tabs = deferred<chrome.tabs.Tab[]>();
+    const groups = deferred<chrome.tabGroups.TabGroup[]>();
+    const fake = createFakeChrome();
+    fake.methods.query.mockReturnValueOnce(tabs.promise);
+    fake.methods.groupQuery.mockReturnValueOnce(groups.promise);
+    vi.stubGlobal("chrome", {
+      tabs: fake.tabs,
+      tabGroups: fake.tabGroups,
+      windows: fake.windows,
+      bookmarks: fake.bookmarks,
+      history: fake.history,
+      sessions: fake.sessions,
+      storage: { local: fake.storage },
+    });
+    vi.resetModules();
+
+    await import("../src/sidepanel/sidebar");
+    await vi.waitFor(() => {
+      expect(fake.methods.query).toHaveBeenCalledWith({ windowId: 10 });
+      expect(fake.methods.groupQuery).toHaveBeenCalledWith({ windowId: 10 });
+    });
     expect(document.documentElement.dataset.ready).toBe("true");
+    window.dispatchEvent(new Event("pagehide"));
+    tabs.resolve([fakeTab({ id: 2, groupId: 7 })]);
+    groups.resolve([fakeGroup({ id: 7 })]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(rowIds()).toEqual([]);
+    expect(element("status-message").textContent).toBe("");
+    for (const event of Object.values(fake.events)) expect(event.listenerCount).toBe(0);
+    for (const event of Object.values(fake.groupEvents)) expect(event.listenerCount).toBe(0);
+  });
+
+  it("auto entry ignores late shortcut storage after pagehide", async () => {
+    const storage = deferred<Record<string, unknown>>();
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 1 })] });
+    fake.methods.storageGet.mockReturnValue(storage.promise);
+    vi.stubGlobal("chrome", {
+      tabs: fake.tabs,
+      tabGroups: fake.tabGroups,
+      windows: fake.windows,
+      bookmarks: fake.bookmarks,
+      history: fake.history,
+      sessions: fake.sessions,
+      storage: { local: fake.storage },
+    });
+    vi.resetModules();
+
+    await import("../src/sidepanel/sidebar");
+    await vi.waitFor(() => expect(document.documentElement.dataset.ready).toBe("true"));
+    window.dispatchEvent(new Event("pagehide"));
+    storage.resolve(enabledShortcuts());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(element("shortcut-strip").hidden).toBe(true);
+    expect(element("status-message").textContent).toBe("");
+    for (const event of Object.values(fake.events)) expect(event.listenerCount).toBe(0);
   });
 
   it("auto entry stays active until pagehide and cleans up only once", async () => {

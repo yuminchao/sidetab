@@ -306,7 +306,7 @@ async function startSidebarInternal(
     historySearch.setFaviconsByOrigin(favicons);
   };
 
-  const resyncTabsAndGroups = (): Promise<void> => {
+  const resyncTabsAndGroups = (reportInitialGroupFailure = false): Promise<void> => {
     if (resyncPromise) {
       if (resyncPhase === "replaying") {
         resyncFollowUpRequested = true;
@@ -317,6 +317,7 @@ async function startSidebarInternal(
     const windowId = currentWindowId;
     let operation!: Promise<void>;
     operation = (async (): Promise<void> => {
+      let shouldReportGroupFailure = reportInitialGroupFailure;
       try {
         do {
           resyncFollowUpRequested = false;
@@ -336,9 +337,10 @@ async function startSidebarInternal(
             groupStore.initialize(groupsResult.value, windowId);
             setStatus("groups", "");
             snapshotApplied = true;
-          } else {
+          } else if (shouldReportGroupFailure) {
             setStatus("groups", "无法读取当前窗口的标签分组");
           }
+          shouldReportGroupFailure = false;
           if (!active || currentWindowId !== windowId) break;
           resyncPhase = "replaying";
           const replayed = await finishBufferedEvents();
@@ -348,7 +350,14 @@ async function startSidebarInternal(
             renderTabList();
           }
         } while (resyncFollowUpRequested);
+      } catch {
+        // Reconciliation is best-effort and must not escape fire-and-forget callers.
       } finally {
+        if (active && bufferingEvents) {
+          bufferingEvents = false;
+          bufferedEvents.length = 0;
+          discardPendingAsyncEvents();
+        }
         resyncPhase = "idle";
         resyncFollowUpRequested = false;
         if (resyncPromise === operation) resyncPromise = undefined;
@@ -1202,7 +1211,7 @@ async function startSidebarInternal(
       windowId,
       groupEventHandlers,
     );
-    void resyncTabsAndGroups().catch(() => undefined);
+    void resyncTabsAndGroups(true);
     // Let already-resolved background API calls publish without waiting for pending work.
     await Promise.resolve();
     await Promise.resolve();
