@@ -117,7 +117,7 @@ describe("shortcut renderer", () => {
     expect(onFontSizePreview).toHaveBeenLastCalledWith(14);
   });
 
-  it("keeps a saved font size after close and resets an open draft to 16", async () => {
+  it("keeps a saved font size after close and resets an open draft to 14", async () => {
     const renderer = createShortcutRenderer(elements, { onOpen, onSave, onFontSizePreview });
     renderer.openSettings(settings());
     elements.fontSize.value = "16";
@@ -130,8 +130,8 @@ describe("shortcut renderer", () => {
 
     renderer.openSettings(settings({ tabTitleFontSize: 18 }));
     click(elements.reset);
-    expect(elements.fontSize.value).toBe("16");
-    expect(onFontSizePreview).toHaveBeenLastCalledWith(16);
+    expect(elements.fontSize.value).toBe("14");
+    expect(onFontSizePreview).toHaveBeenLastCalledWith(14);
   });
 
   it("does not preview or save an invalid font size", () => {

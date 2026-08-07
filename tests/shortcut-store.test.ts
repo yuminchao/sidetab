@@ -20,7 +20,7 @@ describe("shortcut store", () => {
     expect(area.get).toHaveBeenCalledWith(storedKey);
   });
 
-  it("returns normalized valid persisted settings", async () => {
+  it("migrates a legacy persisted object missing its font size to 14", async () => {
     const area = createArea({
       get: vi.fn().mockResolvedValue({
         [storedKey]: {
@@ -32,8 +32,22 @@ describe("shortcut store", () => {
 
     await expect(createShortcutStore(area).load()).resolves.toEqual({
       enabled: true,
-      tabTitleFontSize: 16,
+      tabTitleFontSize: 14,
       items: [{ id: "example", name: "Example", url: "https://example.com/", icon: "letter" }],
+    });
+  });
+
+  it("loads an explicit persisted font size of 16 unchanged", async () => {
+    const area = createArea({
+      get: vi.fn().mockResolvedValue({
+        [storedKey]: { enabled: true, items: [], tabTitleFontSize: 16 },
+      }),
+    });
+
+    await expect(createShortcutStore(area).load()).resolves.toEqual({
+      enabled: true,
+      items: [],
+      tabTitleFontSize: 16,
     });
   });
 
