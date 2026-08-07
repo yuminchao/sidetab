@@ -1216,12 +1216,6 @@ async function startSidebarInternal(
       groupEventHandlers,
     );
     void resyncTabsAndGroups(true);
-    // Let already-resolved background API calls publish without waiting for pending work.
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
   } catch {
     if (active) {
       setStatus("tabs", "无法读取当前窗口的标签页");

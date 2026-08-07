@@ -4,7 +4,10 @@ import {
   createDefaultShortcutSettings,
   type ShortcutSettings,
 } from "../src/sidepanel/shortcut-model";
-import { startSidebar, type SidebarDependencies } from "../src/sidepanel/sidebar";
+import {
+  startSidebar as startSidebarRaw,
+  type SidebarDependencies,
+} from "../src/sidepanel/sidebar";
 import { TabStore } from "../src/sidepanel/tab-store";
 import { createFakeChrome, deferred, fakeGroup, fakeTab } from "./helpers/fake-chrome";
 
@@ -169,6 +172,34 @@ async function flush(): Promise<void> {
   await Promise.resolve();
 }
 
+async function startSidebar(
+  fake: ReturnType<typeof createFakeChrome>,
+): Promise<() => void> {
+  const cleanup = await startSidebarRaw(fake);
+  await vi.waitFor(() => expect(fake.methods.groupQuery).toHaveBeenCalled());
+  const tabsPromise = fake.methods.query.mock.results.at(-1)?.value;
+  const groupsPromise = fake.methods.groupQuery.mock.results.at(-1)?.value;
+  if (!tabsPromise || !groupsPromise) {
+    throw new Error("missing initial reconciliation snapshots");
+  }
+  const [tabs, groups] = await Promise.all([tabsPromise, groupsPromise]) as [
+    chrome.tabs.Tab[],
+    chrome.tabGroups.TabGroup[],
+  ];
+  const expectedTabIds = tabs
+    .filter((tab) => tab.windowId === 10 && tab.id !== undefined)
+    .map((tab) => tab.id!)
+    .sort((left, right) => left - right);
+
+  await vi.waitFor(() => {
+    expect([...rowIds()].sort((left, right) => left - right)).toEqual(expectedTabIds);
+  });
+  for (const group of groups) {
+    await vi.waitFor(() => expect(groupRow(group.id)).toBeTruthy());
+  }
+  return cleanup;
+}
+
 describe("sidebar lifecycle", () => {
   beforeEach(() => {
     installFixture();
@@ -188,7 +219,7 @@ describe("sidebar lifecycle", () => {
     });
     fake.methods.groupQuery.mockReturnValueOnce(groups.promise);
 
-    const cleanup = await startSidebar(fake);
+    const cleanup = await startSidebarRaw(fake);
     await vi.waitFor(() => {
       expect(fake.methods.getCurrent).toHaveBeenCalledWith({ populate: true });
       expect(fake.methods.groupQuery).toHaveBeenCalledWith({ windowId: 10 });
@@ -249,7 +280,7 @@ describe("sidebar lifecycle", () => {
     fake.methods.query.mockReturnValueOnce(tabs.promise);
     fake.methods.groupQuery.mockReturnValueOnce(groups.promise);
 
-    const started = startSidebar(fake);
+    const started = startSidebarRaw(fake);
     await vi.waitFor(() => expect(fake.methods.groupQuery).toHaveBeenCalledOnce());
 
     fake.groupEvents.onMoved.emit(fakeGroup({ id: 8, title: "Moved latest" }));
@@ -283,19 +314,32 @@ describe("sidebar lifecycle", () => {
     const fake = createFakeChrome({ tabs: [fakeTab({ id: 8 })] });
     fake.methods.groupQuery.mockRejectedValueOnce(new Error("groups failed"));
 
-    const cleanup = await startSidebar(fake);
+    const cleanup = await startSidebarRaw(fake);
 
     expect(rowIds()).toEqual([8]);
-    expect(element("status-message").textContent).toBe("无法读取当前窗口的标签分组");
+    await vi.waitFor(() =>
+      expect(element("status-message").textContent).toBe("无法读取当前窗口的标签分组"));
     expect(fake.events.onCreated.listenerCount).toBe(1);
     expect(fake.groupEvents.onCreated.listenerCount).toBe(1);
+    cleanup();
+  });
+
+  it("returns the first screen before initial background groups publish", async () => {
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 1, groupId: 7 })],
+      groups: [fakeGroup({ id: 7, title: "Background group" })],
+    });
+
+    const cleanup = await startSidebarRaw(fake);
+
+    expect(document.querySelector(".tab-group-row[data-group-id='7']")).toBeNull();
+    await vi.waitFor(() => expect(groupRow(7)).toBeTruthy());
     cleanup();
   });
 
   it("keeps the current status when a later group reconciliation fails", async () => {
     const fake = createFakeChrome({ tabs: [fakeTab({ id: 1 })] });
     const cleanup = await startSidebar(fake);
-    await flush();
     fake.methods.groupQuery.mockRejectedValueOnce(new Error("groups unavailable"));
     fake.methods.get.mockRejectedValueOnce(new Error("replacement missing"));
 
@@ -309,14 +353,21 @@ describe("sidebar lifecycle", () => {
 
   it("observes a tab rejection when the paired group query throws synchronously", async () => {
     const rejectedTabs = deferred<chrome.tabs.Tab[]>();
-    const fake = createFakeChrome({ tabs: [fakeTab({ id: 1 })] });
-    const cleanup = await startSidebar(fake);
-    await flush();
-    fake.methods.get.mockRejectedValueOnce(new Error("replacement missing"));
-    fake.methods.query.mockReturnValueOnce(rejectedTabs.promise);
-    fake.methods.groupQuery.mockImplementationOnce(() => {
-      throw new Error("group failure");
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 1, groupId: 7 })],
+      groups: [fakeGroup({ id: 7, title: "Initial" })],
     });
+    const cleanup = await startSidebarRaw(fake);
+    await vi.waitFor(() => expect(groupRow(7)).toBeTruthy());
+    fake.methods.get.mockRejectedValueOnce(new Error("replacement missing"));
+    fake.methods.query
+      .mockReturnValueOnce(rejectedTabs.promise)
+      .mockResolvedValueOnce([fakeTab({ id: 4, title: "Recovered" })]);
+    fake.methods.groupQuery
+      .mockImplementationOnce(() => {
+        throw new Error("group failure");
+      })
+      .mockResolvedValueOnce([]);
 
     fake.events.onReplaced.emit(2, 1);
     await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledTimes(2));
@@ -327,7 +378,8 @@ describe("sidebar lifecycle", () => {
 
     await vi.waitFor(() => expect(fake.methods.get).toHaveBeenCalledTimes(2));
     await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledTimes(3));
-    expect(rowIds()).toEqual([1]);
+    await vi.waitFor(() => expect(rowIds()).toEqual([4]));
+    expect(row(4).querySelector(".tab-title")?.textContent).toBe("Recovered");
     cleanup();
   });
 
@@ -340,7 +392,7 @@ describe("sidebar lifecycle", () => {
       .mockResolvedValueOnce(fallbackTabs)
       .mockReturnValueOnce(reconciliation.promise);
 
-    const cleanup = await startSidebar(fake);
+    const cleanup = await startSidebarRaw(fake);
 
     expect(fake.methods.query).toHaveBeenCalledTimes(2);
     expect(fake.methods.query).toHaveBeenNthCalledWith(1, { windowId: 10 });
@@ -607,7 +659,7 @@ describe("sidebar lifecycle", () => {
     });
     fake.methods.query.mockReturnValueOnce(query.promise);
     fake.methods.get.mockReturnValueOnce(attached.promise);
-    const started = startSidebar(fake);
+    const started = startSidebarRaw(fake);
     await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledOnce());
 
     fake.events.onCreated.emit(
@@ -803,7 +855,7 @@ describe("sidebar lifecycle", () => {
         fake.methods.query.mockRejectedValueOnce(new Error("query failed"));
       }
 
-      const cleanup = await startSidebar(fake);
+      const cleanup = await startSidebarRaw(fake);
       await vi.waitFor(() => expect(element<HTMLButtonElement>("shortcut-settings").disabled).toBe(false));
       click(element("shortcut-settings"));
 
@@ -823,7 +875,7 @@ describe("sidebar lifecycle", () => {
     const list = element("tab-list");
     const replaceChildren = vi.spyOn(list, "replaceChildren");
 
-    const started = startSidebar(fake);
+    const started = startSidebarRaw(fake);
     await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledWith({ windowId: 10 }));
     for (const event of Object.values(fake.events)) expect(event.listenerCount).toBe(1);
 
@@ -853,7 +905,7 @@ describe("sidebar lifecycle", () => {
     fake.methods.query.mockReturnValueOnce(query.promise);
     fake.methods.get.mockReturnValueOnce(attached.promise);
     const replaceChildren = vi.spyOn(element("tab-list"), "replaceChildren");
-    const started = startSidebar(fake);
+    const started = startSidebarRaw(fake);
     await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledOnce());
 
     fake.events.onAttached.emit(4, { newWindowId: 10, newPosition: 2 });
@@ -882,7 +934,7 @@ describe("sidebar lifecycle", () => {
     fake.methods.groupQuery.mockReturnValueOnce(groups.promise);
     fake.methods.get.mockReturnValueOnce(attached.promise);
 
-    const started = startSidebar(fake);
+    const started = startSidebarRaw(fake);
     await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledOnce());
     fake.events.onAttached.emit(3, { newWindowId: 10, newPosition: 1 });
     await vi.waitFor(() => expect(fake.methods.get).toHaveBeenCalledWith(3));
@@ -909,7 +961,7 @@ describe("sidebar lifecycle", () => {
       const fake = createFakeChrome();
       fake.methods.query.mockReturnValueOnce(query.promise);
       fake.methods.storageGet.mockReturnValueOnce(storage.promise);
-      const started = startSidebar(fake);
+      const started = startSidebarRaw(fake);
       await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledOnce());
 
       if (order === "tabs-first") {
