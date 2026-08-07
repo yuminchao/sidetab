@@ -230,6 +230,8 @@ describe("sidebar lifecycle", () => {
 
     expect(rowIds()).toEqual([1]);
     expect(document.documentElement.dataset.ready).toBe("true");
+    openTabContextMenu(1);
+    expect(contextMenuItem("group-same-site").disabled).toBe(true);
     click(row(1).querySelector(".tab-main")!);
     await vi.waitFor(() => expect(fake.methods.update).toHaveBeenCalledWith(1, { active: true }));
 
@@ -237,10 +239,14 @@ describe("sidebar lifecycle", () => {
     fake.groupEvents.onCreated.emit(fakeGroup({ id: 7, title: "Buffered" }));
     fake.events.onCreated.emit(fakeTab({ id: 2, index: 1, groupId: 7 }));
     fake.groupEvents.onUpdated.emit(fakeGroup({ id: 7, title: "Latest" }));
+    openTabContextMenu(1);
+    expect(contextMenuItem("group-same-site").disabled).toBe(true);
     groups.resolve([]);
     await vi.waitFor(() => expect(rowIds()).toEqual([1, 2]));
     expect(rowIds()).toEqual([1, 2]);
     expect(groupRow(7).querySelector(".tab-group-title")?.textContent).toBe("Latest");
+    openTabContextMenu(1);
+    expect(contextMenuItem("group-same-site").disabled).toBe(false);
     cleanup();
   });
 
@@ -319,6 +325,8 @@ describe("sidebar lifecycle", () => {
     expect(rowIds()).toEqual([8]);
     await vi.waitFor(() =>
       expect(element("status-message").textContent).toBe("无法读取当前窗口的标签分组"));
+    openTabContextMenu(8);
+    expect(contextMenuItem("group-same-site").disabled).toBe(true);
     expect(fake.events.onCreated.listenerCount).toBe(1);
     expect(fake.groupEvents.onCreated.listenerCount).toBe(1);
     cleanup();
@@ -348,6 +356,8 @@ describe("sidebar lifecycle", () => {
     await vi.waitFor(() => expect(fake.methods.groupQuery).toHaveBeenCalledTimes(2));
     expect(element("status-message").textContent).toBe("");
     expect(rowIds()).toEqual([1]);
+    openTabContextMenu(1);
+    expect(contextMenuItem("group-same-site").disabled).toBe(false);
     cleanup();
   });
 
@@ -1815,6 +1825,7 @@ describe("sidebar lifecycle", () => {
       fakeTab({ id: 2, index: 1, url: "https://example.com/updated", pinned: true }),
     );
     fake.events.onRemoved.emit(6, { windowId: 10, isWindowClosing: false });
+    fake.groupEvents.onCreated.emit(fakeGroup({ id: 9, color: "grey" }));
     const latestRows = rowIds();
     click(contextMenuItem("group-same-site"));
     await flush();
@@ -1827,7 +1838,7 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.groupUpdate).toHaveBeenCalledOnce();
     expect(fake.methods.groupUpdate).toHaveBeenCalledWith(777, {
       title: "example.com",
-      color: "grey",
+      color: "red",
     });
     expect(latestRows).not.toEqual(rowsBefore);
     expect(rowIds()).toEqual(latestRows);

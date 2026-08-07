@@ -131,6 +131,7 @@ async function startSidebarInternal(
   let addShortcutBusy = false;
   let appearanceSettingsBusy = false;
   let restoreRecentlyClosedBusy = false;
+  let groupsReady = false;
   const groupTabBusy = new Set<number>();
   const groupToggleBusy = new Set<number>();
   const groupCommandBusy = new Set<number>();
@@ -340,6 +341,7 @@ async function startSidebarInternal(
           }
           if (groupsResult.status === "fulfilled") {
             groupStore.initialize(groupsResult.value, windowId);
+            groupsReady = true;
             setStatus("groups", "");
             snapshotApplied = true;
           } else if (shouldReportGroupFailure) {
@@ -480,6 +482,7 @@ async function startSidebarInternal(
           tab,
           canCloseBelow: getClosableTabsBelow(tabs, id).length > 0,
           ...sameSite,
+          canGroupSameSite: groupsReady && sameSite.canGroupSameSite,
         };
       },
       getGroups: () => groupStore.list(),
@@ -501,6 +504,7 @@ async function startSidebarInternal(
           return;
         }
         if (command.action === "group-same-site") {
+          if (!groupsReady) return;
           const plan = createSameSiteGroupPlan(tabStore.list(), command.tabId);
           if (!plan || plan.tabIds.some((tabId) => groupTabBusy.has(tabId))) return;
           for (const tabId of plan.tabIds) groupTabBusy.add(tabId);
