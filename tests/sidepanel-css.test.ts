@@ -252,10 +252,11 @@ describe("side panel responsive CSS", () => {
     );
   });
 
-  it("uses Microsoft YaHei for the context menu", () => {
+  it("uses a fixed 14px Microsoft YaHei menu font through the shared context-menu class", () => {
     expect(css).toMatch(
-      /\.tab-context-menu\s*{[^}]*font-family:\s*"Microsoft YaHei",\s*"微软雅黑",\s*"Segoe UI",\s*system-ui,\s*sans-serif/s,
+      /\.tab-context-menu\s*{[^}]*font-family:\s*"Microsoft YaHei",\s*"微软雅黑",\s*"Segoe UI",\s*system-ui,\s*sans-serif[^}]*font-size:\s*14px/s,
     );
+    expect(css).not.toMatch(/\.tab-context-menu\s*{[^}]*var\(--tab-title-font-size\)/s);
   });
 
   it("styles compact group rows, controls, and titles", () => {
@@ -335,12 +336,14 @@ describe("side panel responsive CSS", () => {
     expect(menuRule).toMatch(
       /font-family:\s*"Microsoft YaHei",\s*"微软雅黑",\s*"Segoe UI",\s*system-ui,\s*sans-serif/,
     );
+    expect(menuRule).toMatch(/font-size:\s*14px/);
+    expect(menuRule).not.toMatch(/var\(--tab-title-font-size\)/);
 
     const submenuRule = css.match(/\.tab-context-submenu\s*{[^}]*}/s)?.[0] ?? "";
     expect(submenuRule).toMatch(/z-index:\s*21/);
     expect(submenuRule).toMatch(/min-width:\s*min\(152px,\s*100vw\)/);
     expect(submenuRule).not.toMatch(
-      /(?:position|display|padding|border|background|box-shadow|font-family|max-height|overflow-y):/,
+      /(?:position|display|padding|border|background|box-shadow|font-family|font-size|max-height|overflow-y):/,
     );
 
     const submenuButtonRule = css.match(/\.tab-context-submenu\s*>\s*button\s*{[^}]*}/s)?.[0] ?? "";
@@ -546,7 +549,10 @@ describe("side panel responsive CSS", () => {
     );
   });
 
-  it("outlines the context-selected tab without replacing the active marker", () => {
+  it("keeps the active marker for ungrouped tabs while outlining context-selected tabs", () => {
+    expect(css).toMatch(
+      /\.tab-row\[data-active="true"\]\s*\{[^}]*background:\s*ButtonFace[^}]*box-shadow:\s*inset\s+2px\s+0\s+AccentColor/s,
+    );
     expect(css).toMatch(
       /\.tab-row\[data-context-selected="true"\]\s*\{[^}]*box-shadow:\s*inset\s+0\s+0\s+0\s+1px\s+#1a73e8/s,
     );
@@ -566,6 +572,38 @@ describe("side panel responsive CSS", () => {
     );
     expect(darkMedia).toMatch(
       /\.tab-row\[data-active="true"\]\[data-context-selected="true"\]\s*\{[^}]*box-shadow:\s*inset\s+2px\s+0\s+AccentColor\s*,\s*inset\s+0\s+0\s+0\s+1px\s+#8ab4f8/s,
+    );
+  });
+
+  it("removes the active rail for grouped tabs while retaining the context outline", () => {
+    expect(css).toMatch(
+      /\.tab-row\[data-group-id\]\[data-active="true"\]\s*\{[^}]*box-shadow:\s*none/s,
+    );
+    expect(css).toMatch(
+      /\.tab-row\[data-group-id\]\[data-active="true"\]\[data-context-selected="true"\]\s*\{[^}]*box-shadow:\s*inset\s+0\s+0\s+0\s+1px\s+#1a73e8/s,
+    );
+    const groupedContextRule = css.match(
+      /\.tab-row\[data-group-id\]\[data-active="true"\]\[data-context-selected="true"\]\s*\{[^}]*}/s,
+    )?.[0] ?? "";
+    expect(groupedContextRule).not.toMatch(/AccentColor/);
+
+    const darkMedia = css.match(
+      /@media\s*\(prefers-color-scheme:\s*dark\)\s*\{([\s\S]*?)\n\}/s,
+    )?.[1] ?? "";
+    expect(darkMedia).toMatch(
+      /\.tab-row\[data-group-id\]\[data-active="true"\]\[data-context-selected="true"\]\s*\{[^}]*box-shadow:\s*inset\s+0\s+0\s+0\s+1px\s+#8ab4f8/s,
+    );
+    const darkGroupedContextRule = darkMedia.match(
+      /\.tab-row\[data-group-id\]\[data-active="true"\]\[data-context-selected="true"\]\s*\{[^}]*}/s,
+    )?.[0] ?? "";
+    expect(darkGroupedContextRule).not.toMatch(/AccentColor/);
+
+    const forcedColors = css.slice(css.indexOf("@media (forced-colors: active)"));
+    expect(forcedColors).toMatch(
+      /\.tab-row\[data-group-id\]\s*\{[^}]*--member-group-color:\s*CanvasText/s,
+    );
+    expect(forcedColors).toMatch(
+      /\.tab-row\[data-context-selected="true"\]\s*\{[^}]*outline:\s*1px\s+solid\s+Highlight[^}]*outline-offset:\s*-1px/s,
     );
   });
 

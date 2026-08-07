@@ -90,7 +90,7 @@ describe("shortcut model", () => {
   it("creates enabled default settings with the three prescribed shortcuts", () => {
     expect(createDefaultShortcutSettings()).toEqual({
       enabled: true,
-      tabTitleFontSize: 16,
+      tabTitleFontSize: 14,
       items: [
         { id: "openai", name: "OpenAI", url: "https://chatgpt.com/", icon: "openai" },
         { id: "google", name: "Google", url: "https://www.google.com/", icon: "google" },
@@ -104,10 +104,10 @@ describe("shortcut model", () => {
       default: DEFAULT_TAB_TITLE_FONT_SIZE,
       min: MIN_TAB_TITLE_FONT_SIZE,
       max: MAX_TAB_TITLE_FONT_SIZE,
-    }).toEqual({ default: 16, min: 12, max: 18 });
+    }).toEqual({ default: 14, min: 12, max: 18 });
   });
 
-  it.each([12, 14, 18])("accepts tab title font size %s", (tabTitleFontSize) => {
+  it.each([12, 14, 16, 18])("accepts tab title font size %s", (tabTitleFontSize) => {
     expect(validateShortcutSettings({ enabled: true, items: [], tabTitleFontSize })).toEqual({
       ok: true,
       value: { enabled: true, items: [], tabTitleFontSize },
@@ -126,7 +126,7 @@ describe("shortcut model", () => {
   it("migrates a valid legacy object to the default tab title font size", () => {
     expect(validateShortcutSettings({ enabled: true, items: [] })).toEqual({
       ok: true,
-      value: { enabled: true, items: [], tabTitleFontSize: 16 },
+      value: { enabled: true, items: [], tabTitleFontSize: 14 },
     });
   });
 
@@ -257,7 +257,7 @@ describe("shortcut model", () => {
 
     expect(validateShortcutSettings(input)).toEqual({
       ok: true,
-      value: { enabled: true, items: [shortcut({ url: "https://example.com/" })], tabTitleFontSize: 16 },
+      value: { enabled: true, items: [shortcut({ url: "https://example.com/" })], tabTitleFontSize: 14 },
     });
   });
 
@@ -274,7 +274,7 @@ describe("shortcut model", () => {
 
     expect(validateShortcutSettings({ enabled: true, items: [item] })).toEqual({
       ok: true,
-      value: { enabled: true, items: [shortcut({ url: "https://example.com/" })], tabTitleFontSize: 16 },
+      value: { enabled: true, items: [shortcut({ url: "https://example.com/" })], tabTitleFontSize: 14 },
     });
   });
 
@@ -319,7 +319,7 @@ describe("shortcut model", () => {
 
     expect(result).toEqual({
       ok: true,
-      value: { enabled: true, items: [shortcut({ id: " stable-id ", name: "Example", url: "https://example.com/" })], tabTitleFontSize: 16 },
+      value: { enabled: true, items: [shortcut({ id: " stable-id ", name: "Example", url: "https://example.com/" })], tabTitleFontSize: 14 },
     });
     expect(input).toEqual({
       enabled: true,
@@ -337,7 +337,7 @@ describe("shortcut model", () => {
       ok: true,
       value: {
         enabled: true,
-        tabTitleFontSize: 16,
+        tabTitleFontSize: 14,
         items: [shortcut({ id: " stable-id ", url: "https://one.example/" }), shortcut({ id: "stable-id", url: "https://two.example/" })],
       },
     });
