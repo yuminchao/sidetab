@@ -323,9 +323,13 @@ async function startSidebarInternal(
           resyncFollowUpRequested = false;
           resyncPhase = "querying";
           bufferingEvents = true;
+          const tabsSnapshot = Promise.resolve().then(() =>
+            deps.tabs.query({ windowId }));
+          const groupsSnapshot = Promise.resolve().then(() =>
+            deps.tabGroups.query({ windowId }));
           const [tabsResult, groupsResult] = await Promise.allSettled([
-            deps.tabs.query({ windowId }),
-            deps.tabGroups.query({ windowId }),
+            tabsSnapshot,
+            groupsSnapshot,
           ]);
           if (!active || currentWindowId !== windowId) break;
           let snapshotApplied = false;
@@ -1213,6 +1217,9 @@ async function startSidebarInternal(
     );
     void resyncTabsAndGroups(true);
     // Let already-resolved background API calls publish without waiting for pending work.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
   } catch {

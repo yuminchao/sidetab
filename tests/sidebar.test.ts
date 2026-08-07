@@ -307,27 +307,27 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
-  it("contains a synchronous later reconciliation failure", async () => {
+  it("observes a tab rejection when the paired group query throws synchronously", async () => {
+    const rejectedTabs = deferred<chrome.tabs.Tab[]>();
     const fake = createFakeChrome({ tabs: [fakeTab({ id: 1 })] });
-    const unhandled: PromiseRejectionEvent[] = [];
-    const onUnhandled = (event: PromiseRejectionEvent): void => {
-      event.preventDefault();
-      unhandled.push(event);
-    };
-    window.addEventListener("unhandledrejection", onUnhandled);
     const cleanup = await startSidebar(fake);
     await flush();
     fake.methods.get.mockRejectedValueOnce(new Error("replacement missing"));
-    fake.methods.query.mockImplementationOnce(() => {
-      throw new Error("synchronous reconciliation failure");
+    fake.methods.query.mockReturnValueOnce(rejectedTabs.promise);
+    fake.methods.groupQuery.mockImplementationOnce(() => {
+      throw new Error("group failure");
     });
 
     fake.events.onReplaced.emit(2, 1);
-    await flush();
+    await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledTimes(2));
+    rejectedTabs.reject(new Error("tab failure"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fake.methods.get.mockRejectedValueOnce(new Error("replacement missing"));
+    fake.events.onReplaced.emit(3, 1);
 
-    expect(unhandled).toEqual([]);
+    await vi.waitFor(() => expect(fake.methods.get).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledTimes(3));
     expect(rowIds()).toEqual([1]);
-    window.removeEventListener("unhandledrejection", onUnhandled);
     cleanup();
   });
 
