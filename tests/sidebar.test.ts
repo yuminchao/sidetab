@@ -181,31 +181,33 @@ describe("sidebar lifecycle", () => {
     vi.resetModules();
   });
 
-  it("subscribes to tab and group events before starting both snapshot queries", async () => {
-    const tabs = deferred<chrome.tabs.Tab[]>();
+  it("renders the populated window snapshot before the deferred group reconciliation", async () => {
     const groups = deferred<chrome.tabGroups.TabGroup[]>();
-    const fake = createFakeChrome();
-    fake.methods.query.mockReturnValueOnce(tabs.promise);
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 1, index: 0, title: "Snapshot" })],
+    });
     fake.methods.groupQuery.mockReturnValueOnce(groups.promise);
 
-    const started = startSidebar(fake);
+    const cleanup = await startSidebar(fake);
     await vi.waitFor(() => {
-      expect(fake.methods.query).toHaveBeenCalledWith({ windowId: 10 });
+      expect(fake.methods.getCurrent).toHaveBeenCalledWith({ populate: true });
       expect(fake.methods.groupQuery).toHaveBeenCalledWith({ windowId: 10 });
     });
 
     for (const event of Object.values(fake.events)) expect(event.listenerCount).toBe(1);
     for (const event of Object.values(fake.groupEvents)) expect(event.listenerCount).toBe(1);
 
+    expect(rowIds()).toEqual([1]);
+    expect(document.documentElement.dataset.ready).toBe("true");
+    click(row(1).querySelector(".tab-main")!);
+    await vi.waitFor(() => expect(fake.methods.update).toHaveBeenCalledWith(1, { active: true }));
+
+    fake.setTabs([fakeTab({ id: 1, index: 0 }), fakeTab({ id: 2, index: 1, groupId: 7 })]);
     fake.groupEvents.onCreated.emit(fakeGroup({ id: 7, title: "Buffered" }));
     fake.events.onCreated.emit(fakeTab({ id: 2, index: 1, groupId: 7 }));
     fake.groupEvents.onUpdated.emit(fakeGroup({ id: 7, title: "Latest" }));
-    tabs.resolve([fakeTab({ id: 1, index: 0 })]);
-    await flush();
-    expect(document.documentElement.dataset.ready).toBeUndefined();
     groups.resolve([]);
-
-    const cleanup = await started;
+    await vi.waitFor(() => expect(rowIds()).toEqual([1, 2]));
     expect(rowIds()).toEqual([1, 2]);
     expect(groupRow(7).querySelector(".tab-group-title")?.textContent).toBe("Latest");
     cleanup();
@@ -235,7 +237,8 @@ describe("sidebar lifecycle", () => {
     groups.resolve([]);
 
     const cleanup = await started;
-    expect(row(1).querySelector(".tab-title")?.textContent).toBe("Buffered latest");
+    await vi.waitFor(() =>
+      expect(row(1).querySelector(".tab-title")?.textContent).toBe("Buffered latest"));
     cleanup();
   });
 
@@ -263,6 +266,7 @@ describe("sidebar lifecycle", () => {
     ]);
 
     const cleanup = await started;
+    await vi.waitFor(() => expect(element("tab-list").children).toHaveLength(4));
     const itemOrder = Array.from(element("tab-list").children, (item) => {
       const row = item as HTMLElement;
       return row.dataset.tabId === undefined
@@ -288,7 +292,7 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
-  it("loads the current window and shortcuts with exact arguments and renders initial state", async () => {
+  it("loads the populated current window and renders initial state", async () => {
     const fake = createFakeChrome({
       tabs: [
         fakeTab({ id: 2, index: 1, title: "Second" }),
@@ -298,7 +302,7 @@ describe("sidebar lifecycle", () => {
 
     const cleanup = await startSidebar(fake);
 
-    expect(fake.methods.getCurrent).toHaveBeenCalledWith();
+    expect(fake.methods.getCurrent).toHaveBeenCalledWith({ populate: true });
     expect(fake.methods.query).toHaveBeenCalledWith({ windowId: 10 });
     expect(fake.methods.storageGet).toHaveBeenCalledWith("shortcutSettings");
     expect(rowIds()).toEqual([1, 2]);
@@ -312,17 +316,27 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
-  it.each(["tabs-first", "shortcuts-first"] as const)(
-    "uses the initial tab favicon when %s initialization wins the race",
-    async (order) => {
-      const query = deferred<chrome.tabs.Tab[]>();
-      const storage = deferred<Record<string, unknown>>();
-      const fake = createFakeChrome();
-      fake.methods.query.mockReturnValueOnce(query.promise);
-      fake.methods.storageGet.mockReturnValueOnce(storage.promise);
-      const started = startSidebar(fake);
-      await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledOnce());
+  it("does not wait for deferred shortcut storage before making tabs ready", async () => {
+    const storage = deferred<Record<string, unknown>>();
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 1 })] });
+    fake.methods.storageGet.mockReturnValue(storage.promise);
 
+    const cleanup = await startSidebar(fake);
+
+    expect(rowIds()).toEqual([1]);
+    expect(document.documentElement.dataset.ready).toBe("true");
+    expect(element<HTMLButtonElement>("shortcut-settings").disabled).toBe(true);
+    click(element("shortcut-settings"));
+    expect(element<HTMLDialogElement>("shortcut-dialog").open).toBe(false);
+
+    storage.resolve(enabledShortcuts());
+    await vi.waitFor(() =>
+      expect(element<HTMLButtonElement>("shortcut-settings").disabled).toBe(false));
+    cleanup();
+  });
+
+  it("uses populated tab favicon when shortcut loading completes later", async () => {
+      const storage = deferred<Record<string, unknown>>();
       const tabs = [
         fakeTab({
           id: 7,
@@ -331,23 +345,15 @@ describe("sidebar lifecycle", () => {
           favIconUrl: "data:image/png;base64,docs-initial",
         }),
       ];
-      if (order === "tabs-first") {
-        query.resolve(tabs);
-        await flush();
-        storage.resolve(enabledShortcuts());
-      } else {
-        storage.resolve(enabledShortcuts());
-        await flush();
-        query.resolve(tabs);
-      }
-
+      const fake = createFakeChrome({ tabs });
+      fake.methods.storageGet.mockReturnValueOnce(storage.promise);
+      const started = startSidebar(fake);
       const cleanup = await started;
-      expect(shortcutImage()?.getAttribute("src")).toBe(
-        "data:image/png;base64,docs-initial",
-      );
+      storage.resolve(enabledShortcuts());
+      await vi.waitFor(() =>
+        expect(shortcutImage()?.getAttribute("src")).toBe("data:image/png;base64,docs-initial"));
       cleanup();
-    },
-  );
+  });
 
   it("prefers live shortcut favicons and otherwise restores persisted cached URLs", async () => {
     const fake = createFakeChrome({
@@ -567,7 +573,7 @@ describe("sidebar lifecycle", () => {
     );
 
     const cleanup = await started;
-    expect(rowIds()).toEqual([3, 4]);
+    await vi.waitFor(() => expect(rowIds()).toEqual([3, 4]));
     expect(shortcutImage("docs")?.getAttribute("src")).toBe(
       "data:image/png;base64,created",
     );
@@ -684,7 +690,7 @@ describe("sidebar lifecycle", () => {
 
     storage.resolve({});
     const cleanup = await started;
-    expect(strip.hidden).toBe(false);
+    await vi.waitFor(() => expect(strip.hidden).toBe(false));
     expect(
       Array.from(strip.querySelectorAll(".shortcut-button"), (button) =>
         (button as HTMLElement).dataset.shortcutId,
@@ -719,7 +725,7 @@ describe("sidebar lifecycle", () => {
       },
     });
     const cleanup = await started;
-    expect(settingsButton.disabled).toBe(false);
+    await vi.waitFor(() => expect(settingsButton.disabled).toBe(false));
     click(settingsButton);
     expect(element<HTMLDialogElement>("shortcut-dialog").open).toBe(true);
     expect(element("shortcut-editor-list").querySelector<HTMLInputElement>(".shortcut-name")?.value).toBe(
@@ -735,10 +741,12 @@ describe("sidebar lifecycle", () => {
       if (failure === "window") {
         fake.methods.getCurrent.mockRejectedValueOnce(new Error("window gone"));
       } else {
+        fake.methods.getCurrent.mockResolvedValueOnce({ id: 10 } as chrome.windows.Window);
         fake.methods.query.mockRejectedValueOnce(new Error("query failed"));
       }
 
       const cleanup = await startSidebar(fake);
+      await vi.waitFor(() => expect(element<HTMLButtonElement>("shortcut-settings").disabled).toBe(false));
       click(element("shortcut-settings"));
 
       expect(element<HTMLDialogElement>("shortcut-dialog").open).toBe(true);
@@ -773,8 +781,7 @@ describe("sidebar lifecycle", () => {
       fakeTab({ id: 3, index: 2, title: "Three" }),
     ]);
     const cleanup = await started;
-
-    expect(rowIds()).toEqual([3, 2]);
+    await vi.waitFor(() => expect(rowIds()).toEqual([3, 2]));
     expect(row(3).dataset.active).toBe("true");
     expect(row(2).dataset.active).toBe("false");
     expect(replaceChildren).not.toHaveBeenCalled();
@@ -803,7 +810,7 @@ describe("sidebar lifecycle", () => {
 
     attached.resolve(fakeTab({ id: 4, index: 2, title: "Attached" }));
     const cleanup = await started;
-    expect(rowIds()).toEqual([1, 2]);
+    await vi.waitFor(() => expect(rowIds()).toEqual([1, 2]));
     expect(replaceChildren).not.toHaveBeenCalled();
     cleanup();
   });
@@ -837,7 +844,7 @@ describe("sidebar lifecycle", () => {
   });
 
   it.each(["tabs-first", "shortcuts-first"] as const)(
-    "aggregates initialization errors deterministically when %s rejects",
+    "keeps the first screen ready when background reads reject %s",
     async (order) => {
       const query = deferred<chrome.tabs.Tab[]>();
       const storage = deferred<Record<string, unknown>>();
@@ -857,11 +864,10 @@ describe("sidebar lifecycle", () => {
         query.reject(new Error("tabs unavailable"));
       }
       const cleanup = await started;
-
-      expect(element("status-message").textContent).toBe(
-        "无法读取当前窗口的标签页；无法读取快捷网站设置",
-      );
-      for (const event of Object.values(fake.events)) expect(event.listenerCount).toBe(0);
+      await vi.waitFor(() =>
+        expect(element("status-message").textContent).toBe("无法读取快捷网站设置"));
+      expect(document.documentElement.dataset.ready).toBe("true");
+      for (const event of Object.values(fake.events)) expect(event.listenerCount).toBe(1);
       cleanup();
     },
   );
@@ -2783,7 +2789,9 @@ describe("sidebar lifecycle", () => {
 
   it("replays a replacement over an older startup snapshot", async () => {
     const snapshot = deferred<chrome.tabs.Tab[]>();
-    const fake = createFakeChrome();
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 1, index: 0, title: "Old" }), fakeTab({ id: 2, index: 1, title: "Two" })],
+    });
     fake.methods.query.mockReturnValueOnce(snapshot.promise);
     const started = startSidebar(fake);
     await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledOnce());
@@ -2798,15 +2806,16 @@ describe("sidebar lifecycle", () => {
       fakeTab({ id: 2, index: 1, title: "Two" }),
     ]);
     const cleanup = await started;
-
-    expect(rowIds()).toEqual([3, 2]);
+    await vi.waitFor(() => expect(rowIds()).toEqual([3, 2]));
     cleanup();
   });
 
   it("keeps a buffered close after its deferred replacement lookup", async () => {
     const snapshot = deferred<chrome.tabs.Tab[]>();
     const replacement = deferred<chrome.tabs.Tab>();
-    const fake = createFakeChrome();
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 1, index: 0, title: "Old" }), fakeTab({ id: 2, index: 1, title: "Two" })],
+    });
     fake.methods.query.mockReturnValueOnce(snapshot.promise);
     fake.methods.get.mockReturnValueOnce(replacement.promise);
     const started = startSidebar(fake);
@@ -2821,8 +2830,7 @@ describe("sidebar lifecycle", () => {
     await flush();
     replacement.resolve(fakeTab({ id: 3, index: 0, title: "Replacement" }));
     const cleanup = await started;
-
-    expect(rowIds()).toEqual([2]);
+    await vi.waitFor(() => expect(rowIds()).toEqual([2]));
     cleanup();
   });
 
@@ -3073,7 +3081,7 @@ describe("sidebar lifecycle", () => {
 
     expect(rowIds()).toEqual([]);
     for (const event of Object.values(fake.events)) expect(event.listenerCount).toBe(0);
-    expect(document.documentElement.dataset.ready).toBeUndefined();
+    expect(document.documentElement.dataset.ready).toBe("true");
   });
 
   it("auto entry stays active until pagehide and cleans up only once", async () => {

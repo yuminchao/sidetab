@@ -322,19 +322,22 @@ async function startSidebarInternal(
           resyncFollowUpRequested = false;
           resyncPhase = "querying";
           bufferingEvents = true;
+          const [tabsResult, groupsResult] = await Promise.allSettled([
+            deps.tabs.query({ windowId }),
+            deps.tabGroups.query({ windowId }),
+          ]);
+          if (!active || currentWindowId !== windowId) break;
           let snapshotApplied = false;
-          try {
-            const [tabs, groups] = await Promise.all([
-              deps.tabs.query({ windowId }),
-              deps.tabGroups.query({ windowId }),
-            ]);
-            if (!active || currentWindowId !== windowId) break;
-            tabStore.initialize(tabs);
-            groupStore.initialize(groups, windowId);
+          if (tabsResult.status === "fulfilled") {
+            tabStore.initialize(tabsResult.value);
+            snapshotApplied = true;
+          }
+          if (groupsResult.status === "fulfilled") {
+            groupStore.initialize(groupsResult.value, windowId);
             setStatus("groups", "");
             snapshotApplied = true;
-          } catch {
-            // A resync is best-effort; retaining the last coherent view avoids retry loops.
+          } else {
+            setStatus("groups", "无法读取当前窗口的标签分组");
           }
           if (!active || currentWindowId !== windowId) break;
           resyncPhase = "replaying";
@@ -1169,69 +1172,44 @@ async function startSidebarInternal(
     const message = [settingsResult.error, cacheResult.error].filter(Boolean).join("；");
     setStatus("shortcuts", message);
     flushFaviconCache();
+  }).catch(() => {
+    setStatus("shortcuts", "无法读取快捷网站设置");
   });
 
-  const loadTabsAndGroups = (async () => {
-    try {
-      const currentWindow = await deps.windows.getCurrent();
-      if (!active) return;
-      const windowId = currentWindow.id;
-      if (
-        typeof windowId !== "number" ||
-        !Number.isFinite(windowId) ||
-        !Number.isInteger(windowId)
-      ) {
-        throw new Error("当前窗口缺少有效 ID");
-      }
+  try {
+    const currentWindow = await deps.windows.getCurrent({ populate: true });
+    if (!active) return cleanup;
+    const windowId = currentWindow.id;
+    if (typeof windowId !== "number" || !Number.isSafeInteger(windowId)) {
+      throw new Error("当前窗口缺少有效 ID");
+    }
+    const tabs = Array.isArray(currentWindow.tabs)
+      ? currentWindow.tabs
+      : await deps.tabs.query({ windowId });
+    if (!active) return cleanup;
 
-      currentWindowId = windowId;
-      bufferingEvents = true;
-      unsubscribeTabs = subscribeWithBufferedAsyncEvents(windowId);
-      unsubscribeGroups = subscribeToTabGroupEvents(
-        deps.tabGroups,
-        windowId,
-        groupEventHandlers,
-      );
+    currentWindowId = windowId;
+    tabStore.initialize(tabs);
+    groupStore.initialize([], windowId);
+    syncShortcutFavicons();
+    renderTabList();
+    deps.document.documentElement.dataset.ready = "true";
 
-      const [tabsResult, groupsResult] = await Promise.allSettled([
-        deps.tabs.query({ windowId }),
-        deps.tabGroups.query({ windowId }),
-      ]);
-      if (tabsResult.status === "rejected") {
-        if (active) {
-          unsubscribeTabs();
-          unsubscribeGroups();
-          unsubscribeTabs = () => undefined;
-          unsubscribeGroups = () => undefined;
-          bufferingEvents = false;
-          bufferedEvents.length = 0;
-          discardPendingAsyncEvents();
-          setStatus("tabs", "无法读取当前窗口的标签页");
-        }
-        return;
-      }
-      if (!active) return;
-
-      tabStore.initialize(tabsResult.value);
-      if (groupsResult.status === "fulfilled") {
-        groupStore.initialize(groupsResult.value, windowId);
-        setStatus("groups", "");
-      } else {
-        groupStore.initialize([], windowId);
-        setStatus("groups", "无法读取当前窗口的标签分组");
-      }
-      await finishBufferedEvents();
-      if (!active) return;
-      syncShortcutFavicons();
-      renderTabList();
-    } catch {
+    bufferingEvents = true;
+    unsubscribeTabs = subscribeWithBufferedAsyncEvents(windowId);
+    unsubscribeGroups = subscribeToTabGroupEvents(
+      deps.tabGroups,
+      windowId,
+      groupEventHandlers,
+    );
+    void resyncTabsAndGroups().catch(() => undefined);
+    // Let already-resolved background API calls publish without waiting for pending work.
+    await Promise.resolve();
+    await Promise.resolve();
+  } catch {
+    if (active) {
       setStatus("tabs", "无法读取当前窗口的标签页");
     }
-  })();
-
-  await Promise.all([loadShortcuts, loadTabsAndGroups]);
-  if (active) {
-    deps.document.documentElement.dataset.ready = "true";
   }
 
   return cleanup;

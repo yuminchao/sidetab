@@ -229,7 +229,16 @@ export function createFakeChrome(options: {
     groupState[groupIndex] = updated;
     return updated;
   });
-  const getCurrent = vi.fn(async () => options.currentWindow ?? ({ id: 10 } as chrome.windows.Window));
+  const getCurrent = vi.fn(async (queryOptions?: chrome.windows.QueryOptions) => {
+    const currentWindow = options.currentWindow ?? ({ id: 10 } as chrome.windows.Window);
+    if (queryOptions?.populate) {
+      return {
+        ...currentWindow,
+        tabs: tabState.map((tab) => ({ ...tab })),
+      } as chrome.windows.Window;
+    }
+    return currentWindow;
+  });
   const storageGet = vi.fn(async (_key: string) => options.stored ?? {});
   const storageSet = vi.fn<(items: Record<string, unknown>) => Promise<void>>(
     async () => undefined,
