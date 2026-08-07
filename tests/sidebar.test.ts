@@ -1468,7 +1468,11 @@ describe("sidebar lifecycle", () => {
     });
     const cleanup = await startSidebar(fake);
 
-    for (const tabId of [1, 2, 3]) {
+    openTabContextMenu(1);
+    expect(contextMenuItem("group-same-site").disabled).toBe(false);
+    expect(contextMenuItem("close-same-site").disabled).toBe(false);
+    expect(contextMenuItem("duplicate").disabled).toBe(false);
+    for (const tabId of [2, 3]) {
       openTabContextMenu(tabId);
       expect(contextMenuItem("group-same-site").disabled).toBe(true);
       expect(contextMenuItem("close-same-site").disabled).toBe(false);
@@ -1501,7 +1505,7 @@ describe("sidebar lifecycle", () => {
     }
   });
 
-  it("disables both same-site commands for a lone ordinary HTTP tab", async () => {
+  it("allows quick grouping but disables closing for a lone ordinary HTTP tab", async () => {
     const fake = createFakeChrome({
       tabs: [
         fakeTab({ id: 1, url: "https://example.com/only", groupId: -1 }),
@@ -1511,7 +1515,7 @@ describe("sidebar lifecycle", () => {
 
     openTabContextMenu(1);
 
-    expect(contextMenuItem("group-same-site").disabled).toBe(true);
+    expect(contextMenuItem("group-same-site").disabled).toBe(false);
     expect(contextMenuItem("close-same-site").disabled).toBe(true);
     cleanup();
   });
@@ -1866,7 +1870,7 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
-  it("silently skips quick grouping when the latest snapshot no longer has a plan", async () => {
+  it("quick groups the triggering tab when the latest snapshot has no other candidate", async () => {
     const fake = createFakeChrome({
       tabs: [
         fakeTab({ id: 1, index: 0, url: "https://example.com/target", groupId: -1 }),
@@ -1881,8 +1885,14 @@ describe("sidebar lifecycle", () => {
     click(contextMenuItem("group-same-site"));
     await flush();
 
-    expect(fake.methods.group).not.toHaveBeenCalled();
-    expect(fake.methods.groupUpdate).not.toHaveBeenCalled();
+    expect(fake.methods.group).toHaveBeenCalledWith({
+      tabIds: [1],
+      createProperties: { windowId: 10 },
+    });
+    expect(fake.methods.groupUpdate).toHaveBeenCalledWith(777, {
+      title: "example.com",
+      color: "grey",
+    });
     expect(element("status-message").textContent).toBe("");
     expect(fake.methods.query).toHaveBeenCalledOnce();
     cleanup();
@@ -1903,7 +1913,7 @@ describe("sidebar lifecycle", () => {
 
     await vi.waitFor(() =>
       expect(element("status-message").textContent).toBe(
-        "无法快速分组同类网站",
+        "无法快速分组",
       ),
     );
     expect(fake.methods.query).toHaveBeenCalledTimes(2);

@@ -90,13 +90,14 @@ describe("tab group actions", () => {
     expect(update).toHaveBeenCalledWith(7, { title: "Work", color: "blue" });
   });
 
-  it("creates one same-site group and saves its hostname with the grey color", async () => {
+  it("creates one same-site group and saves its hostname with the supplied color", async () => {
     const { actions, group, update } = createApis();
 
     await expect(actions.createSameSite({
       tabIds: [3, 4, 5],
       windowId: 10,
       hostname: "example.com",
+      color: "purple",
     })).resolves.toBe(7);
 
     expect(group).toHaveBeenCalledOnce();
@@ -105,7 +106,24 @@ describe("tab group actions", () => {
       createProperties: { windowId: 10 },
     });
     expect(update).toHaveBeenCalledOnce();
-    expect(update).toHaveBeenCalledWith(7, { title: "example.com", color: "grey" });
+    expect(update).toHaveBeenCalledWith(7, { title: "example.com", color: "purple" });
+  });
+
+  it("creates a same-site group from a single tab", async () => {
+    const { actions, group, update } = createApis();
+
+    await expect(actions.createSameSite({
+      tabIds: [3],
+      windowId: 10,
+      hostname: "example.com",
+      color: "cyan",
+    })).resolves.toBe(7);
+
+    expect(group).toHaveBeenCalledWith({
+      tabIds: [3],
+      createProperties: { windowId: 10 },
+    });
+    expect(update).toHaveBeenCalledWith(7, { title: "example.com", color: "cyan" });
   });
 
   it("maps same-site group creation failures without updating metadata", async () => {
@@ -117,8 +135,21 @@ describe("tab group actions", () => {
       tabIds: [3, 4],
       windowId: 10,
       hostname: "example.com",
-    })).rejects.toMatchObject({ message: "无法快速分组同类网站", cause });
+      color: "grey",
+    })).rejects.toMatchObject({ message: "无法快速分组", cause });
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it("uses the quick-group failure message", async () => {
+    const { actions, group } = createApis();
+    group.mockRejectedValueOnce(new Error("chrome failed"));
+
+    await expect(actions.createSameSite({
+      tabIds: [3],
+      windowId: 10,
+      hostname: "example.com",
+      color: "grey",
+    })).rejects.toThrow("无法快速分组");
   });
 
   it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
@@ -131,6 +162,7 @@ describe("tab group actions", () => {
         tabIds: [3, 4],
         windowId: 10,
         hostname: "example.com",
+        color: "grey",
       })).rejects.toThrow("标签组 ID 无效");
       expect(update).not.toHaveBeenCalled();
     },
@@ -281,6 +313,7 @@ describe("tab group actions", () => {
       tabIds: [3, 4],
       windowId: 10,
       hostname: "example.com",
+      color: "grey",
     })).rejects.toMatchObject({
       message: "分组已创建，但无法保存名称或颜色",
       groupId: 7,

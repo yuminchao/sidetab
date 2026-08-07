@@ -10,9 +10,10 @@ type TabGroupActions = {
     color: TabGroupColor;
   }): Promise<number>;
   createSameSite(input: {
-    tabIds: [number, number, ...number[]];
+    tabIds: [number, ...number[]];
     windowId: number;
     hostname: string;
+    color: TabGroupColor;
   }): Promise<number>;
   createTabInGroup(input: {
     groupId: number;
@@ -108,11 +109,11 @@ export function createTabGroupActions(
           createProperties: { windowId: input.windowId },
         });
       } catch (cause) {
-        throw new Error("无法快速分组同类网站", { cause });
+        throw new Error("无法快速分组", { cause });
       }
 
       assertValidTabGroupId(groupId);
-      await updateCreated(groupId, input.hostname, "grey");
+      await updateCreated(groupId, input.hostname, input.color);
       return groupId;
     },
 

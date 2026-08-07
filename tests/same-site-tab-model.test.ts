@@ -4,7 +4,9 @@ import {
   getHttpHostname,
   getOtherSameSiteTabIds,
   getSameSiteMenuAvailability,
+  selectQuickGroupColor,
 } from "../src/sidepanel/same-site-tab-model";
+import { TAB_GROUP_COLORS, type TabGroupViewModel } from "../src/sidepanel/tab-group-model";
 import type { TabViewModel } from "../src/sidepanel/tab-model";
 
 function tab(overrides: Partial<TabViewModel> = {}): TabViewModel {
@@ -18,6 +20,17 @@ function tab(overrides: Partial<TabViewModel> = {}): TabViewModel {
     active: false,
     pinned: false,
     groupId: -1,
+    ...overrides,
+  };
+}
+
+function group(overrides: Partial<TabGroupViewModel> = {}): TabGroupViewModel {
+  return {
+    id: 1,
+    windowId: 10,
+    title: "Example",
+    color: "grey",
+    collapsed: false,
     ...overrides,
   };
 }
@@ -92,6 +105,20 @@ describe("getSameSiteMenuAvailability", () => {
     });
   });
 
+  it("allows grouping when the target is the only eligible same-host tab", () => {
+    const tabs = [
+      tab({ id: 1, url: "https://example.com/target" }),
+      tab({ id: 2, url: "https://example.com/pinned", pinned: true }),
+      tab({ id: 3, url: "https://example.com/grouped", groupId: 7 }),
+      tab({ id: 4, url: "https://example.com/other-window", windowId: 11 }),
+    ];
+
+    expect(getSameSiteMenuAvailability(tabs, 1)).toEqual({
+      canCloseOtherSameSite: true,
+      canGroupSameSite: true,
+    });
+  });
+
   it("reads each item once while calculating both states for a 500-tab snapshot", () => {
     const source = Array.from({ length: 500 }, (_, id) => tab({
       id: id + 1,
@@ -139,9 +166,23 @@ describe("createSameSiteGroupPlan", () => {
     ["the target uses a non-HTTP URL", [tab({ url: "file:///tmp/a" }), tab({ id: 2 })], 1],
     ["the target is pinned", [tab({ pinned: true }), tab({ id: 2 })], 1],
     ["the target is already grouped", [tab({ groupId: 3 }), tab({ id: 2 })], 1],
-    ["only one eligible tab exists", [tab(), tab({ id: 2, pinned: true })], 1],
   ])("returns undefined when %s", (_reason, tabs, tabId) => {
     expect(createSameSiteGroupPlan(tabs, tabId)).toBeUndefined();
+  });
+
+  it("creates a plan containing only the triggering tab when it is the sole eligible candidate", () => {
+    const tabs = [
+      tab({ id: 1 }),
+      tab({ id: 2, pinned: true }),
+      tab({ id: 3, groupId: 7 }),
+      tab({ id: 4, windowId: 11 }),
+    ];
+
+    expect(createSameSiteGroupPlan(tabs, 1)).toEqual({
+      hostname: "example.com",
+      windowId: 10,
+      tabIds: [1],
+    });
   });
 
   it("does not mutate the supplied tabs while calculating close and group results", () => {
@@ -174,5 +215,54 @@ describe("createSameSiteGroupPlan", () => {
     expect(groupPlan?.tabIds).toHaveLength(250);
     expect(groupPlan?.tabIds[0]).toBe(1);
     expect(groupPlan?.tabIds.at(-1)).toBe(499);
+  });
+});
+
+describe("selectQuickGroupColor", () => {
+  it("returns the first palette color for an empty window", () => {
+    expect(selectQuickGroupColor([], 10)).toBe("grey");
+  });
+
+  it("returns the first unused palette color in order", () => {
+    expect(selectQuickGroupColor([group({ color: "grey" })], 10)).toBe("blue");
+  });
+
+  it("does not count duplicate colors as distinct used colors", () => {
+    expect(selectQuickGroupColor([
+      group({ id: 1, color: "grey" }),
+      group({ id: 2, color: "grey" }),
+      group({ id: 3, color: "blue" }),
+    ], 10)).toBe("red");
+  });
+
+  it("ignores colors used by groups in other windows", () => {
+    expect(selectQuickGroupColor([
+      group({ id: 1, color: "grey" }),
+      group({ id: 2, windowId: 11, color: "blue" }),
+    ], 10)).toBe("blue");
+  });
+
+  it("cycles to grey after nine groups use every palette color", () => {
+    const groups = TAB_GROUP_COLORS.map((color, index) => group({ id: index, color }));
+
+    expect(selectQuickGroupColor(groups, 10)).toBe("grey");
+  });
+
+  it("cycles to blue after ten groups use every palette color", () => {
+    const groups = [
+      ...TAB_GROUP_COLORS.map((color, index) => group({ id: index, color })),
+      group({ id: 10, color: "grey" }),
+    ];
+
+    expect(selectQuickGroupColor(groups, 10)).toBe("blue");
+  });
+
+  it("does not mutate the input groups", () => {
+    const groups = [group({ color: "grey" }), group({ id: 2, color: "blue" })];
+    const original = structuredClone(groups);
+
+    selectQuickGroupColor(groups, 10);
+
+    expect(groups).toEqual(original);
   });
 });

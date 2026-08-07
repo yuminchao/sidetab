@@ -1,9 +1,10 @@
+import { TAB_GROUP_COLORS, type TabGroupColor, type TabGroupViewModel } from "./tab-group-model";
 import type { TabViewModel } from "./tab-model";
 
 export type SameSiteGroupPlan = {
   hostname: string;
   windowId: number;
-  tabIds: [number, number, ...number[]];
+  tabIds: [number, ...number[]];
 };
 
 export type SameSiteMenuAvailability = {
@@ -74,7 +75,7 @@ export function getSameSiteMenuAvailability(
       && !target.pinned
       && target.groupId < 0
       && stats
-      && stats.groupCandidateCount >= 2
+      && stats.groupCandidateCount >= 1
       && !stats.hasBusyGroupCandidate
     ),
   };
@@ -116,14 +117,31 @@ export function createSameSiteGroupPlan(
     && getHttpHostname(tab.url) === hostname
   ));
 
-  if (eligible.length < 2) {
+  if (eligible.length === 0) {
     return undefined;
   }
 
-  const [first, second, ...remaining] = eligible;
+  const [first, ...remaining] = eligible;
   return {
     hostname,
     windowId: target.windowId,
-    tabIds: [first!.id, second!.id, ...remaining.map((tab) => tab.id)],
+    tabIds: [first!.id, ...remaining.map((tab) => tab.id)],
   };
+}
+
+export function selectQuickGroupColor(
+  groups: readonly TabGroupViewModel[],
+  windowId: number,
+): TabGroupColor {
+  const usedColors = new Set<TabGroupColor>();
+  let groupCount = 0;
+
+  for (const group of groups) {
+    if (group.windowId !== windowId) continue;
+    groupCount += 1;
+    usedColors.add(group.color);
+  }
+
+  return TAB_GROUP_COLORS.find((color) => !usedColors.has(color))
+    ?? TAB_GROUP_COLORS[groupCount % TAB_GROUP_COLORS.length]!;
 }

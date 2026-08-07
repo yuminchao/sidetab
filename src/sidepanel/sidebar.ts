@@ -35,6 +35,7 @@ import {
   createSameSiteGroupPlan,
   getOtherSameSiteTabIds,
   getSameSiteMenuAvailability,
+  selectQuickGroupColor,
 } from "./same-site-tab-model";
 
 export type SidebarDependencies = {
@@ -504,7 +505,10 @@ async function startSidebarInternal(
           if (!plan || plan.tabIds.some((tabId) => groupTabBusy.has(tabId))) return;
           for (const tabId of plan.tabIds) groupTabBusy.add(tabId);
           runTabOperation(
-            groupActions.createSameSite(plan).then(() => undefined),
+            groupActions.createSameSite({
+              ...plan,
+              color: selectQuickGroupColor(groupStore.list(), plan.windowId),
+            }).then(() => undefined),
             () => {
               for (const tabId of plan.tabIds) groupTabBusy.delete(tabId);
             },
