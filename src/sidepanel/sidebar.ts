@@ -132,6 +132,7 @@ async function startSidebarInternal(
   let appearanceSettingsBusy = false;
   let restoreRecentlyClosedBusy = false;
   let groupsReady = false;
+  let quickGroupingReady = false;
   const groupTabBusy = new Set<number>();
   const groupToggleBusy = new Set<number>();
   const groupCommandBusy = new Set<number>();
@@ -323,6 +324,7 @@ async function startSidebarInternal(
       try {
         do {
           resyncFollowUpRequested = false;
+          quickGroupingReady = false;
           resyncPhase = "querying";
           bufferingEvents = true;
           const tabsSnapshot = Promise.resolve().then(() =>
@@ -352,6 +354,7 @@ async function startSidebarInternal(
           resyncPhase = "replaying";
           const replayed = await finishBufferedEvents();
           if (!active || currentWindowId !== windowId) break;
+          quickGroupingReady = groupsReady;
           if (snapshotApplied || replayed) {
             syncShortcutFavicons();
             renderTabList();
@@ -482,7 +485,7 @@ async function startSidebarInternal(
           tab,
           canCloseBelow: getClosableTabsBelow(tabs, id).length > 0,
           ...sameSite,
-          canGroupSameSite: groupsReady && sameSite.canGroupSameSite,
+          canGroupSameSite: quickGroupingReady && sameSite.canGroupSameSite,
         };
       },
       getGroups: () => groupStore.list(),
@@ -504,7 +507,7 @@ async function startSidebarInternal(
           return;
         }
         if (command.action === "group-same-site") {
-          if (!groupsReady) return;
+          if (!quickGroupingReady) return;
           const plan = createSameSiteGroupPlan(tabStore.list(), command.tabId);
           if (!plan || plan.tabIds.some((tabId) => groupTabBusy.has(tabId))) return;
           for (const tabId of plan.tabIds) groupTabBusy.add(tabId);

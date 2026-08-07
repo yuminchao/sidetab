@@ -250,6 +250,30 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
+  it("keeps quick grouping disabled until buffered startup tab lookups replay", async () => {
+    const groups = deferred<chrome.tabGroups.TabGroup[]>();
+    const attached = deferred<chrome.tabs.Tab>();
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 1 })] });
+    fake.methods.groupQuery.mockReturnValueOnce(groups.promise);
+    fake.methods.get.mockReturnValueOnce(attached.promise);
+
+    const cleanup = await startSidebarRaw(fake);
+    await vi.waitFor(() => expect(fake.methods.groupQuery).toHaveBeenCalledOnce());
+    fake.events.onAttached.emit(2, { newWindowId: 10, newPosition: 1 });
+    await vi.waitFor(() => expect(fake.methods.get).toHaveBeenCalledWith(2));
+    groups.resolve([]);
+    await flush();
+
+    openTabContextMenu(1);
+    expect(contextMenuItem("group-same-site").disabled).toBe(true);
+
+    attached.resolve(fakeTab({ id: 2, index: 1, url: "https://first.example/attached" }));
+    await vi.waitFor(() => expect(rowIds()).toEqual([1, 2]));
+    openTabContextMenu(1);
+    expect(contextMenuItem("group-same-site").disabled).toBe(false);
+    cleanup();
+  });
+
   it("replays buffered tab updates over an older snapshot in receive order", async () => {
     const tabs = deferred<chrome.tabs.Tab[]>();
     const groups = deferred<chrome.tabGroups.TabGroup[]>();
@@ -371,6 +395,43 @@ describe("sidebar lifecycle", () => {
     expect(rowIds()).toEqual([1]);
     openTabContextMenu(1);
     expect(contextMenuItem("group-same-site").disabled).toBe(false);
+    cleanup();
+  });
+
+  it("rejects an already open quick-group command while a later reconciliation is pending", async () => {
+    const resyncTabs = deferred<chrome.tabs.Tab[]>();
+    const resyncGroups = deferred<chrome.tabGroups.TabGroup[]>();
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 1 })] });
+    const cleanup = await startSidebar(fake);
+    fake.methods.query.mockReturnValueOnce(resyncTabs.promise);
+    fake.methods.groupQuery.mockReturnValueOnce(resyncGroups.promise);
+    fake.methods.get.mockRejectedValueOnce(new Error("replacement missing"));
+
+    openTabContextMenu(1);
+    const quickGroup = contextMenuItem("group-same-site");
+    expect(quickGroup.disabled).toBe(false);
+    fake.events.onReplaced.emit(2, 99);
+    await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledTimes(2));
+    const statusBefore = element("status-message").textContent;
+    const tabQueriesBefore = fake.methods.query.mock.calls.length;
+    const groupQueriesBefore = fake.methods.groupQuery.mock.calls.length;
+    click(quickGroup);
+    await flush();
+
+    expect(fake.methods.group).not.toHaveBeenCalled();
+    expect(fake.methods.groupUpdate).not.toHaveBeenCalled();
+    expect(element("status-message").textContent).toBe(statusBefore);
+    expect(fake.methods.query).toHaveBeenCalledTimes(tabQueriesBefore);
+    expect(fake.methods.groupQuery).toHaveBeenCalledTimes(groupQueriesBefore);
+
+    openTabContextMenu(1);
+    expect(contextMenuItem("group-same-site").disabled).toBe(true);
+    resyncTabs.resolve([fakeTab({ id: 1 })]);
+    resyncGroups.resolve([]);
+    await vi.waitFor(() => {
+      openTabContextMenu(1);
+      expect(contextMenuItem("group-same-site").disabled).toBe(false);
+    });
     cleanup();
   });
 
