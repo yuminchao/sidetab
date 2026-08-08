@@ -321,6 +321,16 @@ input:focus-visible {
   min-width: 0;
 }
 
+/* Keep group interiors continuous while separating complete group blocks. */
+.tab-list > .tab-group-row:not(:first-child),
+.tab-list > .tab-group-row[data-collapsed="true"] + .tab-row:not([data-group-id]),
+.tab-list > .tab-row:is(
+  [data-group-position="last"],
+  [data-group-position="single"]
+) + .tab-row:not([data-group-id]) {
+  margin-block-start: 4px;
+}
+
 .tab-group-row {
   position: relative;
   width: 100%;
@@ -501,7 +511,7 @@ input:focus-visible {
 }
 
 .tab-row[data-active="true"] {
-  background: ButtonFace;
+  background: #fff3bf;
   box-shadow: inset 2px 0 AccentColor;
 }
 
@@ -521,7 +531,7 @@ input:focus-visible {
   box-shadow: inset 0 0 0 1px #1a73e8;
 }
 
-.tab-row:hover {
+.tab-row:hover:not([data-active="true"]) {
   background: ButtonFace;
 }
 
@@ -821,6 +831,10 @@ input:focus-visible {
 
   .tab-row[data-context-selected="true"] {
     box-shadow: inset 0 0 0 1px #8ab4f8;
+  }
+
+  .tab-row[data-active="true"] {
+    background: #4a3f18;
   }
 
   .tab-row[data-active="true"][data-context-selected="true"] {
@@ -1187,6 +1201,10 @@ input:focus-visible {
 }
 
 @media (forced-colors: active) {
+  .tab-row[data-active="true"] {
+    background: ButtonFace;
+  }
+
   .tab-row[data-group-id] {
     --member-group-color: CanvasText;
   }

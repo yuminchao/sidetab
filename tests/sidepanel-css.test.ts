@@ -59,6 +59,35 @@ describe("side panel responsive CSS", () => {
     expect(css).not.toMatch(/\.tab-row\[data-group-id\]\s*{[^}]*border-(?:top|block):/s);
   });
 
+  it("adds one external boundary between group blocks without using list gap", () => {
+    const root = postcss.parse(css);
+    const boundaryRule = root.nodes.find((node) => (
+      node.type === "rule"
+      && node.selector.includes(".tab-group-row:not(:first-child)")
+      && node.selector.includes('.tab-group-row[data-collapsed="true"] + .tab-row:not([data-group-id])')
+      && node.selector.includes('[data-group-position="last"]')
+      && node.selector.includes('[data-group-position="single"]')
+    ));
+    expect(boundaryRule?.type).toBe("rule");
+    if (!boundaryRule || boundaryRule.type !== "rule") return;
+
+    const selectors = boundaryRule.selectors;
+    expect(selectors).toContain(".tab-list > .tab-group-row:not(:first-child)");
+    expect(selectors).toContain(
+      '.tab-list > .tab-group-row[data-collapsed="true"] + .tab-row:not([data-group-id])',
+    );
+    expect(selectors.at(-1)).toContain('+ .tab-row:not([data-group-id])');
+    expect(boundaryRule.nodes).toHaveLength(1);
+    expect(boundaryRule.nodes[0]).toMatchObject({
+      type: "decl",
+      prop: "margin-block-start",
+      value: "4px",
+    });
+    expect(selectors.some((selector) => selector.includes(".tab-group-row:first-child"))).toBe(false);
+    expect(selectors.some((selector) => selector.includes(".new-tab-button"))).toBe(false);
+    expect(css).not.toMatch(/\.tab-list\s*\{[^}]*gap\s*:/s);
+  });
+
   it("maps every Chrome group color to the member border color", () => {
     for (const color of [
       "grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange",
@@ -551,8 +580,9 @@ describe("side panel responsive CSS", () => {
 
   it("keeps the active marker for ungrouped tabs while outlining context-selected tabs", () => {
     expect(css).toMatch(
-      /\.tab-row\[data-active="true"\]\s*\{[^}]*background:\s*ButtonFace[^}]*box-shadow:\s*inset\s+2px\s+0\s+AccentColor/s,
+      /\.tab-row\[data-active="true"\]\s*\{[^}]*background:\s*#fff3bf[^}]*box-shadow:\s*inset\s+2px\s+0\s+AccentColor/s,
     );
+    expect(css).toMatch(/\.tab-row:hover:not\(\[data-active="true"\]\)\s*\{[^}]*background:\s*ButtonFace/s);
     expect(css).toMatch(
       /\.tab-row\[data-context-selected="true"\]\s*\{[^}]*box-shadow:\s*inset\s+0\s+0\s+0\s+1px\s+#1a73e8/s,
     );
@@ -567,6 +597,9 @@ describe("side panel responsive CSS", () => {
     const darkMedia = css.match(
       /@media\s*\(prefers-color-scheme:\s*dark\)\s*\{([\s\S]*?)\n\}/s,
     )?.[1] ?? "";
+    expect(darkMedia).toMatch(
+      /\.tab-row\[data-active="true"\]\s*\{[^}]*background:\s*#4a3f18/s,
+    );
     expect(darkMedia).toMatch(
       /\.tab-row\[data-context-selected="true"\]\s*\{[^}]*box-shadow:\s*inset\s+0\s+0\s+0\s+1px\s+#8ab4f8/s,
     );
@@ -599,6 +632,9 @@ describe("side panel responsive CSS", () => {
     expect(darkGroupedContextRule).not.toMatch(/AccentColor/);
 
     const forcedColors = css.slice(css.indexOf("@media (forced-colors: active)"));
+    expect(forcedColors).toMatch(
+      /\.tab-row\[data-active="true"\]\s*\{[^}]*background:\s*ButtonFace/s,
+    );
     expect(forcedColors).toMatch(
       /\.tab-row\[data-group-id\]\s*\{[^}]*--member-group-color:\s*CanvasText/s,
     );
