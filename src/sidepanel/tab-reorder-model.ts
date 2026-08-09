@@ -1,4 +1,5 @@
 import type { TabViewModel } from "./tab-model";
+import { getTabSubtreeIds, getTabTreeParentId } from "./tab-tree-model";
 
 export type DropPlacement = "before" | "after";
 
@@ -122,18 +123,56 @@ export function shouldDetachTreeTabOnDrop(
   sourceId: number,
   target: TabDropTarget,
   detachedTabIds: ReadonlySet<number>,
+  attachedTabParentIds: ReadonlyMap<number, number> = new Map(),
 ): boolean {
-  const source = tabs.find((tab) => tab.id === sourceId);
-  if (
-    source?.openerTabId === undefined ||
-    detachedTabIds.has(source.id) ||
-    target.kind === "group"
-  ) {
-    return target.kind === "group" && source?.openerTabId !== undefined
-      && !detachedTabIds.has(source.id);
-  }
+  const parentId = getTabTreeParentId(
+    tabs, sourceId, detachedTabIds, attachedTabParentIds,
+  );
+  if (parentId === undefined) return false;
+  if (target.kind === "group") return true;
   const targetTab = tabs.find((tab) => tab.id === target.tabId);
-  const staysAfterParent = targetTab?.id === source.openerTabId && target.placement === "after";
-  const staysWithSibling = targetTab?.openerTabId === source.openerTabId;
+  const staysAfterParent = targetTab?.id === parentId && target.placement === "after";
+  const staysWithSibling = getTabTreeParentId(
+    tabs, target.tabId, detachedTabIds, attachedTabParentIds,
+  ) === parentId;
   return !staysAfterParent && !staysWithSibling;
+}
+
+export function getTreeAttachmentParentIdOnDrop(
+  tabs: readonly TabViewModel[],
+  sourceId: number,
+  target: TabDropTarget,
+  detachedTabIds: ReadonlySet<number>,
+  attachedTabParentIds: ReadonlyMap<number, number>,
+): number | undefined {
+  if (target.kind !== "tab" || target.placement !== "after") return undefined;
+  if (getTabTreeParentId(
+    tabs, sourceId, detachedTabIds, attachedTabParentIds,
+  ) !== undefined) return undefined;
+  const source = tabs.find((tab) => tab.id === sourceId);
+  const targetTab = tabs.find((tab) => tab.id === target.tabId);
+  const targetParentId = getTabTreeParentId(
+    tabs, target.tabId, detachedTabIds, attachedTabParentIds,
+  );
+  const targetHasChildren = getTabSubtreeIds(
+    tabs, target.tabId, detachedTabIds, attachedTabParentIds,
+  ).length > 1;
+  const parentId = targetHasChildren || targetParentId === undefined
+    ? target.tabId
+    : targetParentId;
+  const parent = tabs.find((tab) => tab.id === parentId);
+  if (
+    !source
+    || !targetTab
+    || !parent
+    || source.id === targetTab.id
+    || source.windowId !== parent.windowId
+    || source.pinned
+    || parent.pinned
+    || source.groupId !== parent.groupId
+  ) return undefined;
+  const subtreeIds = getTabSubtreeIds(
+    tabs, sourceId, detachedTabIds, attachedTabParentIds,
+  );
+  return subtreeIds.includes(targetTab.id) ? undefined : parent.id;
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createTabBlockReorderPlan,
   createTabReorderPlan,
+  getTreeAttachmentParentIdOnDrop,
   shouldDetachTreeTabOnDrop,
   type TabDropTarget,
 } from "../src/sidepanel/tab-reorder-model";
@@ -31,6 +32,36 @@ const tabTarget = (tabId: number, placement: "before" | "after"): TabDropTarget 
 const groupTarget = (groupId: number): TabDropTarget => ({ kind: "group", groupId });
 
 describe("createTabReorderPlan", () => {
+  it("attaches only a root tab dropped after a valid parent outside its own subtree", () => {
+    const tabs = [
+      fakeTabModel({ id: 1, index: 0 }),
+      fakeTabModel({ id: 2, index: 1, openerTabId: 1 }),
+      fakeTabModel({ id: 3, index: 2 }),
+      fakeTabModel({ id: 4, index: 3 }),
+    ];
+    expect(getTreeAttachmentParentIdOnDrop(
+      tabs, 3, tabTarget(1, "after"), new Set(), new Map(),
+    )).toBe(1);
+    expect(getTreeAttachmentParentIdOnDrop(
+      tabs, 4, tabTarget(2, "after"), new Set(), new Map(),
+    )).toBe(1);
+    expect(getTreeAttachmentParentIdOnDrop(
+      tabs, 3, tabTarget(1, "before"), new Set(), new Map(),
+    )).toBeUndefined();
+    expect(getTreeAttachmentParentIdOnDrop(
+      tabs, 1, tabTarget(2, "after"), new Set(), new Map(),
+    )).toBeUndefined();
+    expect(getTreeAttachmentParentIdOnDrop(
+      tabs, 2, tabTarget(3, "after"), new Set(), new Map(),
+    )).toBeUndefined();
+    expect(shouldDetachTreeTabOnDrop(
+      tabs,
+      3,
+      tabTarget(4, "after"),
+      new Set(),
+      new Map([[3, 1]]),
+    )).toBe(true);
+  });
   it("detaches only when a child is dropped outside its sibling area", () => {
     const tabs = [
       fakeTabModel({ id: 1, index: 0 }),

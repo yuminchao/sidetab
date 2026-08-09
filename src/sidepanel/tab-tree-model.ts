@@ -16,13 +16,14 @@ export type VisibleTabTreeEntry = {
 export function buildTabForest(
   tabs: readonly TabViewModel[],
   detachedTabIds: ReadonlySet<number> = new Set(),
+  attachedTabParentIds: ReadonlyMap<number, number> = new Map(),
 ): TabTreeNode[] {
   const orderedTabs = [...tabs].sort(compareTabs);
   const tabsById = new Map(orderedTabs.map((tab) => [tab.id, tab]));
   const parentById = new Map<number, number>();
 
   for (const child of orderedTabs) {
-    const parentId = child.openerTabId;
+    const parentId = attachedTabParentIds.get(child.id) ?? child.openerTabId;
     const parent = parentId === undefined ? undefined : tabsById.get(parentId);
     if (
       !parent ||
@@ -77,8 +78,9 @@ export function getTabSubtreeIds(
   tabs: readonly TabViewModel[],
   sourceId: number,
   detachedTabIds: ReadonlySet<number> = new Set(),
+  attachedTabParentIds: ReadonlyMap<number, number> = new Map(),
 ): number[] {
-  const stack = [...buildTabForest(tabs, detachedTabIds)].reverse();
+  const stack = [...buildTabForest(tabs, detachedTabIds, attachedTabParentIds)].reverse();
   while (stack.length > 0) {
     const node = stack.pop();
     if (!node) continue;
@@ -100,6 +102,24 @@ export function getTabSubtreeIds(
     }
   }
   return [];
+}
+
+export function getTabTreeParentId(
+  tabs: readonly TabViewModel[],
+  childId: number,
+  detachedTabIds: ReadonlySet<number> = new Set(),
+  attachedTabParentIds: ReadonlyMap<number, number> = new Map(),
+): number | undefined {
+  const stack = [...buildTabForest(tabs, detachedTabIds, attachedTabParentIds)];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) continue;
+    for (const child of node.children) {
+      if (child.tab.id === childId) return node.tab.id;
+      stack.push(child);
+    }
+  }
+  return undefined;
 }
 
 function removeCycleRelationships(

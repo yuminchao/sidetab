@@ -31,6 +31,7 @@ export type TabListOptions = {
   treeEnabled?: boolean;
   collapsedTabIds?: ReadonlySet<number>;
   detachedTabIds?: ReadonlySet<number>;
+  attachedTabParentIds?: ReadonlyMap<number, number>;
 };
 
 export function buildTabListItems(
@@ -112,6 +113,7 @@ function buildTreeTabListItems(
   const forest = buildTabForest(
     orderedTabs.filter((tab) => !tab.pinned),
     options.detachedTabIds,
+    options.attachedTabParentIds,
   );
   const groupedRoots = new Map<number, TabTreeNode[]>();
   const units: Array<

@@ -29,6 +29,7 @@ import { createTabMiddleClickController } from "./tab-middle-click";
 import {
   createTabBlockReorderPlan,
   createTabReorderPlan,
+  getTreeAttachmentParentIdOnDrop,
   shouldDetachTreeTabOnDrop,
 } from "./tab-reorder-model";
 import { createTabGroupReorderPlan } from "./tab-group-reorder-model";
@@ -137,6 +138,7 @@ async function startSidebarInternal(
   let lastScrolledActiveTabId: number | undefined;
   const collapsedTabIds = new Set<number>();
   const detachedTabIds = new Set<number>();
+  const attachedTabParentIds = new Map<number, number>();
   const replacementTabIds = new Map<number, number>();
   let operationGeneration = 0;
   let reorderBusy = false;
@@ -235,6 +237,7 @@ async function startSidebarInternal(
       treeEnabled: isTreeEnabled(),
       collapsedTabIds,
       detachedTabIds,
+      attachedTabParentIds,
     }));
     const activeTabId = tabs.find((tab) => tab.active)?.id;
     if (
@@ -257,7 +260,7 @@ async function startSidebarInternal(
     if (!isTreeEnabled() || currentWindowId === undefined) return;
     void treeSessionStore.save(
       currentWindowId,
-      { collapsedTabIds, detachedTabIds },
+      { collapsedTabIds, detachedTabIds, attachedTabParentIds },
     ).catch(() => undefined);
   };
 
@@ -322,6 +325,7 @@ async function startSidebarInternal(
         if (saved.newTabBehavior === "root") {
           collapsedTabIds.clear();
           detachedTabIds.clear();
+          attachedTabParentIds.clear();
           if (currentWindowId !== undefined) {
             void treeSessionStore.clear(currentWindowId).catch(() => undefined);
           }
@@ -630,6 +634,7 @@ async function startSidebarInternal(
               isTreeEnabled()
             ) {
               detachedTabIds.add(duplicatedTabId);
+              attachedTabParentIds.delete(duplicatedTabId);
               persistTreeSession();
               renderTabList();
             }
@@ -788,34 +793,60 @@ async function startSidebarInternal(
         if (reorderBusy) return;
         const tabs = tabStore.list();
         const sourceIds = isTreeEnabled()
-          ? getTabSubtreeIds(tabs, intent.sourceId, detachedTabIds)
+          ? getTabSubtreeIds(
+            tabs, intent.sourceId, detachedTabIds, attachedTabParentIds,
+          )
           : [intent.sourceId];
+        const attachmentParentId = isTreeEnabled()
+          ? getTreeAttachmentParentIdOnDrop(
+            tabs,
+            intent.sourceId,
+            intent.target,
+            detachedTabIds,
+            attachedTabParentIds,
+          )
+          : undefined;
         const blockPlan = sourceIds.length > 1
           ? createTabBlockReorderPlan(tabs, sourceIds, intent.target)
           : undefined;
         const plan = createTabReorderPlan(
           tabs, intent.sourceId, intent.target,
         );
-        if (!plan || (sourceIds.length > 1 && !blockPlan)) return;
         const shouldDetach = isTreeEnabled()
           && shouldDetachTreeTabOnDrop(
             tabs,
             intent.sourceId,
             intent.target,
             detachedTabIds,
+            attachedTabParentIds,
           );
+        const applyTreeMutation = (): void => {
+          if (attachmentParentId !== undefined) {
+            attachedTabParentIds.set(intent.sourceId, attachmentParentId);
+            detachedTabIds.delete(intent.sourceId);
+          } else if (shouldDetach) {
+            attachedTabParentIds.delete(intent.sourceId);
+            detachedTabIds.add(intent.sourceId);
+          } else {
+            return;
+          }
+          persistTreeSession();
+          renderTabList();
+        };
+        const hasTreeMutation = attachmentParentId !== undefined || shouldDetach;
+        if (!plan) {
+          if (hasTreeMutation) applyTreeMutation();
+          return;
+        }
+        if (sourceIds.length > 1 && !blockPlan) return;
         reorderBusy = true;
         updateDragEnabled();
         const reorderOperation = blockPlan
           ? tabActions.reorderMany(blockPlan)
           : tabActions.reorder(plan);
         runTabOperation(
-          shouldDetach
-            ? reorderOperation.then(() => {
-              detachedTabIds.add(intent.sourceId);
-              persistTreeSession();
-              renderTabList();
-            })
+          hasTreeMutation
+            ? reorderOperation.then(applyTreeMutation)
             : reorderOperation,
           () => {
             if (!active) return;
@@ -1033,6 +1064,10 @@ async function startSidebarInternal(
         tabStore.remove(tabId);
         collapsedTabIds.delete(tabId);
         detachedTabIds.delete(tabId);
+        attachedTabParentIds.delete(tabId);
+        for (const [childId, parentId] of attachedTabParentIds) {
+          if (parentId === tabId) attachedTabParentIds.delete(childId);
+        }
         persistTreeSession();
       },
       renderTabList,
@@ -1047,6 +1082,14 @@ async function startSidebarInternal(
     replacementTabIds.set(removedTabId, tab.id);
     if (collapsedTabIds.delete(removedTabId)) collapsedTabIds.add(tab.id);
     if (detachedTabIds.delete(removedTabId)) detachedTabIds.add(tab.id);
+    const replacementParentId = attachedTabParentIds.get(removedTabId);
+    if (replacementParentId !== undefined) {
+      attachedTabParentIds.delete(removedTabId);
+      attachedTabParentIds.set(tab.id, replacementParentId);
+    }
+    for (const [childId, parentId] of attachedTabParentIds) {
+      if (parentId === removedTabId) attachedTabParentIds.set(childId, tab.id);
+    }
     persistTreeSession();
   };
 
@@ -1382,14 +1425,21 @@ async function startSidebarInternal(
       treeSessionStore.load(windowId).catch(() => ({
         collapsedTabIds: new Set<number>(),
         detachedTabIds: new Set<number>(),
+        attachedTabParentIds: new Map<number, number>(),
       })),
     ]).then(([, treeState]) => {
       if (!active || currentWindowId !== windowId) return;
       collapsedTabIds.clear();
       detachedTabIds.clear();
+      attachedTabParentIds.clear();
       if (shortcutSettings.newTabBehavior === "child") {
         copyMigratedIds(treeState.collapsedTabIds, collapsedTabIds, replacementTabIds);
         copyMigratedIds(treeState.detachedTabIds, detachedTabIds, replacementTabIds);
+        copyMigratedParentIds(
+          treeState.attachedTabParentIds,
+          attachedTabParentIds,
+          replacementTabIds,
+        );
       } else {
         void treeSessionStore.clear(windowId).catch(() => undefined);
       }
@@ -1428,16 +1478,36 @@ function copyMigratedIds(
   replacements: ReadonlyMap<number, number>,
 ): void {
   for (const sourceId of source) {
-    let id = sourceId;
-    const visited = new Set<number>();
-    while (!visited.has(id)) {
-      visited.add(id);
-      const replacement = replacements.get(id);
-      if (replacement === undefined) break;
-      id = replacement;
-    }
-    target.add(id);
+    target.add(getMigratedId(sourceId, replacements));
   }
+}
+
+function copyMigratedParentIds(
+  source: ReadonlyMap<number, number>,
+  target: Map<number, number>,
+  replacements: ReadonlyMap<number, number>,
+): void {
+  for (const [childId, parentId] of source) {
+    target.set(
+      getMigratedId(childId, replacements),
+      getMigratedId(parentId, replacements),
+    );
+  }
+}
+
+function getMigratedId(
+  sourceId: number,
+  replacements: ReadonlyMap<number, number>,
+): number {
+  let id = sourceId;
+  const visited = new Set<number>();
+  while (!visited.has(id)) {
+    visited.add(id);
+    const replacement = replacements.get(id);
+    if (replacement === undefined) break;
+    id = replacement;
+  }
+  return id;
 }
 
 function getSidebarElements(document: Document): SidebarElements {

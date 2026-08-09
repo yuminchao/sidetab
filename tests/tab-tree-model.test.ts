@@ -40,6 +40,25 @@ describe("tab tree model", () => {
       .toEqual([[1, 0], [2, 1], [3, 2], [4, 1]]);
   });
 
+  it("applies explicit session parents without bypassing tree boundaries", () => {
+    const tabs = [
+      tab({ id: 1, index: 0 }),
+      tab({ id: 2, index: 1 }),
+      tab({ id: 3, index: 2, pinned: true }),
+      tab({ id: 4, index: 3, groupId: 7 }),
+    ];
+
+    expect(summarize(buildTabForest(
+      tabs,
+      new Set(),
+      new Map([[2, 1], [3, 1], [4, 1]]),
+    ))).toEqual([
+      [1, 1, [[2, 0, []]]],
+      [3, 0, []],
+      [4, 0, []],
+    ]);
+  });
+
   it("suppresses relationships across pinned and native-group boundaries", () => {
     const forest = buildTabForest([
       tab({ id: 1, index: 0 }),

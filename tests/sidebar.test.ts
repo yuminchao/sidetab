@@ -3473,7 +3473,11 @@ describe("sidebar lifecycle", () => {
     click(row(1).querySelector("[data-action='toggle-tree']")!);
     expect(rowIds()).toEqual([1, 3]);
     await vi.waitFor(() => expect(sessionSet).toHaveBeenCalledWith({
-      "tabTreeSessionState:10": { collapsedTabIds: [1], detachedTabIds: [] },
+      "tabTreeSessionState:10": {
+        collapsedTabIds: [1],
+        detachedTabIds: [],
+        attachedTabParentIds: [],
+      },
     }));
 
     click(element("new-tab-button"));
@@ -3553,6 +3557,93 @@ describe("sidebar lifecycle", () => {
     await vi.waitFor(() => expect(row(1).dataset.treeParent).toBe("true"));
     expect(row(1).draggable).toBe(true);
     expect(groupRow(7).draggable).toBe(true);
+    cleanup();
+  });
+
+  it("attaches a root tab to a tree when dropped after its new parent", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, active: true }),
+        fakeTab({ id: 2, index: 1, openerTabId: 1 }),
+        fakeTab({ id: 3, index: 2 }),
+      ],
+      stored: {
+        shortcutSettings: {
+          ...createDefaultShortcutSettings(),
+          newTabBehavior: "child",
+        },
+      },
+    });
+    const fake = {
+      ...base,
+      sessionStorage: {
+        get: vi.fn().mockResolvedValue({ "tabTreeSessionState:10": {} }),
+        set: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(row(1).dataset.treeParent).toBe("true"));
+    const parent = row(1);
+    vi.spyOn(parent, "getBoundingClientRect").mockReturnValue({
+      top: 0, height: 30, bottom: 30, left: 0, right: 100, width: 100,
+      x: 0, y: 0, toJSON: () => ({}),
+    });
+
+    row(3).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
+    const over = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.defineProperty(over, "clientY", { value: 29 });
+    parent.dispatchEvent(over);
+    parent.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => expect(fake.methods.move).toHaveBeenCalledWith(3, { index: 1 }));
+    await vi.waitFor(() => expect(row(3).dataset.treeDepth).toBe("1"));
+    expect(fake.sessionStorage.set).toHaveBeenCalledWith({
+      "tabTreeSessionState:10": {
+        collapsedTabIds: [],
+        detachedTabIds: [],
+        attachedTabParentIds: [[3, 1]],
+      },
+    });
+    cleanup();
+  });
+
+  it("attaches an already adjacent root without issuing a no-op Chrome move", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, active: true }),
+        fakeTab({ id: 3, index: 1 }),
+        fakeTab({ id: 2, index: 2, openerTabId: 1 }),
+      ],
+      stored: {
+        shortcutSettings: {
+          ...createDefaultShortcutSettings(),
+          newTabBehavior: "child",
+        },
+      },
+    });
+    const fake = {
+      ...base,
+      sessionStorage: {
+        get: vi.fn().mockResolvedValue({ "tabTreeSessionState:10": {} }),
+        set: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(row(1).dataset.treeParent).toBe("true"));
+    const parent = row(1);
+    vi.spyOn(parent, "getBoundingClientRect").mockReturnValue({
+      top: 0, height: 30, bottom: 30, left: 0, right: 100, width: 100,
+      x: 0, y: 0, toJSON: () => ({}),
+    });
+
+    row(3).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
+    const over = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.defineProperty(over, "clientY", { value: 29 });
+    parent.dispatchEvent(over);
+    parent.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
+
+    expect(fake.methods.move).not.toHaveBeenCalled();
+    expect(row(3).dataset.treeDepth).toBe("1");
     cleanup();
   });
 });
