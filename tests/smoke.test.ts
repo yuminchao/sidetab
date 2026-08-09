@@ -16,21 +16,17 @@ function parseCsp(value: string): Record<string, string[]> {
 }
 
 describe("extension manifest", () => {
-  it("keeps the npm and extension release versions aligned at 0.10.4", () => {
+  it("keeps the npm and extension release versions aligned at 0.11.0", () => {
     const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
     const packageLock = JSON.parse(readFileSync("package-lock.json", "utf8"));
-    expect(manifest.version).toBe("0.10.4");
-    expect(packageJson.version).toBe("0.10.4");
-    expect(packageLock.version).toBe("0.10.4");
-    expect(packageLock.packages[""].version).toBe("0.10.4");
+    expect(manifest.version).toBe("0.11.0");
+    expect(packageJson.version).toBe("0.11.0");
+    expect(packageLock.version).toBe("0.11.0");
+    expect(packageLock.packages[""].version).toBe("0.11.0");
   });
 
   it("records the 0.10.4 context actions and visual refinements release", () => {
-    const readme = readFileSync("README.md", "utf8");
-    const checklist = readFileSync("docs/chrome-web-store-checklist.md", "utf8");
     const updateLog = readFileSync("update.log", "utf8");
-    expect(readme).toContain("release/sidetab-lite-0.10.4.zip");
-    expect(checklist).toContain("release/sidetab-lite-0.10.4.zip");
     for (const detail of [
       "打开所有快捷网站",
       "完整 hostname",
@@ -46,7 +42,6 @@ describe("extension manifest", () => {
     ]) {
       expect(updateLog).toContain(detail);
     }
-    expect(checklist).toContain("0.10.4");
   });
 
   it("documents the current release archive, permissions, and file count", () => {
@@ -135,22 +130,21 @@ describe("extension manifest", () => {
     }
   });
 
-  it("records the 0.10.4 release scope and boundaries first", () => {
+  it("records the 0.11.0 tab-tree release scope and boundaries first", () => {
     const updateLog = readFileSync("update.log", "utf8");
     const nextVersion = updateLog.search(/\r?\n(?=\d+\.\d+\.\d+\r?$)/m);
     const currentRelease = nextVersion === -1 ? updateLog : updateLog.slice(0, nextVersion);
 
-    expect(updateLog.split(/\r?\n/, 1)[0]).toBe("0.10.4");
+    expect(updateLog.split(/\r?\n/, 1)[0]).toBe("0.11.0");
     for (const detail of [
-      "打开所有快捷网站",
-      "完整 hostname",
-      "关闭上方标签页",
-      "4px",
-      "淡黄色背景",
+      "新 Tab 行为",
+      "openerTabId",
+      "多级缩进",
+      "storage.session",
+      "整棵子树",
+      "O(n)",
       "无新增权限",
-      "无新增查询",
       "无新增轮询",
-      "无长期缓存",
       "无远程代码",
     ]) {
       expect(currentRelease).toContain(detail);
