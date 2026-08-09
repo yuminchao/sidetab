@@ -2,7 +2,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 
-const storeAssetsDirectory = path.resolve("store-assets", "0.10.2");
+const storeAssetsDirectory = path.resolve("store-assets", "0.11.0");
 
 const imageCases = [
   {
