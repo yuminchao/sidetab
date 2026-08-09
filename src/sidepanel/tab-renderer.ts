@@ -242,6 +242,11 @@ function createTabRow(tab: TabViewModel, dragEnabled: boolean): HTMLElement {
   treeToggle.textContent = ">";
   treeToggle.hidden = true;
 
+  const treeLeaf = document.createElement("span");
+  treeLeaf.className = "tab-tree-leaf";
+  treeLeaf.setAttribute("aria-hidden", "true");
+  treeLeaf.hidden = true;
+
   const pin = document.createElement("span");
   pin.className = "pin-indicator";
   pin.setAttribute("aria-hidden", "true");
@@ -261,7 +266,7 @@ function createTabRow(tab: TabViewModel, dragEnabled: boolean): HTMLElement {
   close.dataset.action = "close";
   close.textContent = "×";
 
-  row.append(treeToggle, main, close);
+  row.append(treeToggle, treeLeaf, main, close);
   patchTabRow(row, tab, dragEnabled);
   return row;
 }
@@ -283,24 +288,36 @@ function updateTreeDecoration(
   tree: TabTreeDecoration | undefined,
 ): void {
   const toggle = row.querySelector<HTMLButtonElement>(".tab-tree-toggle");
+  const leaf = row.querySelector<HTMLElement>(".tab-tree-leaf");
   if (!tree) {
     delete row.dataset.treeDepth;
     delete row.dataset.treeParent;
     row.style.removeProperty("--tab-tree-indent");
     row.removeAttribute("aria-level");
+    delete row.dataset.activeDescendant;
     if (toggle) toggle.hidden = true;
+    if (leaf) leaf.hidden = true;
     return;
   }
 
   const visualDepth = Math.min(tree.depth, 4);
   row.dataset.treeDepth = String(tree.depth);
   row.dataset.treeParent = String(tree.hasChildren);
+  row.dataset.activeDescendant = String(tree.containsActiveDescendant);
   row.style.setProperty("--tab-tree-indent", `${visualDepth * 12}px`);
   row.setAttribute("aria-level", String(tree.depth + 1));
+  if (leaf) leaf.hidden = tree.hasChildren || tree.depth === 0;
   if (!toggle) return;
   toggle.hidden = !tree.hasChildren;
   toggle.setAttribute("aria-expanded", String(!tree.collapsed));
-  toggle.setAttribute("aria-label", tree.collapsed ? "展开子标签" : "折叠子标签");
+  toggle.setAttribute(
+    "aria-label",
+    tree.collapsed && tree.containsActiveDescendant
+      ? "展开子标签，包含当前标签"
+      : tree.collapsed
+        ? "展开子标签"
+        : "折叠子标签",
+  );
 }
 
 function patchTabRow(row: HTMLElement, tab: TabViewModel, dragEnabled: boolean): void {

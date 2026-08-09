@@ -135,18 +135,57 @@ describe("tab renderer", () => {
     if (item.kind !== "tab") throw new Error("expected tab fixture");
     renderer.render([{
       ...item,
-      tree: { depth: 2, hasChildren: true, collapsed: true },
+      tree: {
+        depth: 2,
+        hasChildren: true,
+        collapsed: true,
+        containsActiveDescendant: true,
+      },
     }]);
 
     const row = list.firstElementChild as HTMLElement;
     const toggle = row.querySelector<HTMLButtonElement>(".tab-tree-toggle");
-    expect(row.dataset).toMatchObject({ treeDepth: "2", treeParent: "true" });
+    expect(row.dataset).toMatchObject({
+      treeDepth: "2",
+      treeParent: "true",
+      activeDescendant: "true",
+    });
     expect(row.style.getPropertyValue("--tab-tree-indent")).toBe("24px");
     expect(row.getAttribute("aria-level")).toBe("3");
     expect(toggle?.hidden).toBe(false);
     expect(toggle?.dataset.action).toBe("toggle-tree");
     expect(toggle?.getAttribute("aria-expanded")).toBe("false");
-    expect(toggle?.getAttribute("aria-label")).toBe("展开子标签");
+    expect(toggle?.getAttribute("aria-label")).toBe("展开子标签，包含当前标签");
+  });
+
+  it("uses the tree control slot for a decorative leaf dot", () => {
+    const renderer = createTabRenderer({ list, empty });
+    const item = tabItem({ id: 7 });
+    if (item.kind !== "tab") throw new Error("expected tab fixture");
+    renderer.render([{
+      ...item,
+      tree: {
+        depth: 1,
+        hasChildren: false,
+        collapsed: false,
+        containsActiveDescendant: false,
+      },
+    }]);
+
+    const row = list.firstElementChild as HTMLElement;
+    expect(row.querySelector<HTMLButtonElement>(".tab-tree-toggle")?.hidden).toBe(true);
+    expect(row.querySelector(".tab-tree-leaf")?.getAttribute("aria-hidden")).toBe("true");
+
+    renderer.render([{
+      ...item,
+      tree: {
+        depth: 0,
+        hasChildren: false,
+        collapsed: false,
+        containsActiveDescendant: false,
+      },
+    }]);
+    expect(row.querySelector<HTMLElement>(".tab-tree-leaf")?.hidden).toBe(true);
   });
 
   it("writes group decoration datasets when creating a tab row", () => {

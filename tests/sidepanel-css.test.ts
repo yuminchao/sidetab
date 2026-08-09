@@ -242,9 +242,12 @@ describe("side panel responsive CSS", () => {
 
   it("renders shortcut buttons as transparent borderless 32px icon controls", () => {
     expect(css).toMatch(
-      /\.shortcut-button\s*{[^}]*width:\s*32px[^}]*height:\s*32px[^}]*border-color:\s*transparent[^}]*background:\s*transparent/s,
+      /\.shortcut-button,\s*\.locate-active-tab-button\s*{[^}]*width:\s*32px[^}]*height:\s*32px[^}]*border-color:\s*transparent[^}]*background:\s*transparent/s,
     );
     expect(css).not.toMatch(/\.shortcut-button\s*{[^}]*display:\s*none/s);
+    expect(css).toMatch(
+      /\.locate-active-tab-button::before\s*{[^}]*width:\s*20px[^}]*height:\s*20px[^}]*mask:\s*url\("\.\.\/assets\/icons\/locate\.svg"\)/s,
+    );
     expect(css).toMatch(/button:focus-visible[^}]*outline:/s);
   });
 
@@ -572,6 +575,19 @@ describe("side panel responsive CSS", () => {
     expect(indicatorRule).toMatch(/height:\s*2px/);
     expect(indicatorRule).toMatch(/background:\s*AccentColor/);
     expect(indicatorRule).not.toMatch(/(?:margin|padding|width):/);
+  });
+
+  it("uses logical indentation for tree leaves and depth-aware drop lines", () => {
+    expect(css).toMatch(
+      /\.tab-tree-leaf\s*\{[^}]*inset-inline-start:\s*calc\(10px \+ var\(--tab-tree-indent, 0px\)\)[^}]*width:\s*4px[^}]*height:\s*4px[^}]*background:\s*GrayText/s,
+    );
+    expect(css).toMatch(
+      /\.tab-row\[data-active-descendant="true"\][^{]*\{[^}]*color:\s*AccentColor/s,
+    );
+    expect(css).toMatch(/\.tab-list\[data-drop-placement="after"\]::after/s);
+    expect(css).toMatch(/inset-inline-start:\s*var\(--drop-depth-indent, 4px\)/s);
+    expect(css).toMatch(/inset-inline-end:\s*4px/s);
+    expect(css).not.toMatch(/--drop-depth-indent[^;]*transition/);
   });
 
   it("uses adaptive menu surfaces and inert context separators", () => {

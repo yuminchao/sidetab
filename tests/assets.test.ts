@@ -13,6 +13,7 @@ const pngAssets = [
 ] as const;
 
 const sanitizedSvgAssets = [
+  { name: "locate.svg", pathCount: 1 },
   { name: "search.svg", pathCount: 1 },
   { name: "settings.svg", pathCount: 1 },
   { name: "network.svg", pathCount: 1 },

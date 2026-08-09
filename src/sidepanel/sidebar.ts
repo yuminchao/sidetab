@@ -29,15 +29,18 @@ import { createTabMiddleClickController } from "./tab-middle-click";
 import {
   createTabBlockReorderPlan,
   createTabReorderPlan,
-  getTreeAttachmentParentIdOnDrop,
-  shouldDetachTreeTabOnDrop,
 } from "./tab-reorder-model";
 import { createTabGroupReorderPlan } from "./tab-group-reorder-model";
 import type { TabDragIntent } from "./tab-drag-controller";
 import { createTabRenderer } from "./tab-renderer";
 import { TabStore } from "./tab-store";
 import { createTabTreeSessionStore } from "./tab-tree-session-store";
-import { getTabSubtreeIds } from "./tab-tree-model";
+import {
+  getTabSubtreeIds,
+  getTabTreeAncestorIds,
+  getTabTreeParentId,
+} from "./tab-tree-model";
+import { createTabTreeDropResolver } from "./tab-tree-drop-model";
 import {
   createSameSiteGroupPlan,
   getOtherSameSiteTabIds,
@@ -59,6 +62,7 @@ export type SidebarDependencies = {
 
 type SidebarElements = {
   shortcutStrip: HTMLElement;
+  locateActiveTab: HTMLButtonElement;
   search: HTMLInputElement;
   historyResults: HTMLElement;
   settingsButton: HTMLButtonElement;
@@ -139,6 +143,7 @@ async function startSidebarInternal(
   const collapsedTabIds = new Set<number>();
   const detachedTabIds = new Set<number>();
   const attachedTabParentIds = new Map<number, number>();
+  let treeSessionRevision = 0;
   const replacementTabIds = new Map<number, number>();
   let operationGeneration = 0;
   let reorderBusy = false;
@@ -254,14 +259,79 @@ async function startSidebarInternal(
     } else if (!isTreeEnabled()) {
       lastScrolledActiveTabId = undefined;
     }
+    elements.locateActiveTab.disabled = !tabsReady || !tabs.some((tab) => tab.active);
+  };
+
+  const onLocateActiveTabClick = (): void => {
+    const activeTab = tabStore.list().find((tab) => tab.active);
+    if (!activeTab) return;
+    let row = findTabRow(elements.list, activeTab.id);
+    if (!row && isTreeEnabled()) {
+      let expanded = false;
+      for (const ancestorId of getTabTreeAncestorIds(
+        tabStore.list(),
+        activeTab.id,
+        detachedTabIds,
+        attachedTabParentIds,
+      )) {
+        expanded = collapsedTabIds.delete(ancestorId) || expanded;
+      }
+      if (expanded) {
+        renderTabList();
+        persistTreeSession();
+        row = findTabRow(elements.list, activeTab.id);
+      }
+    }
+    if (!row) return;
+    row.scrollIntoView?.({ block: "center", inline: "nearest" });
+    row.querySelector<HTMLButtonElement>(".tab-main")?.focus({ preventScroll: true });
+  };
+
+  const saveTreeSession = (): Promise<void> => {
+    if (!isTreeEnabled() || currentWindowId === undefined) return Promise.resolve();
+    return treeSessionStore.save(
+      currentWindowId,
+      { collapsedTabIds, detachedTabIds, attachedTabParentIds },
+    );
+  };
+
+  const restoreTreeSessionAfterFailure = async (
+    windowId: number,
+    revision: number,
+    error: unknown,
+  ): Promise<boolean> => {
+    if (!active || currentWindowId !== windowId || treeSessionRevision !== revision) {
+      return false;
+    }
+    const stored = await treeSessionStore.load(windowId);
+    if (!active || currentWindowId !== windowId || treeSessionRevision !== revision) {
+      return false;
+    }
+    treeSessionRevision += 1;
+    collapsedTabIds.clear();
+    detachedTabIds.clear();
+    attachedTabParentIds.clear();
+    for (const id of stored.collapsedTabIds) collapsedTabIds.add(id);
+    for (const id of stored.detachedTabIds) detachedTabIds.add(id);
+    for (const [childId, parentId] of stored.attachedTabParentIds) {
+      attachedTabParentIds.set(childId, parentId);
+    }
+    renderTabList();
+    setStatus(
+      "operation",
+      error instanceof Error ? error.message : "无法保存标签树状态",
+    );
+    void resyncTabsAndGroups();
+    return true;
   };
 
   const persistTreeSession = (): void => {
-    if (!isTreeEnabled() || currentWindowId === undefined) return;
-    void treeSessionStore.save(
-      currentWindowId,
-      { collapsedTabIds, detachedTabIds, attachedTabParentIds },
-    ).catch(() => undefined);
+    const windowId = currentWindowId;
+    const revision = ++treeSessionRevision;
+    void saveTreeSession().catch(async (error: unknown) => {
+      if (windowId === undefined) return;
+      await restoreTreeSessionAfterFailure(windowId, revision, error);
+    });
   };
 
   const flushFaviconCache = (): void => {
@@ -774,6 +844,49 @@ async function startSidebarInternal(
         && Boolean(groupStore.get(groupId))
         && !groupCommandBusy.has(groupId)
         && !groupToggleBusy.has(groupId),
+      prepareTabDrag: (sourceId) => {
+        if (!isTreeEnabled()) return (target) => target;
+        const tabs = tabStore.list();
+        const source = tabs.find((tab) => tab.id === sourceId);
+        if (!source || source.pinned || source.groupId >= 0) return (target) => target;
+        return createTabTreeDropResolver(
+          tabs,
+          sourceId,
+          collapsedTabIds,
+          detachedTabIds,
+          attachedTabParentIds,
+        );
+      },
+      canDropTab: (sourceId, target) => {
+        const latestTabs = tabStore.list();
+        const source = latestTabs.find((tab) => tab.id === sourceId);
+        if (!source) return false;
+        if (target.kind === "group") return Boolean(groupStore.get(target.groupId));
+        if (!isTreeEnabled() || source.pinned || source.groupId >= 0) {
+          return target.kind === "end"
+            || latestTabs.some((tab) => tab.id === target.tabId);
+        }
+        const baseTarget = target.kind === "end"
+          ? { kind: "end" as const }
+          : { kind: "tab" as const, tabId: target.tabId, placement: target.placement };
+        const latestTarget = createTabTreeDropResolver(
+          latestTabs,
+          sourceId,
+          collapsedTabIds,
+          detachedTabIds,
+          attachedTabParentIds,
+        )(baseTarget, target.tree?.depth ?? 0);
+        if (!latestTarget || latestTarget.kind !== target.kind) return false;
+        if (latestTarget.kind === "end" && target.kind === "end") {
+          return latestTarget.tree?.depth === target.tree?.depth
+            && latestTarget.tree?.parentId === target.tree?.parentId;
+        }
+        return latestTarget.kind === "tab" && target.kind === "tab"
+          && latestTarget.tabId === target.tabId
+          && latestTarget.placement === target.placement
+          && latestTarget.tree?.depth === target.tree?.depth
+          && latestTarget.tree?.parentId === target.tree?.parentId;
+      },
       onDrop(intent: TabDragIntent) {
         if (intent.kind === "group") {
           const groupId = intent.sourceGroupId;
@@ -797,45 +910,89 @@ async function startSidebarInternal(
             tabs, intent.sourceId, detachedTabIds, attachedTabParentIds,
           )
           : [intent.sourceId];
-        const attachmentParentId = isTreeEnabled()
-          ? getTreeAttachmentParentIdOnDrop(
+        const currentParentId = isTreeEnabled()
+          ? getTabTreeParentId(
             tabs,
             intent.sourceId,
-            intent.target,
             detachedTabIds,
             attachedTabParentIds,
           )
           : undefined;
+        const treePlacement = intent.target.kind !== "group"
+          ? intent.target.tree
+          : undefined;
+        const hasExplicitTreePlacement = isTreeEnabled()
+          && (treePlacement !== undefined || intent.target.kind === "group");
+        const attachmentParentId = treePlacement?.parentId;
         const blockPlan = sourceIds.length > 1
           ? createTabBlockReorderPlan(tabs, sourceIds, intent.target)
           : undefined;
         const plan = createTabReorderPlan(
           tabs, intent.sourceId, intent.target,
         );
-        const shouldDetach = isTreeEnabled()
-          && shouldDetachTreeTabOnDrop(
-            tabs,
-            intent.sourceId,
-            intent.target,
-            detachedTabIds,
-            attachedTabParentIds,
+        const shouldDetach = hasExplicitTreePlacement
+          && attachmentParentId === undefined
+          && currentParentId !== undefined;
+        const shouldAttach = hasExplicitTreePlacement
+          && attachmentParentId !== undefined
+          && attachmentParentId !== currentParentId;
+        const shouldExpandParent = attachmentParentId !== undefined
+          && collapsedTabIds.has(attachmentParentId);
+        const applyTreeMutation = async (): Promise<void> => {
+          const latestTabs = tabStore.list();
+          const latestSource = latestTabs.find((tab) => tab.id === intent.sourceId);
+          const latestParent = attachmentParentId === undefined
+            ? undefined
+            : latestTabs.find((tab) => tab.id === attachmentParentId);
+          const invalidAttachment = shouldAttach && (
+            !latestSource
+            || !latestParent
+            || latestSource.windowId !== latestParent.windowId
+            || latestSource.pinned
+            || latestParent.pinned
+            || latestSource.groupId !== latestParent.groupId
+            || getTabSubtreeIds(
+              latestTabs,
+              intent.sourceId,
+              detachedTabIds,
+              attachedTabParentIds,
+            ).includes(attachmentParentId!)
           );
-        const applyTreeMutation = (): void => {
-          if (attachmentParentId !== undefined) {
+          if (!latestSource || invalidAttachment) {
+            await resyncTabsAndGroups();
+            return;
+          }
+          if (shouldAttach && attachmentParentId !== undefined) {
             attachedTabParentIds.set(intent.sourceId, attachmentParentId);
             detachedTabIds.delete(intent.sourceId);
           } else if (shouldDetach) {
             attachedTabParentIds.delete(intent.sourceId);
             detachedTabIds.add(intent.sourceId);
-          } else {
-            return;
           }
-          persistTreeSession();
-          renderTabList();
+          if (shouldExpandParent && attachmentParentId !== undefined) {
+            collapsedTabIds.delete(attachmentParentId);
+          }
+          const windowId = currentWindowId;
+          const revision = ++treeSessionRevision;
+          try {
+            await saveTreeSession();
+            renderTabList();
+          } catch (error) {
+            if (
+              windowId !== undefined
+              && await restoreTreeSessionAfterFailure(windowId, revision, error)
+            ) throw error;
+          }
         };
-        const hasTreeMutation = attachmentParentId !== undefined || shouldDetach;
+        const hasTreeMutation = shouldAttach || shouldDetach || shouldExpandParent;
         if (!plan) {
-          if (hasTreeMutation) applyTreeMutation();
+          if (hasTreeMutation) {
+            runTabOperation(
+              applyTreeMutation(),
+              undefined,
+              () => { void resyncTabsAndGroups(); },
+            );
+          }
           return;
         }
         if (sourceIds.length > 1 && !blockPlan) return;
@@ -853,7 +1010,7 @@ async function startSidebarInternal(
             reorderBusy = false;
             updateDragEnabled();
           },
-          plan.groupChanged ? () => { void resyncTabsAndGroups(); } : undefined,
+          () => { void resyncTabsAndGroups(); },
         );
       },
     },
@@ -924,6 +1081,7 @@ async function startSidebarInternal(
     elements.list.removeEventListener("click", onListClick);
     elements.list.removeEventListener("keydown", onListKeyDown);
     elements.newTabButton.removeEventListener("click", onNewTabClick);
+    elements.locateActiveTab.removeEventListener("click", onLocateActiveTabClick);
     elements.tabScroll.removeEventListener("scroll", onTabScroll);
     elements.settingsButton.removeEventListener("click", onSettingsClick);
     elements.chromeAppearanceSettings.removeEventListener(
@@ -1028,6 +1186,7 @@ async function startSidebarInternal(
   elements.list.addEventListener("click", onListClick);
   elements.list.addEventListener("keydown", onListKeyDown);
   elements.newTabButton.addEventListener("click", onNewTabClick);
+  elements.locateActiveTab.addEventListener("click", onLocateActiveTabClick);
   elements.tabScroll.addEventListener("scroll", onTabScroll);
   elements.settingsButton.addEventListener("click", onSettingsClick);
   elements.chromeAppearanceSettings.addEventListener(
@@ -1098,6 +1257,18 @@ async function startSidebarInternal(
       applyEvent(
         () => {
           tabStore.add(tab);
+          if (isTreeEnabled() && tab.active && tab.id !== undefined) {
+            let expanded = false;
+            for (const ancestorId of getTabTreeAncestorIds(
+              tabStore.list(),
+              tab.id,
+              detachedTabIds,
+              attachedTabParentIds,
+            )) {
+              expanded = collapsedTabIds.delete(ancestorId) || expanded;
+            }
+            if (expanded) persistTreeSession();
+          }
         },
         renderTabList,
         true,
@@ -1513,6 +1684,7 @@ function getMigratedId(
 function getSidebarElements(document: Document): SidebarElements {
   return {
     shortcutStrip: requireElement(document, "shortcut-strip", HTMLElement),
+    locateActiveTab: requireElement(document, "locate-active-tab", HTMLButtonElement),
     search: requireElement(document, "tab-search", HTMLInputElement),
     historyResults: requireElement(document, "history-search-results", HTMLElement),
     settingsButton: requireElement(document, "shortcut-settings", HTMLButtonElement),

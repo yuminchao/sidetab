@@ -201,6 +201,30 @@ describe("shortcut renderer", () => {
     );
   });
 
+  it("preserves a static locate control as the last strip item", () => {
+    const locate = document.createElement("button");
+    locate.id = "locate-active-tab";
+    elements.strip.append(locate);
+    const renderer = createShortcutRenderer(elements, { onOpen, onSave });
+
+    renderer.render(settings({
+      items: [
+        shortcut({ id: "a", url: "https://a.example/" }),
+        shortcut({ id: "b", url: "https://b.example/" }),
+      ],
+    }));
+
+    expect(Array.from(elements.strip.children)).toEqual([
+      elements.strip.querySelector('[data-shortcut-id="a"]'),
+      elements.strip.querySelector('[data-shortcut-id="b"]'),
+      locate,
+    ]);
+
+    renderer.render(settings({ items: [shortcut({ id: "b", url: "https://b.example/" })] }));
+    expect(elements.strip.lastElementChild).toBe(locate);
+    expect(elements.strip.querySelectorAll(".shortcut-button")).toHaveLength(1);
+  });
+
   it.each(["openai", "google", "github", "letter"] as const)(
     "renders the same network favicon candidates for the legacy %s icon value",
     (icon) => {

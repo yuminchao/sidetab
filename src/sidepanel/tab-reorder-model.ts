@@ -1,11 +1,21 @@
 import type { TabViewModel } from "./tab-model";
-import { getTabSubtreeIds, getTabTreeParentId } from "./tab-tree-model";
 
 export type DropPlacement = "before" | "after";
 
+export type TabTreeDropPlacement = {
+  depth: number;
+  parentId?: number;
+};
+
 export type TabDropTarget =
-  | { kind: "tab"; tabId: number; placement: DropPlacement }
-  | { kind: "group"; groupId: number };
+  | {
+      kind: "tab";
+      tabId: number;
+      placement: DropPlacement;
+      tree?: TabTreeDropPlacement;
+    }
+  | { kind: "group"; groupId: number }
+  | { kind: "end"; tree?: TabTreeDropPlacement };
 
 export type TabReorderPlan = {
   tabId: number;
@@ -43,7 +53,7 @@ export function createTabReorderPlan(
     insertionIndex = target.placement === "before" ? targetIndex : targetIndex + 1;
     targetPinned = targetTab.pinned;
     targetGroupId = targetTab.groupId;
-  } else {
+  } else if (target.kind === "group") {
     let lastGroupTab: TabViewModel | undefined;
     for (let index = tabsWithoutSource.length - 1; index >= 0; index -= 1) {
       const tab = tabsWithoutSource[index];
@@ -56,6 +66,10 @@ export function createTabReorderPlan(
     insertionIndex = tabsWithoutSource.findIndex((tab) => tab.id === lastGroupTab.id) + 1;
     targetPinned = false;
     targetGroupId = target.groupId;
+  } else {
+    insertionIndex = tabsWithoutSource.length;
+    targetPinned = false;
+    targetGroupId = -1;
   }
 
   const sourceIndex = sortedTabs.findIndex((tab) => tab.id === sourceId);
@@ -96,7 +110,7 @@ export function createTabBlockReorderPlan(
     const index = remaining.findIndex((tab) => tab.id === target.tabId);
     if (index < 0) return undefined;
     targetIndex = target.placement === "before" ? index : index + 1;
-  } else {
+  } else if (target.kind === "group") {
     let lastIndex = -1;
     for (let index = remaining.length - 1; index >= 0; index -= 1) {
       if (remaining[index]?.groupId === target.groupId) {
@@ -106,6 +120,8 @@ export function createTabBlockReorderPlan(
     }
     if (lastIndex < 0) return undefined;
     targetIndex = lastIndex + 1;
+  } else {
+    targetIndex = remaining.length;
   }
   return {
     tabIds: [sourceId, ...uniqueSourceIds.slice(1)],
@@ -116,63 +132,4 @@ export function createTabBlockReorderPlan(
     targetGroupId: base.targetGroupId,
     groupChanged: base.groupChanged,
   };
-}
-
-export function shouldDetachTreeTabOnDrop(
-  tabs: readonly TabViewModel[],
-  sourceId: number,
-  target: TabDropTarget,
-  detachedTabIds: ReadonlySet<number>,
-  attachedTabParentIds: ReadonlyMap<number, number> = new Map(),
-): boolean {
-  const parentId = getTabTreeParentId(
-    tabs, sourceId, detachedTabIds, attachedTabParentIds,
-  );
-  if (parentId === undefined) return false;
-  if (target.kind === "group") return true;
-  const targetTab = tabs.find((tab) => tab.id === target.tabId);
-  const staysAfterParent = targetTab?.id === parentId && target.placement === "after";
-  const staysWithSibling = getTabTreeParentId(
-    tabs, target.tabId, detachedTabIds, attachedTabParentIds,
-  ) === parentId;
-  return !staysAfterParent && !staysWithSibling;
-}
-
-export function getTreeAttachmentParentIdOnDrop(
-  tabs: readonly TabViewModel[],
-  sourceId: number,
-  target: TabDropTarget,
-  detachedTabIds: ReadonlySet<number>,
-  attachedTabParentIds: ReadonlyMap<number, number>,
-): number | undefined {
-  if (target.kind !== "tab" || target.placement !== "after") return undefined;
-  if (getTabTreeParentId(
-    tabs, sourceId, detachedTabIds, attachedTabParentIds,
-  ) !== undefined) return undefined;
-  const source = tabs.find((tab) => tab.id === sourceId);
-  const targetTab = tabs.find((tab) => tab.id === target.tabId);
-  const targetParentId = getTabTreeParentId(
-    tabs, target.tabId, detachedTabIds, attachedTabParentIds,
-  );
-  const targetHasChildren = getTabSubtreeIds(
-    tabs, target.tabId, detachedTabIds, attachedTabParentIds,
-  ).length > 1;
-  const parentId = targetHasChildren || targetParentId === undefined
-    ? target.tabId
-    : targetParentId;
-  const parent = tabs.find((tab) => tab.id === parentId);
-  if (
-    !source
-    || !targetTab
-    || !parent
-    || source.id === targetTab.id
-    || source.windowId !== parent.windowId
-    || source.pinned
-    || parent.pinned
-    || source.groupId !== parent.groupId
-  ) return undefined;
-  const subtreeIds = getTabSubtreeIds(
-    tabs, sourceId, detachedTabIds, attachedTabParentIds,
-  );
-  return subtreeIds.includes(targetTab.id) ? undefined : parent.id;
 }

@@ -15,7 +15,9 @@ function installFixture(): void {
   delete document.documentElement.dataset.ready;
   document.documentElement.style.removeProperty("--tab-title-font-size");
   document.body.innerHTML = `
-    <div id="shortcut-strip" hidden></div>
+    <div id="shortcut-strip" hidden>
+      <button id="locate-active-tab" type="button" disabled></button>
+    </div>
     <input id="tab-search" />
     <div id="history-search-results" role="listbox" hidden></div>
     <button id="shortcut-settings"></button>
@@ -720,7 +722,7 @@ describe("sidebar lifecycle", () => {
     const replaceChildren = vi.spyOn(strip, "replaceChildren");
 
     expect(strip.hidden).toBe(true);
-    expect(strip.childElementCount).toBe(0);
+    expect(strip.querySelectorAll(".shortcut-button")).toHaveLength(0);
     expect(shortcutImage()).toBeNull();
     cleanup();
     fake.events.onUpdated.emit(
@@ -831,7 +833,7 @@ describe("sidebar lifecycle", () => {
 
     expect(rowIds()).toEqual([1]);
     expect(element("shortcut-strip").hidden).toBe(false);
-    expect(element("shortcut-strip").childElementCount).toBe(3);
+    expect(element("shortcut-strip").querySelectorAll(".shortcut-button")).toHaveLength(3);
     expect(element("status-message").textContent).toBe("无法读取快捷网站设置");
     cleanup();
   });
@@ -852,7 +854,7 @@ describe("sidebar lifecycle", () => {
     await vi.waitFor(() => expect(rowIds()).toEqual([1]));
     const strip = element("shortcut-strip");
     expect(strip.hidden).toBe(true);
-    expect(strip.childElementCount).toBe(0);
+    expect(strip.querySelectorAll(".shortcut-button")).toHaveLength(0);
     expect(strip.querySelector(".shortcut-button")).toBeNull();
 
     storage.resolve({
@@ -860,7 +862,7 @@ describe("sidebar lifecycle", () => {
     });
     const cleanup = await started;
     expect(strip.hidden).toBe(true);
-    expect(strip.childElementCount).toBe(0);
+    expect(strip.querySelectorAll(".shortcut-button")).toHaveLength(0);
     expect(strip.querySelector(".shortcut-button")).toBeNull();
     cleanup();
   });
@@ -881,7 +883,7 @@ describe("sidebar lifecycle", () => {
     await vi.waitFor(() => expect(rowIds()).toEqual([1]));
     const strip = element("shortcut-strip");
     expect(strip.hidden).toBe(true);
-    expect(strip.childElementCount).toBe(0);
+    expect(strip.querySelectorAll(".shortcut-button")).toHaveLength(0);
     expect(strip.querySelector(".shortcut-button")).toBeNull();
 
     storage.resolve({});
@@ -1724,7 +1726,7 @@ describe("sidebar lifecycle", () => {
     });
     expect(saved.enabled).toBe(true);
     expect(element("shortcut-strip").hidden).toBe(false);
-    expect(element("shortcut-strip").childElementCount).toBe(4);
+    expect(element("shortcut-strip").querySelectorAll(".shortcut-button")).toHaveLength(4);
     expect(element("status-message").textContent).toBe("已添加到快捷网站");
     expect(fake.methods.create).not.toHaveBeenCalled();
     expect(fake.methods.duplicate).not.toHaveBeenCalled();
@@ -1750,7 +1752,8 @@ describe("sidebar lifecycle", () => {
     await vi.waitFor(() => expect(fake.methods.storageSet).toHaveBeenCalledOnce());
 
     expect(element("shortcut-strip").hidden).toBe(false);
-    expect(element("shortcut-strip").children).toHaveLength(1);
+    expect(element("shortcut-strip").querySelectorAll(".shortcut-button")).toHaveLength(1);
+    expect(element("shortcut-strip").lastElementChild).toBe(element("locate-active-tab"));
     expect(element("shortcut-strip").querySelector("img")?.getAttribute("src"))
       .toBe("data:image/png;base64,docs-menu");
     cleanup();
@@ -2902,7 +2905,7 @@ describe("sidebar lifecycle", () => {
       shortcutSettings: { ...createDefaultShortcutSettings(), enabled: true },
     });
     await vi.waitFor(() => expect(element("shortcut-strip").hidden).toBe(false));
-    expect(element("shortcut-strip").children).toHaveLength(3);
+    expect(element("shortcut-strip").querySelectorAll(".shortcut-button")).toHaveLength(3);
     cleanup();
   });
 
@@ -3148,6 +3151,31 @@ describe("sidebar lifecycle", () => {
     expect(row(1).dataset.active).toBe("false");
     expect(row(2).dataset.active).toBe("true");
     expect(row(3).dataset.active).toBe("false");
+    cleanup();
+  });
+
+  it("keeps the locate control last and focuses the current tab without reactivating it", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0 }),
+        fakeTab({ id: 2, index: 1, active: true }),
+        fakeTab({ id: 3, index: 2 }),
+      ],
+      stored: enabledShortcuts(),
+    });
+    const cleanup = await startSidebar(fake);
+    const locate = element<HTMLButtonElement>("locate-active-tab");
+    const activeRow = row(2);
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(activeRow, "scrollIntoView", { value: scrollIntoView });
+
+    await vi.waitFor(() => expect(locate.disabled).toBe(false));
+    expect(element("shortcut-strip").lastElementChild).toBe(locate);
+    click(locate);
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "center", inline: "nearest" });
+    expect(document.activeElement).toBe(activeRow.querySelector(".tab-main"));
+    expect(fake.methods.update).not.toHaveBeenCalled();
     cleanup();
   });
 
@@ -3486,6 +3514,55 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
+  it("keeps an active descendant collapsed and expands for a newly active child", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0 }),
+        fakeTab({ id: 2, index: 1, openerTabId: 1, active: true }),
+        fakeTab({ id: 3, index: 2 }),
+      ],
+      stored: {
+        shortcutSettings: {
+          ...createDefaultShortcutSettings(),
+          newTabBehavior: "child",
+        },
+      },
+    });
+    const fake = {
+      ...base,
+      sessionStorage: {
+        get: vi.fn().mockResolvedValue({
+          "tabTreeSessionState:10": { collapsedTabIds: [1] },
+        }),
+        set: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(rowIds()).toEqual([1, 3]));
+
+    const toggle = row(1).querySelector<HTMLButtonElement>(".tab-tree-toggle");
+    expect(row(1).dataset.activeDescendant).toBe("true");
+    expect(row(1).hasAttribute("aria-current")).toBe(false);
+    expect(toggle?.ariaLabel).toBe("展开子标签，包含当前标签");
+
+    click(element("locate-active-tab"));
+    expect(rowIds()).toContain(2);
+    expect(document.activeElement).toBe(row(2).querySelector(".tab-main"));
+    click(row(1).querySelector(".tab-tree-toggle")!);
+    expect(rowIds()).toEqual([1, 3]);
+
+    fake.events.onCreated.emit(fakeTab({
+      id: 4,
+      index: 3,
+      openerTabId: 1,
+      active: true,
+    }));
+    await vi.waitFor(() => expect(rowIds()).toContain(4));
+    expect(rowIds()).toContain(2);
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    cleanup();
+  });
+
   it("keeps new-tab creation disabled until the current window snapshot is ready", async () => {
     const currentWindow = deferred<chrome.windows.Window>();
     const fake = createFakeChrome({
@@ -3592,8 +3669,12 @@ describe("sidebar lifecycle", () => {
     row(3).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
     const over = new Event("dragover", { bubbles: true, cancelable: true });
     Object.defineProperty(over, "clientY", { value: 29 });
+    Object.defineProperty(over, "clientX", { value: 16 });
     parent.dispatchEvent(over);
-    parent.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
+    const drop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, "clientY", { value: 29 });
+    Object.defineProperty(drop, "clientX", { value: 16 });
+    parent.dispatchEvent(drop);
 
     await vi.waitFor(() => expect(fake.methods.move).toHaveBeenCalledWith(3, { index: 1 }));
     await vi.waitFor(() => expect(row(3).dataset.treeDepth).toBe("1"));
@@ -3639,11 +3720,202 @@ describe("sidebar lifecycle", () => {
     row(3).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
     const over = new Event("dragover", { bubbles: true, cancelable: true });
     Object.defineProperty(over, "clientY", { value: 29 });
+    Object.defineProperty(over, "clientX", { value: 16 });
     parent.dispatchEvent(over);
-    parent.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
+    const drop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, "clientY", { value: 29 });
+    Object.defineProperty(drop, "clientX", { value: 16 });
+    parent.dispatchEvent(drop);
 
     expect(fake.methods.move).not.toHaveBeenCalled();
-    expect(row(3).dataset.treeDepth).toBe("1");
+    await vi.waitFor(() => expect(row(3).dataset.treeDepth).toBe("1"));
+    cleanup();
+  });
+
+  it("cancels before Chrome move when the intended parent becomes pinned", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0 }),
+        fakeTab({ id: 2, index: 1, openerTabId: 1 }),
+        fakeTab({ id: 3, index: 2 }),
+      ],
+      stored: {
+        shortcutSettings: {
+          ...createDefaultShortcutSettings(),
+          newTabBehavior: "child",
+        },
+      },
+    });
+    const fake = {
+      ...base,
+      sessionStorage: {
+        get: vi.fn().mockResolvedValue({ "tabTreeSessionState:10": {} }),
+        set: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(row(1).dataset.treeParent).toBe("true"));
+    const parent = row(1);
+    vi.spyOn(parent, "getBoundingClientRect").mockReturnValue({
+      top: 0, height: 30, bottom: 30, left: 0, right: 100, width: 100,
+      x: 0, y: 0, toJSON: () => ({}),
+    });
+
+    row(3).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
+    const over = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.defineProperties(over, { clientY: { value: 29 }, clientX: { value: 16 } });
+    parent.dispatchEvent(over);
+    fake.events.onUpdated.emit(
+      1,
+      { pinned: true },
+      fakeTab({ id: 1, index: 0, pinned: true }),
+    );
+    const drop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperties(drop, { clientY: { value: 29 }, clientX: { value: 16 } });
+    parent.dispatchEvent(drop);
+
+    expect(fake.methods.move).not.toHaveBeenCalled();
+    expect(fake.sessionStorage.set).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("does not persist a tree parent removed while Chrome is moving the source", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0 }),
+        fakeTab({ id: 2, index: 1, openerTabId: 1 }),
+        fakeTab({ id: 3, index: 2 }),
+      ],
+      stored: {
+        shortcutSettings: {
+          ...createDefaultShortcutSettings(),
+          newTabBehavior: "child",
+        },
+      },
+    });
+    const move = deferred<chrome.tabs.Tab>();
+    base.methods.move.mockReturnValueOnce(move.promise);
+    const sessionSet = vi.fn().mockResolvedValue(undefined);
+    const fake = {
+      ...base,
+      sessionStorage: {
+        get: vi.fn().mockResolvedValue({ "tabTreeSessionState:10": {} }),
+        set: sessionSet,
+      },
+    };
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(row(1).dataset.treeParent).toBe("true"));
+    vi.spyOn(row(1), "getBoundingClientRect").mockReturnValue({
+      top: 0, height: 30, bottom: 30, left: 0, right: 100, width: 100,
+      x: 0, y: 0, toJSON: () => ({}),
+    });
+
+    row(3).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
+    const over = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.defineProperties(over, { clientY: { value: 29 }, clientX: { value: 16 } });
+    row(1).dispatchEvent(over);
+    const drop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperties(drop, { clientY: { value: 29 }, clientX: { value: 16 } });
+    row(1).dispatchEvent(drop);
+    await vi.waitFor(() => expect(fake.methods.move).toHaveBeenCalled());
+
+    fake.events.onRemoved.emit(1, { windowId: 10, isWindowClosing: false });
+    move.resolve(fakeTab({ id: 3, index: 0 }));
+    await flush();
+    expect(sessionSet).not.toHaveBeenCalledWith(expect.objectContaining({
+      "tabTreeSessionState:10": expect.objectContaining({
+        attachedTabParentIds: [[3, 1]],
+      }),
+    }));
+    cleanup();
+  });
+
+  it("rolls back a parent-only drop when the tree session cannot be saved", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0 }),
+        fakeTab({ id: 3, index: 1 }),
+        fakeTab({ id: 2, index: 2, openerTabId: 1 }),
+      ],
+      stored: {
+        shortcutSettings: {
+          ...createDefaultShortcutSettings(),
+          newTabBehavior: "child",
+        },
+      },
+    });
+    const fake = {
+      ...base,
+      sessionStorage: {
+        get: vi.fn().mockResolvedValue({ "tabTreeSessionState:10": {} }),
+        set: vi.fn().mockRejectedValue(new Error("无法保存标签树")),
+      },
+    };
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(row(1).dataset.treeParent).toBe("true"));
+    vi.spyOn(row(1), "getBoundingClientRect").mockReturnValue({
+      top: 0, height: 30, bottom: 30, left: 0, right: 100, width: 100,
+      x: 0, y: 0, toJSON: () => ({}),
+    });
+
+    row(3).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
+    const over = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.defineProperties(over, { clientY: { value: 29 }, clientX: { value: 16 } });
+    row(1).dispatchEvent(over);
+    const drop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperties(drop, { clientY: { value: 29 }, clientX: { value: 16 } });
+    row(1).dispatchEvent(drop);
+
+    await vi.waitFor(() => expect(element("status-message").textContent)
+      .toContain("无法保存标签树"));
+    expect(row(3).dataset.treeDepth).toBe("0");
+    expect(fake.methods.move).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("does not let an older save failure overwrite newer tree collapses", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0 }),
+        fakeTab({ id: 2, index: 1, openerTabId: 1 }),
+        fakeTab({ id: 3, index: 2 }),
+        fakeTab({ id: 4, index: 3, openerTabId: 3 }),
+      ],
+      stored: {
+        shortcutSettings: {
+          ...createDefaultShortcutSettings(),
+          newTabBehavior: "child",
+        },
+      },
+    });
+    const firstSave = deferred<void>();
+    const sessionSet = vi.fn()
+      .mockReturnValueOnce(firstSave.promise)
+      .mockResolvedValue(undefined);
+    const fake = {
+      ...base,
+      sessionStorage: {
+        get: vi.fn().mockResolvedValue({ "tabTreeSessionState:10": {} }),
+        set: sessionSet,
+      },
+    };
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(row(1).dataset.treeParent).toBe("true"));
+
+    click(row(1).querySelector("[data-action='toggle-tree']")!);
+    click(row(3).querySelector("[data-action='toggle-tree']")!);
+    expect(rowIds()).toEqual([1, 3]);
+    firstSave.reject(new Error("older write failed"));
+
+    await vi.waitFor(() => expect(sessionSet).toHaveBeenCalledTimes(2));
+    expect(rowIds()).toEqual([1, 3]);
+    expect(sessionSet).toHaveBeenLastCalledWith({
+      "tabTreeSessionState:10": {
+        collapsedTabIds: [1, 3],
+        detachedTabIds: [],
+        attachedTabParentIds: [],
+      },
+    });
     cleanup();
   });
 });

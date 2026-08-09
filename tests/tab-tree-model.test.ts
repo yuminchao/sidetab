@@ -3,6 +3,7 @@ import {
   buildTabForest,
   flattenVisibleTabForest,
   getTabSubtreeIds,
+  getTabTreeAncestorIds,
   type TabTreeNode,
 } from "../src/sidepanel/tab-tree-model";
 import type { TabViewModel } from "../src/sidepanel/tab-model";
@@ -90,7 +91,7 @@ describe("tab tree model", () => {
     expect(forest.every((node) => node.children.length === 0)).toBe(true);
   });
 
-  it("hides collapsed descendants but auto-expands the active descendant path", () => {
+  it("keeps an active descendant hidden behind a manually collapsed ancestor", () => {
     const forest = buildTabForest([
       tab({ id: 1, index: 0 }),
       tab({ id: 2, index: 1, openerTabId: 1 }),
@@ -101,8 +102,13 @@ describe("tab tree model", () => {
       .toEqual([1]);
 
     forest[0]!.children[0]!.children[0]!.tab.active = true;
-    expect(flattenVisibleTabForest(forest, new Set([1, 2])).map(({ tab }) => tab.id))
-      .toEqual([1, 2, 3]);
+    expect(flattenVisibleTabForest(forest, new Set([1, 2]))).toMatchObject([
+      {
+        tab: { id: 1 },
+        collapsed: true,
+        containsActiveDescendant: true,
+      },
+    ]);
   });
 
   it("does not mutate input and handles five hundred tabs in one forest", () => {
@@ -131,5 +137,6 @@ describe("tab tree model", () => {
     ];
     expect(getTabSubtreeIds(tabs, 1)).toEqual([1, 2, 3]);
     expect(getTabSubtreeIds(tabs, 2, new Set([2]))).toEqual([2, 3]);
+    expect(getTabTreeAncestorIds(tabs, 3)).toEqual([2, 1]);
   });
 });

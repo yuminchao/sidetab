@@ -89,6 +89,7 @@ input:focus-visible {
 }
 
 .shortcut-button,
+.locate-active-tab-button,
 .icon-button,
 .tab-close {
   display: inline-grid;
@@ -100,11 +101,21 @@ input:focus-visible {
   line-height: 1;
 }
 
-.shortcut-button {
+.shortcut-button,
+.locate-active-tab-button {
   width: 32px;
   height: 32px;
   border-color: transparent;
   background: transparent;
+}
+
+.locate-active-tab-button::before {
+  content: "";
+  width: 20px;
+  height: 20px;
+  background-color: currentColor;
+  -webkit-mask: url("../assets/icons/locate.svg") center / contain no-repeat;
+  mask: url("../assets/icons/locate.svg") center / contain no-repeat;
 }
 
 #shortcut-settings {
@@ -318,6 +329,7 @@ input:focus-visible {
 }
 
 .tab-list {
+  position: relative;
   min-width: 0;
 }
 
@@ -509,11 +521,13 @@ input:focus-visible {
 .tab-row[data-drop-placement="before"]::before,
 .tab-row[data-drop-placement="after"]::after,
 .tab-group-row[data-drop-placement="before"]::before,
-.tab-group-row[data-drop-placement="after"]::after {
+.tab-group-row[data-drop-placement="after"]::after,
+.tab-list[data-drop-placement="after"]::after {
   content: "";
   position: absolute;
   z-index: 2;
-  inset-inline: 4px;
+  inset-inline-start: var(--drop-depth-indent, 4px);
+  inset-inline-end: 4px;
   height: 2px;
   background: AccentColor;
   pointer-events: none;
@@ -525,7 +539,8 @@ input:focus-visible {
 }
 
 .tab-row[data-drop-placement="after"]::after,
-.tab-group-row[data-drop-placement="after"]::after {
+.tab-group-row[data-drop-placement="after"]::after,
+.tab-list[data-drop-placement="after"]::after {
   bottom: 0;
 }
 
@@ -679,6 +694,25 @@ input:focus-visible {
   line-height: 1;
   transform: rotate(90deg);
   transform-origin: center;
+}
+
+.tab-tree-leaf {
+  position: absolute;
+  z-index: 1;
+  inset-inline-start: calc(10px + var(--tab-tree-indent, 0px));
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: GrayText;
+  pointer-events: none;
+}
+
+.tab-tree-leaf[hidden] {
+  display: none;
+}
+
+.tab-row[data-active-descendant="true"] .tab-tree-toggle[aria-expanded="false"] {
+  color: AccentColor;
 }
 
 .tab-tree-toggle[aria-expanded="false"] {

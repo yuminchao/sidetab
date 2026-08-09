@@ -14,6 +14,7 @@ const expectedFiles = [
   "assets/icons/icon-16.png",
   "assets/icons/icon-32.png",
   "assets/icons/icon-48.png",
+  "assets/icons/locate.svg",
   "assets/icons/network.svg",
   "assets/icons/pin.svg",
   "assets/icons/search.svg",
@@ -157,7 +158,7 @@ describe("release file contract", () => {
     const { EXPECTED_FILES } = await loadReleaseFiles();
 
     expect(EXPECTED_FILES).toEqual(expectedFiles);
-    expect(EXPECTED_FILES).toHaveLength(14);
+    expect(EXPECTED_FILES).toHaveLength(15);
     expect(EXPECTED_FILES).not.toContain("assets/icons/add-tab.svg");
     expect(EXPECTED_FILES).toEqual([...EXPECTED_FILES].sort());
   });
@@ -300,7 +301,7 @@ describe("dist validation", () => {
     await expect(checkDist(resolve("dist"))).resolves.toMatchObject({
       totalBytes: expect.any(Number),
     });
-    await expect(assertExactReleaseFiles(resolve("dist"))).resolves.toHaveLength(14);
+    await expect(assertExactReleaseFiles(resolve("dist"))).resolves.toHaveLength(15);
     await expect(readFile(resolve("dist/THIRD_PARTY_NOTICES.md"), "utf8")).resolves.toContain(
       "ISC License",
     );

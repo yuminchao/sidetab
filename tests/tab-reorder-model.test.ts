@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   createTabBlockReorderPlan,
   createTabReorderPlan,
-  getTreeAttachmentParentIdOnDrop,
-  shouldDetachTreeTabOnDrop,
   type TabDropTarget,
 } from "../src/sidepanel/tab-reorder-model";
 import type { TabViewModel } from "../src/sidepanel/tab-model";
@@ -32,55 +30,23 @@ const tabTarget = (tabId: number, placement: "before" | "after"): TabDropTarget 
 const groupTarget = (groupId: number): TabDropTarget => ({ kind: "group", groupId });
 
 describe("createTabReorderPlan", () => {
-  it("attaches only a root tab dropped after a valid parent outside its own subtree", () => {
+  it("moves a tab or subtree block to the ungrouped list tail", () => {
     const tabs = [
       fakeTabModel({ id: 1, index: 0 }),
-      fakeTabModel({ id: 2, index: 1, openerTabId: 1 }),
+      fakeTabModel({ id: 2, index: 1 }),
       fakeTabModel({ id: 3, index: 2 }),
-      fakeTabModel({ id: 4, index: 3 }),
     ];
-    expect(getTreeAttachmentParentIdOnDrop(
-      tabs, 3, tabTarget(1, "after"), new Set(), new Map(),
-    )).toBe(1);
-    expect(getTreeAttachmentParentIdOnDrop(
-      tabs, 4, tabTarget(2, "after"), new Set(), new Map(),
-    )).toBe(1);
-    expect(getTreeAttachmentParentIdOnDrop(
-      tabs, 3, tabTarget(1, "before"), new Set(), new Map(),
-    )).toBeUndefined();
-    expect(getTreeAttachmentParentIdOnDrop(
-      tabs, 1, tabTarget(2, "after"), new Set(), new Map(),
-    )).toBeUndefined();
-    expect(getTreeAttachmentParentIdOnDrop(
-      tabs, 2, tabTarget(3, "after"), new Set(), new Map(),
-    )).toBeUndefined();
-    expect(shouldDetachTreeTabOnDrop(
-      tabs,
-      3,
-      tabTarget(4, "after"),
-      new Set(),
-      new Map([[3, 1]]),
-    )).toBe(true);
-  });
-  it("detaches only when a child is dropped outside its sibling area", () => {
-    const tabs = [
-      fakeTabModel({ id: 1, index: 0 }),
-      fakeTabModel({ id: 2, index: 1, openerTabId: 1 }),
-      fakeTabModel({ id: 3, index: 2, openerTabId: 1 }),
-      fakeTabModel({ id: 4, index: 3 }),
-    ];
-    expect(shouldDetachTreeTabOnDrop(
-      tabs, 2, { kind: "tab", tabId: 1, placement: "after" }, new Set(),
-    )).toBe(false);
-    expect(shouldDetachTreeTabOnDrop(
-      tabs, 2, { kind: "tab", tabId: 3, placement: "before" }, new Set(),
-    )).toBe(false);
-    expect(shouldDetachTreeTabOnDrop(
-      tabs, 2, { kind: "tab", tabId: 1, placement: "before" }, new Set(),
-    )).toBe(true);
-    expect(shouldDetachTreeTabOnDrop(
-      tabs, 2, { kind: "tab", tabId: 4, placement: "after" }, new Set(),
-    )).toBe(true);
+
+    expect(createTabReorderPlan(tabs, 1, { kind: "end" })).toMatchObject({
+      tabId: 1,
+      targetIndex: 2,
+      targetGroupId: -1,
+    });
+    expect(createTabBlockReorderPlan(tabs, [1, 2], { kind: "end" })).toMatchObject({
+      tabIds: [1, 2],
+      targetIndex: 1,
+      targetGroupId: -1,
+    });
   });
   it("computes a destination after removing an entire source subtree", () => {
     const tabs = [

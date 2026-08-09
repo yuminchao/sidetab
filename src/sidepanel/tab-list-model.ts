@@ -25,6 +25,7 @@ export type TabTreeDecoration = {
   depth: number;
   hasChildren: boolean;
   collapsed: boolean;
+  containsActiveDescendant: boolean;
 };
 
 export type TabListOptions = {
@@ -108,7 +109,12 @@ function buildTreeTabListItems(
     .map((tab) => ({
       kind: "tab" as const,
       tab,
-      tree: { depth: 0, hasChildren: false, collapsed: false },
+      tree: {
+        depth: 0,
+        hasChildren: false,
+        collapsed: false,
+        containsActiveDescendant: false,
+      },
     }));
   const forest = buildTabForest(
     orderedTabs.filter((tab) => !tab.pinned),
@@ -164,6 +170,7 @@ function buildTreeTabListItems(
           depth: entry.depth,
           hasChildren: entry.hasChildren,
           collapsed: entry.collapsed,
+          containsActiveDescendant: entry.containsActiveDescendant,
         },
       });
     });
@@ -184,6 +191,7 @@ function appendTreeEntries(
         depth: entry.depth,
         hasChildren: entry.hasChildren,
         collapsed: entry.collapsed,
+        containsActiveDescendant: entry.containsActiveDescendant,
       },
     });
   }

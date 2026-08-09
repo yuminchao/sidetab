@@ -10,6 +10,7 @@ export type VisibleTabTreeEntry = {
   depth: number;
   hasChildren: boolean;
   collapsed: boolean;
+  containsActiveDescendant: boolean;
   rootId: number;
 };
 
@@ -58,13 +59,20 @@ export function flattenVisibleTabForest(
   forest: readonly TabTreeNode[],
   collapsedTabIds: ReadonlySet<number>,
 ): VisibleTabTreeEntry[] {
-  const forcedOpen = findActiveAncestors(forest);
+  const activeAncestors = findActiveAncestors(forest);
   const entries: VisibleTabTreeEntry[] = [];
 
   const visit = (node: TabTreeNode, depth: number, rootId: number): void => {
     const hasChildren = node.children.length > 0;
-    const collapsed = hasChildren && collapsedTabIds.has(node.tab.id) && !forcedOpen.has(node.tab.id);
-    entries.push({ tab: node.tab, depth, hasChildren, collapsed, rootId });
+    const collapsed = hasChildren && collapsedTabIds.has(node.tab.id);
+    entries.push({
+      tab: node.tab,
+      depth,
+      hasChildren,
+      collapsed,
+      containsActiveDescendant: activeAncestors.has(node.tab.id),
+      rootId,
+    });
     if (!collapsed) {
       for (const child of node.children) visit(child, depth + 1, rootId);
     }
@@ -104,6 +112,34 @@ export function getTabSubtreeIds(
   return [];
 }
 
+export function getTabSubtreeMaxDepth(
+  tabs: readonly TabViewModel[],
+  sourceId: number,
+  detachedTabIds: ReadonlySet<number> = new Set(),
+  attachedTabParentIds: ReadonlyMap<number, number> = new Map(),
+): number {
+  const stack = [...buildTabForest(tabs, detachedTabIds, attachedTabParentIds)];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) continue;
+    if (node.tab.id === sourceId) {
+      let maximumDepth = 0;
+      const descendants: Array<{ node: TabTreeNode; depth: number }> = [{ node, depth: 0 }];
+      while (descendants.length > 0) {
+        const current = descendants.pop();
+        if (!current) continue;
+        maximumDepth = Math.max(maximumDepth, current.depth);
+        for (const child of current.node.children) {
+          descendants.push({ node: child, depth: current.depth + 1 });
+        }
+      }
+      return maximumDepth;
+    }
+    stack.push(...node.children);
+  }
+  return 0;
+}
+
 export function getTabTreeParentId(
   tabs: readonly TabViewModel[],
   childId: number,
@@ -120,6 +156,33 @@ export function getTabTreeParentId(
     }
   }
   return undefined;
+}
+
+export function getTabTreeAncestorIds(
+  tabs: readonly TabViewModel[],
+  childId: number,
+  detachedTabIds: ReadonlySet<number> = new Set(),
+  attachedTabParentIds: ReadonlyMap<number, number> = new Map(),
+): number[] {
+  const parentById = new Map<number, number>();
+  const stack = [...buildTabForest(tabs, detachedTabIds, attachedTabParentIds)];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) continue;
+    for (const child of node.children) {
+      parentById.set(child.tab.id, node.tab.id);
+      stack.push(child);
+    }
+  }
+  const ancestors: number[] = [];
+  let currentId = childId;
+  while (parentById.has(currentId)) {
+    const parentId = parentById.get(currentId);
+    if (parentId === undefined) break;
+    ancestors.push(parentId);
+    currentId = parentId;
+  }
+  return ancestors;
 }
 
 function removeCycleRelationships(

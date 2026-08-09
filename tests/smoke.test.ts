@@ -61,10 +61,10 @@ describe("extension manifest", () => {
       expect(checklist).toContain(`\`${permission}\``);
     }
     expect(readme).toContain(
-      "精确包含 14 个审核文件，其中图标资源为四个扩展 PNG 图标和四个 SVG（固定、网络兜底、搜索、设置）",
+      "精确包含 15 个审核文件，其中图标资源为四个扩展 PNG 图标和五个 SVG（定位、固定、网络兜底、搜索、设置）",
     );
     expect(checklist).toContain(
-      "精确包含 14 个审核文件，图标资源为 4 个 PNG 与 4 个 SVG（固定、网络兜底、搜索、设置）",
+      "精确包含 15 个审核文件，图标资源为 4 个 PNG 与 5 个 SVG（定位、固定、网络兜底、搜索、设置）",
     );
   });
 
