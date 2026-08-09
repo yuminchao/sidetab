@@ -34,8 +34,11 @@ function group(overrides: Partial<TabGroupViewModel> = {}): TabGroupViewModel {
   };
 }
 
-function groupItem(overrides: Partial<TabGroupViewModel> = {}): TabListItem {
-  return { kind: "group", group: group(overrides) };
+function groupItem(
+  overrides: Partial<TabGroupViewModel> = {},
+  count = 2,
+): TabListItem {
+  return { kind: "group", group: group(overrides), count };
 }
 
 describe("tab renderer", () => {
@@ -95,7 +98,7 @@ describe("tab renderer", () => {
     expect(pin?.dataset.visible).toBe("true");
   });
 
-  it("renders accessible group rows without a count", () => {
+  it("renders accessible group rows with the tab count at the end", () => {
     const renderer = createTabRenderer({ list, empty });
 
     renderer.render([
@@ -106,6 +109,7 @@ describe("tab renderer", () => {
     const row = list.querySelector<HTMLElement>(".tab-group-row");
     const button = row?.querySelector<HTMLButtonElement>(".tab-group-main");
     const chevron = row?.querySelector<HTMLElement>(".tab-group-chevron");
+    const count = row?.querySelector<HTMLElement>(".tab-group-count");
     expect(row?.getAttribute("role")).toBe("listitem");
     expect(row?.dataset).toMatchObject({
       groupId: "3",
@@ -114,13 +118,35 @@ describe("tab renderer", () => {
     });
     expect(button?.dataset.action).toBe("toggle-group");
     expect(button?.getAttribute("aria-expanded")).toBe("false");
-    expect(button?.ariaLabel).toBe("未命名分组，已折叠");
+    expect(button?.ariaLabel).toBe("未命名分组，包含 2 个标签页，已折叠");
     expect(chevron?.getAttribute("aria-hidden")).toBe("true");
     expect(row?.querySelector(".tab-group-color")).toBeNull();
     expect(row?.querySelector(".tab-group-title")?.textContent).toBe("未命名分组");
-    expect(row?.querySelector(".tab-group-count")).toBeNull();
+    expect(count?.textContent).toBe("2");
+    expect(count?.getAttribute("aria-hidden")).toBe("true");
+    expect(button?.lastElementChild).toBe(count);
     expect(row?.draggable).toBe(true);
     expect(button?.draggable).toBe(false);
+  });
+
+  it("renders tree indentation and an independent accessible collapse control", () => {
+    const renderer = createTabRenderer({ list, empty });
+    const item = tabItem({ id: 7 });
+    if (item.kind !== "tab") throw new Error("expected tab fixture");
+    renderer.render([{
+      ...item,
+      tree: { depth: 2, hasChildren: true, collapsed: true },
+    }]);
+
+    const row = list.firstElementChild as HTMLElement;
+    const toggle = row.querySelector<HTMLButtonElement>(".tab-tree-toggle");
+    expect(row.dataset).toMatchObject({ treeDepth: "2", treeParent: "true" });
+    expect(row.style.getPropertyValue("--tab-tree-indent")).toBe("24px");
+    expect(row.getAttribute("aria-level")).toBe("3");
+    expect(toggle?.hidden).toBe(false);
+    expect(toggle?.dataset.action).toBe("toggle-tree");
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle?.getAttribute("aria-label")).toBe("展开子标签");
   });
 
   it("writes group decoration datasets when creating a tab row", () => {
@@ -205,9 +231,24 @@ describe("tab renderer", () => {
     expect(row.dataset.collapsed).toBe("true");
     expect(row.dataset.groupColor).toBe("orange");
     expect(row.querySelector(".tab-group-title")?.textContent).toBe("Updated");
+    expect(row.querySelector(".tab-group-count")?.textContent).toBe("2");
     expect(row.querySelector(".tab-group-color")).toBeNull();
     expect((button as HTMLButtonElement).getAttribute("aria-expanded")).toBe("false");
-    expect((button as HTMLButtonElement).ariaLabel).toBe("Updated，已折叠");
+    expect((button as HTMLButtonElement).ariaLabel).toBe("Updated，包含 2 个标签页，已折叠");
+  });
+
+  it("updates the group count during a full render while reusing the row", () => {
+    const renderer = createTabRenderer({ list, empty });
+    renderer.render([groupItem({}, 2)]);
+    const row = list.firstElementChild as HTMLElement;
+
+    renderer.render([groupItem({}, 5)]);
+
+    expect(list.firstElementChild).toBe(row);
+    expect(row.querySelector(".tab-group-count")?.textContent).toBe("5");
+    expect((row.querySelector(".tab-group-main") as HTMLButtonElement).ariaLabel).toBe(
+      "Work，包含 5 个标签页，已展开",
+    );
   });
 
   it("keeps group rows intact while patching, removing, and toggling tab dragging", () => {
@@ -253,7 +294,7 @@ describe("tab renderer", () => {
     expect(row.dataset.collapsed).toBe("false");
     expect(row.querySelector(".tab-group-main")?.getAttribute("aria-expanded")).toBe("true");
     expect((row.querySelector(".tab-group-main") as HTMLButtonElement).ariaLabel).toBe(
-      "未命名分组，已展开",
+      "未命名分组，包含 2 个标签页，已展开",
     );
   });
 

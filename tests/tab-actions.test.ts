@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createShortcutActions } from "../src/sidepanel/shortcut-actions";
 import { createTabActions } from "../src/sidepanel/tab-actions";
-import type { TabReorderPlan } from "../src/sidepanel/tab-reorder-model";
+import type { TabBlockReorderPlan, TabReorderPlan } from "../src/sidepanel/tab-reorder-model";
 
 const tab = { id: 7, windowId: 3, index: 0 } as chrome.tabs.Tab;
 const sameGroupPlan: TabReorderPlan = {
@@ -80,6 +80,27 @@ describe("tab actions", () => {
     expect(create).toHaveBeenCalledWith({ active: true });
   });
 
+  it("creates a child tab with the supplied opener", async () => {
+    const create = vi.fn().mockResolvedValue(tab);
+    await createTabActions(tabApi({ create })).create(9);
+    expect(create).toHaveBeenCalledWith({ active: true, openerTabId: 9 });
+  });
+
+  it("moves a subtree as one Chrome tab batch", async () => {
+    const move = vi.fn().mockResolvedValue([tab]);
+    const plan: TabBlockReorderPlan = {
+      tabIds: [7, 8],
+      targetIndex: 3,
+      targetPinned: false,
+      pinnedChanged: false,
+      sourceGroupId: -1,
+      targetGroupId: -1,
+      groupChanged: false,
+    };
+    await createTabActions(tabApi({ move })).reorderMany(plan);
+    expect(move).toHaveBeenCalledWith([7, 8], { index: 3 });
+  });
+
   it.each([
     ["synchronous throw", () => vi.fn(() => { throw new Error("chrome failed"); })],
     ["promise rejection", () => vi.fn().mockRejectedValue(new Error("chrome failed"))],
@@ -142,6 +163,17 @@ describe("tab actions", () => {
     expect(remove).not.toHaveBeenCalled();
   });
 
+  it("closes tabs above the target", async () => {
+    const remove = vi.fn().mockResolvedValue(undefined);
+    await createTabActions(tabApi({ remove })).closeAbove([1, 2]);
+    expect(remove).toHaveBeenCalledWith([1, 2]);
+  });
+
+  it("maps closeAbove failures to the user-facing error", async () => {
+    const remove = vi.fn().mockRejectedValue(new Error("chrome failed"));
+    await expect(createTabActions(tabApi({ remove })).closeAbove([1])).rejects.toThrow("无法关闭上方标签页");
+  });
+
   it.each([
     ["synchronous throw", () => vi.fn(() => { throw new Error("chrome failed"); })],
     ["promise rejection", () => vi.fn().mockRejectedValue(new Error("chrome failed"))],
@@ -180,7 +212,7 @@ describe("tab actions", () => {
   it("duplicates exactly the requested tab", async () => {
     const duplicate = vi.fn().mockResolvedValue(tab);
 
-    await createTabActions(tabApi({ duplicate })).duplicate(7);
+    await expect(createTabActions(tabApi({ duplicate })).duplicate(7)).resolves.toBe(7);
 
     expect(duplicate).toHaveBeenCalledOnce();
     expect(duplicate).toHaveBeenCalledWith(7);
@@ -320,6 +352,12 @@ describe("tab actions", () => {
 });
 
 describe("shortcut actions", () => {
+  it("opens missing shortcut URLs in background tabs", async () => {
+    const create = vi.fn().mockResolvedValue(tab);
+    await createShortcutActions({ create }).openMany(["https://one.example/", "https://two.example/"]);
+    expect(create).toHaveBeenNthCalledWith(1, { url: "https://one.example/", active: false });
+    expect(create).toHaveBeenNthCalledWith(2, { url: "https://two.example/", active: false });
+  });
   it("normalizes a URL and opens it in an active tab", async () => {
     const create = vi.fn().mockResolvedValue(tab);
 

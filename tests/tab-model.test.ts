@@ -45,6 +45,11 @@ describe("tab model", () => {
     expect(TAB_GROUP_ID_NONE).toBe(-1);
   });
 
+  it("preserves the opener tab ID only when Chrome supplies one", () => {
+    expect(toTabViewModel(tab({ openerTabId: 3 }))).toHaveProperty("openerTabId", 3);
+    expect(toTabViewModel(tab({ openerTabId: undefined }))).not.toHaveProperty("openerTabId");
+  });
+
   it.each([
     -2,
     Number.NaN,

@@ -24,6 +24,7 @@ function settings(overrides: Partial<ShortcutSettings> = {}): ShortcutSettings {
   return {
     enabled: true,
     tabTitleFontSize: 14,
+    newTabBehavior: "root",
     items: [shortcut()],
     ...overrides,
   };
@@ -42,6 +43,15 @@ function createFixture(): ShortcutRendererElements & {
   enabled.type = "checkbox";
   const fontSize = document.createElement("input");
   fontSize.type = "number";
+  const rootBehavior = document.createElement("input");
+  rootBehavior.type = "radio";
+  rootBehavior.name = "new-tab-behavior";
+  rootBehavior.value = "root";
+  rootBehavior.checked = true;
+  const childBehavior = document.createElement("input");
+  childBehavior.type = "radio";
+  childBehavior.name = "new-tab-behavior";
+  childBehavior.value = "child";
   const editor = document.createElement("div");
   const error = document.createElement("p");
   const add = document.createElement("button");
@@ -53,7 +63,18 @@ function createFixture(): ShortcutRendererElements & {
   cancel.dataset.action = "cancel";
   const save = document.createElement("button");
   save.type = "submit";
-  form.append(fontSize, enabled, editor, error, add, reset, cancel, save);
+  form.append(
+    fontSize,
+    enabled,
+    rootBehavior,
+    childBehavior,
+    editor,
+    error,
+    add,
+    reset,
+    cancel,
+    save,
+  );
   dialog.append(form);
   document.body.append(strip, settingsButton, dialog);
 
@@ -63,7 +84,21 @@ function createFixture(): ShortcutRendererElements & {
     dialog.dispatchEvent(new Event("close"));
   });
 
-  return { strip, dialog, form, fontSize, enabled, editor, error, add, reset, settingsButton, cancel, save };
+  return {
+    strip,
+    dialog,
+    form,
+    fontSize,
+    enabled,
+    newTabBehavior: form.querySelectorAll<HTMLInputElement>("[name='new-tab-behavior']"),
+    editor,
+    error,
+    add,
+    reset,
+    settingsButton,
+    cancel,
+    save,
+  };
 }
 
 function click(element: Element | null): void {
@@ -524,6 +559,7 @@ describe("shortcut renderer", () => {
     expect(onSave).toHaveBeenCalledWith({
       enabled: true,
       tabTitleFontSize: 14,
+      newTabBehavior: "root",
       items: [shortcut({ name: "Saved name" })],
     });
     expect(elements.strip.querySelector(".shortcut-button")?.getAttribute("title")).toBe(

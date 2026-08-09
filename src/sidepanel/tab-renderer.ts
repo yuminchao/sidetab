@@ -1,5 +1,9 @@
 import type { TabGroupViewModel } from "./tab-group-model";
-import type { TabGroupDecoration, TabListItem } from "./tab-list-model";
+import type {
+  TabGroupDecoration,
+  TabListItem,
+  TabTreeDecoration,
+} from "./tab-list-model";
 import type { TabViewModel } from "./tab-model";
 import { createFaviconCandidates } from "./favicon-model";
 
@@ -71,7 +75,8 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
           if (nextGroupRows.has(item.group.id)) {
             throw new Error(`重复分组 ID: ${item.group.id}`);
           }
-          const row = groupRows.get(item.group.id) ?? createGroupRow(item.group, dragEnabled);
+          const row = groupRows.get(item.group.id)
+            ?? createGroupRow(item.group, item.count, dragEnabled);
           nextGroupRows.set(item.group.id, row);
           prepared.push({ node: row, item });
         }
@@ -96,9 +101,15 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
             preparedRow.item.tab,
             tabDragEnabled,
             preparedRow.item.group,
+            preparedRow.item.tree,
           );
         } else {
-          updateGroupRow(preparedRow.node, preparedRow.item.group, dragEnabled);
+          updateGroupRow(
+            preparedRow.node,
+            preparedRow.item.group,
+            dragEnabled,
+            preparedRow.item.count,
+          );
         }
       }
       tabRows = nextTabRows;
@@ -153,7 +164,11 @@ export function createTabRenderer({ list, empty }: TabRendererElements): TabRend
   };
 }
 
-function createGroupRow(group: TabGroupViewModel, dragEnabled: boolean): HTMLElement {
+function createGroupRow(
+  group: TabGroupViewModel,
+  count: number,
+  dragEnabled: boolean,
+): HTMLElement {
   const row = document.createElement("div");
   row.className = "tab-group-row";
   row.setAttribute("role", "listitem");
@@ -171,9 +186,13 @@ function createGroupRow(group: TabGroupViewModel, dragEnabled: boolean): HTMLEle
   const title = document.createElement("span");
   title.className = "tab-group-title";
 
-  main.append(chevron, title);
+  const countElement = document.createElement("span");
+  countElement.className = "tab-group-count";
+  countElement.setAttribute("aria-hidden", "true");
+
+  main.append(chevron, title, countElement);
   row.append(main);
-  updateGroupRow(row, group, dragEnabled);
+  updateGroupRow(row, group, dragEnabled, count);
   return row;
 }
 
@@ -181,18 +200,28 @@ function updateGroupRow(
   row: HTMLElement,
   group: TabGroupViewModel,
   dragEnabled: boolean,
+  count?: number,
 ): void {
   const main = row.querySelector<HTMLButtonElement>(".tab-group-main");
   const title = row.querySelector<HTMLElement>(".tab-group-title");
-  if (!main || !title) return;
+  const countElement = row.querySelector<HTMLElement>(".tab-group-count");
+  if (!main || !title || !countElement) return;
+
+  if (count !== undefined) {
+    countElement.textContent = String(count);
+  }
 
   const displayTitle = group.title || "未命名分组";
+  const displayCount = countElement.textContent ?? "0";
   row.dataset.groupId = String(group.id);
   row.dataset.groupColor = group.color;
   row.dataset.collapsed = String(group.collapsed);
   updateRowDragState(row, dragEnabled);
   main.setAttribute("aria-expanded", String(!group.collapsed));
-  main.setAttribute("aria-label", `${displayTitle}，${group.collapsed ? "已折叠" : "已展开"}`);
+  main.setAttribute(
+    "aria-label",
+    `${displayTitle}，包含 ${displayCount} 个标签页，${group.collapsed ? "已折叠" : "已展开"}`,
+  );
   title.textContent = displayTitle;
 }
 
@@ -205,6 +234,13 @@ function createTabRow(tab: TabViewModel, dragEnabled: boolean): HTMLElement {
   main.className = "tab-main";
   main.type = "button";
   main.dataset.action = "activate";
+
+  const treeToggle = document.createElement("button");
+  treeToggle.className = "tab-tree-toggle";
+  treeToggle.type = "button";
+  treeToggle.dataset.action = "toggle-tree";
+  treeToggle.textContent = ">";
+  treeToggle.hidden = true;
 
   const pin = document.createElement("span");
   pin.className = "pin-indicator";
@@ -225,7 +261,7 @@ function createTabRow(tab: TabViewModel, dragEnabled: boolean): HTMLElement {
   close.dataset.action = "close";
   close.textContent = "×";
 
-  row.append(main, close);
+  row.append(treeToggle, main, close);
   patchTabRow(row, tab, dragEnabled);
   return row;
 }
@@ -235,9 +271,36 @@ function updateTabRow(
   tab: TabViewModel,
   dragEnabled: boolean,
   group: TabGroupDecoration | undefined,
+  tree: TabTreeDecoration | undefined,
 ): void {
   patchTabRow(row, tab, dragEnabled);
   updateGroupDecoration(row, group);
+  updateTreeDecoration(row, tree);
+}
+
+function updateTreeDecoration(
+  row: HTMLElement,
+  tree: TabTreeDecoration | undefined,
+): void {
+  const toggle = row.querySelector<HTMLButtonElement>(".tab-tree-toggle");
+  if (!tree) {
+    delete row.dataset.treeDepth;
+    delete row.dataset.treeParent;
+    row.style.removeProperty("--tab-tree-indent");
+    row.removeAttribute("aria-level");
+    if (toggle) toggle.hidden = true;
+    return;
+  }
+
+  const visualDepth = Math.min(tree.depth, 4);
+  row.dataset.treeDepth = String(tree.depth);
+  row.dataset.treeParent = String(tree.hasChildren);
+  row.style.setProperty("--tab-tree-indent", `${visualDepth * 12}px`);
+  row.setAttribute("aria-level", String(tree.depth + 1));
+  if (!toggle) return;
+  toggle.hidden = !tree.hasChildren;
+  toggle.setAttribute("aria-expanded", String(!tree.collapsed));
+  toggle.setAttribute("aria-label", tree.collapsed ? "展开子标签" : "折叠子标签");
 }
 
 function patchTabRow(row: HTMLElement, tab: TabViewModel, dragEnabled: boolean): void {

@@ -16,6 +16,7 @@ export type TabViewModel = {
   active: boolean;
   pinned: boolean;
   groupId: number;
+  openerTabId?: number;
 };
 
 export function toTabViewModel(tab: chrome.tabs.Tab): TabViewModel {
@@ -39,6 +40,9 @@ export function toTabViewModel(tab: chrome.tabs.Tab): TabViewModel {
 
   if (tab.favIconUrl) {
     model.favIconUrl = tab.favIconUrl;
+  }
+  if (tab.openerTabId !== undefined) {
+    model.openerTabId = tab.openerTabId;
   }
 
   return model;

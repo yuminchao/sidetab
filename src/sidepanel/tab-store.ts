@@ -94,6 +94,10 @@ export class TabStore {
     } catch {
       return undefined;
     }
+    const removed = this.tabs.get(removedId);
+    if (model.openerTabId === undefined && removed?.openerTabId !== undefined) {
+      model.openerTabId = removed.openerTabId;
+    }
 
     const ordered = this.tabsInChromeOrder()
       .filter((tab) => tab.id !== removedId && tab.id !== model.id);
@@ -104,6 +108,7 @@ export class TabStore {
     for (const [index, tab] of ordered.entries()) {
       next.set(tab.id, {
         ...tab,
+        ...(tab.openerTabId === removedId ? { openerTabId: model.id } : {}),
         index,
         active: model.active ? tab.id === model.id : tab.active,
       });

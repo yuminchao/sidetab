@@ -35,6 +35,8 @@ function menuContext(
   id: number,
   availability: Partial<{
     canCloseBelow: boolean;
+    canCloseAbove: boolean;
+    canOpenAllShortcuts: boolean;
     canGroupSameSite: boolean;
     canCloseOtherSameSite: boolean;
   }> = {},
@@ -73,19 +75,21 @@ describe("tab context menu", () => {
     expect(popup.style.top).toBe(`${window.innerHeight - 90}px`);
     expect(document.querySelectorAll(".tab-context-menu:not(.tab-context-submenu)")).toHaveLength(1);
     expect(document.querySelectorAll(".tab-context-submenu")).toHaveLength(1);
-    expect(popup.children).toHaveLength(11);
+    expect(popup.children).toHaveLength(13);
     expect(Array.from(popup.children, (item) => item instanceof HTMLButtonElement
       ? item.dataset.menuAction
       : item.className)).toEqual([
       "duplicate",
       "set-pinned",
       "add-shortcut",
+      "open-all-shortcuts",
       "tab-context-separator",
       "add-to-group",
       "remove-from-group",
       "group-same-site",
       "tab-context-separator",
       "close-below",
+      "close-above",
       "close-same-site",
       "restore-recently-closed",
     ]);
@@ -110,9 +114,11 @@ describe("tab context menu", () => {
       "复制标签页",
       "固定标签",
       "设为快捷网站",
+      "打开所有快捷网站",
       "添加到分组",
       "快速分组",
       "关闭下方标签页",
+      "关闭上方标签页",
       "关闭其他同类网站标签页",
       "打开最近关闭标签页",
     ]);
@@ -201,6 +207,28 @@ describe("tab context menu", () => {
 
     expect(onCommand).toHaveBeenCalledWith({ action: "close-below", tabId: 1 });
     expect(popup.hidden).toBe(true);
+    menu.destroy();
+  });
+
+  it("dispatches close-above and open-all-shortcuts when enabled", () => {
+    const onCommand = vi.fn();
+    const menu = createTabContextMenu(
+      { document, list, viewport: window },
+      {
+        getContext: (id) => menuContext(id, { canCloseAbove: true, canOpenAllShortcuts: true }),
+        getGroups: () => [],
+        onCommand,
+      },
+    );
+    const popup = document.querySelector<HTMLElement>(".tab-context-menu")!;
+
+    context(row(1));
+    popup.querySelector<HTMLButtonElement>("[data-menu-action='open-all-shortcuts']")!.click();
+    expect(onCommand).toHaveBeenLastCalledWith({ action: "open-all-shortcuts", tabId: 1 });
+
+    context(row(1));
+    popup.querySelector<HTMLButtonElement>("[data-menu-action='close-above']")!.click();
+    expect(onCommand).toHaveBeenLastCalledWith({ action: "close-above", tabId: 1 });
     menu.destroy();
   });
 

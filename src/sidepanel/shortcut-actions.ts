@@ -12,5 +12,15 @@ export function createShortcutActions(api: ShortcutTabsApi) {
         throw new Error("无法打开快捷网站");
       }
     },
+
+    async openMany(urls: readonly string[]): Promise<void> {
+      if (urls.length === 0) return;
+      const results = await Promise.allSettled(
+        urls.map((url) => api.create({ url: normalizeShortcutUrl(url), active: false })),
+      );
+      if (results.some((result) => result.status === "rejected")) {
+        throw new Error("无法打开全部快捷网站");
+      }
+    },
   };
 }

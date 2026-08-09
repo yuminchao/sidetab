@@ -33,6 +33,7 @@ describe("shortcut store", () => {
     await expect(createShortcutStore(area).load()).resolves.toEqual({
       enabled: true,
       tabTitleFontSize: 14,
+      newTabBehavior: "root",
       items: [{ id: "example", name: "Example", url: "https://example.com/", icon: "letter" }],
     });
   });
@@ -48,6 +49,7 @@ describe("shortcut store", () => {
       enabled: true,
       items: [],
       tabTitleFontSize: 16,
+      newTabBehavior: "root",
     });
   });
 
@@ -64,6 +66,7 @@ describe("shortcut store", () => {
     await expect(createShortcutStore(area).load()).resolves.toEqual({
       enabled: true,
       tabTitleFontSize: 18,
+      newTabBehavior: "root",
       items: [{ id: "example", name: "Example", url: "https://example.com/", icon: "letter" }],
     });
   });
@@ -79,6 +82,7 @@ describe("shortcut store", () => {
       enabled: false,
       items: [],
       tabTitleFontSize: 14,
+      newTabBehavior: "root",
     });
   });
 
@@ -124,18 +128,21 @@ describe("shortcut store", () => {
     const settings = {
       enabled: true,
       tabTitleFontSize: 18,
+      newTabBehavior: "child" as const,
       items: [{ id: "example", name: "  Example  ", url: " example.com ", icon: "letter" as const }],
     };
 
     await expect(createShortcutStore(area).save(settings)).resolves.toEqual({
       enabled: true,
       tabTitleFontSize: 18,
+      newTabBehavior: "child",
       items: [{ id: "example", name: "Example", url: "https://example.com/", icon: "letter" }],
     });
     expect(area.set).toHaveBeenCalledWith({
       [storedKey]: {
         enabled: true,
         tabTitleFontSize: 18,
+        newTabBehavior: "child",
         items: [{ id: "example", name: "Example", url: "https://example.com/", icon: "letter" }],
       },
     });
@@ -143,7 +150,7 @@ describe("shortcut store", () => {
 
   it("rejects invalid saves with the validator message without writing", async () => {
     const area = createArea();
-    const invalid = { enabled: true, tabTitleFontSize: 14, items: [{ id: "example", name: "", url: "https://example.com", icon: "letter" as const }] };
+    const invalid = { enabled: true, tabTitleFontSize: 14, newTabBehavior: "root" as const, items: [{ id: "example", name: "", url: "https://example.com", icon: "letter" as const }] };
     const validation = validateShortcutSettings(invalid);
     if (validation.ok) throw new Error("test setup expected invalid settings");
 
@@ -161,6 +168,7 @@ describe("shortcut store", () => {
     const settings = {
       enabled: true,
       tabTitleFontSize: 17,
+      newTabBehavior: "child" as const,
       items: [{ id: "example", name: "  Example  ", url: " example.com ", icon: "letter" as const }],
     };
     const area = createArea({
@@ -173,11 +181,13 @@ describe("shortcut store", () => {
     await expect(createShortcutStore(area).save(settings)).resolves.toEqual({
       enabled: true,
       tabTitleFontSize: 17,
+      newTabBehavior: "child",
       items: [{ id: "example", name: "Example", url: "https://example.com/", icon: "letter" }],
     });
     expect(settings).toEqual({
       enabled: true,
       tabTitleFontSize: 17,
+      newTabBehavior: "child",
       items: [{ id: "example", name: "  Example  ", url: " example.com ", icon: "letter" }],
     });
   });

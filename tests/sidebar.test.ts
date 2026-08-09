@@ -36,6 +36,8 @@ function installFixture(): void {
       <form id="shortcut-form">
         <h2 id="shortcut-dialog-title"></h2>
         <input id="tab-title-font-size" type="number" min="12" max="18" step="1" />
+        <input type="radio" name="new-tab-behavior" value="root" checked />
+        <input type="radio" name="new-tab-behavior" value="child" />
         <button id="chrome-appearance-settings" type="button"></button>
         <input id="shortcut-enabled" type="checkbox" />
         <div id="shortcut-editor-list"></div>
@@ -3441,6 +3443,117 @@ describe("sidebar lifecycle", () => {
     };
     const dependencies: SidebarDependencies = null as unknown as RealChromeDependencies;
     expect(dependencies).toBeNull();
+  });
+
+  it("renders opener children, collapses them, and creates new children from the active tab", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, active: true }),
+        fakeTab({ id: 2, index: 1, openerTabId: 1 }),
+        fakeTab({ id: 3, index: 2 }),
+      ],
+      stored: {
+        shortcutSettings: {
+          ...createDefaultShortcutSettings(),
+          newTabBehavior: "child",
+        },
+      },
+    });
+    const sessionSet = vi.fn().mockResolvedValue(undefined);
+    const fake = {
+      ...base,
+      sessionStorage: {
+        get: vi.fn().mockResolvedValue({ "tabTreeSessionState:10": {} }),
+        set: sessionSet,
+      },
+    };
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(row(1).dataset.treeParent).toBe("true"));
+
+    click(row(1).querySelector("[data-action='toggle-tree']")!);
+    expect(rowIds()).toEqual([1, 3]);
+    await vi.waitFor(() => expect(sessionSet).toHaveBeenCalledWith({
+      "tabTreeSessionState:10": { collapsedTabIds: [1], detachedTabIds: [] },
+    }));
+
+    click(element("new-tab-button"));
+    await vi.waitFor(() => expect(fake.methods.create).toHaveBeenCalled());
+    expect(fake.methods.create).toHaveBeenCalledWith({ active: true, openerTabId: 1 });
+    cleanup();
+  });
+
+  it("keeps new-tab creation disabled until the current window snapshot is ready", async () => {
+    const currentWindow = deferred<chrome.windows.Window>();
+    const fake = createFakeChrome({
+      stored: {
+        shortcutSettings: {
+          ...createDefaultShortcutSettings(),
+          newTabBehavior: "child",
+        },
+      },
+    });
+    fake.methods.getCurrent.mockReturnValueOnce(currentWindow.promise);
+    const startup = startSidebarRaw(fake);
+
+    await vi.waitFor(() => expect(
+      element<HTMLButtonElement>("shortcut-settings").disabled,
+    ).toBe(false));
+    expect(element<HTMLButtonElement>("new-tab-button").disabled).toBe(true);
+
+    currentWindow.resolve({
+      id: 10,
+      tabs: [fakeTab({ id: 1, index: 0, active: true })],
+    } as chrome.windows.Window);
+    const cleanup = await startup;
+    expect(element<HTMLButtonElement>("new-tab-button").disabled).toBe(false);
+    cleanup();
+  });
+
+  it("keeps tree interactions disabled until the window session is hydrated", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, active: true }),
+        fakeTab({ id: 2, index: 1, openerTabId: 1 }),
+        fakeTab({ id: 3, index: 2, groupId: 7 }),
+      ],
+      groups: [fakeGroup({ id: 7 })],
+      stored: {
+        shortcutSettings: {
+          ...createDefaultShortcutSettings(),
+          newTabBehavior: "child",
+        },
+      },
+    });
+    const sessionState = deferred<Record<string, unknown>>();
+    const fake = {
+      ...base,
+      sessionStorage: {
+        get: vi.fn().mockReturnValue(sessionState.promise),
+        set: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+    const cleanup = await startSidebar(fake);
+    await flush();
+
+    expect(row(1).dataset.treeParent).toBeUndefined();
+    expect(row(1).querySelector<HTMLButtonElement>(
+      "[data-action='toggle-tree']",
+    )?.hidden).toBe(true);
+    expect(row(1).draggable).toBe(false);
+    expect(groupRow(7).draggable).toBe(false);
+    openTabContextMenu(1);
+    expect(contextMenuItem("duplicate").disabled).toBe(true);
+    click(element("new-tab-button"));
+    await vi.waitFor(() => expect(fake.methods.create).toHaveBeenCalledWith({
+      active: true,
+      openerTabId: 1,
+    }));
+
+    sessionState.resolve({ "tabTreeSessionState:10": {} });
+    await vi.waitFor(() => expect(row(1).dataset.treeParent).toBe("true"));
+    expect(row(1).draggable).toBe(true);
+    expect(groupRow(7).draggable).toBe(true);
+    cleanup();
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getClosableTabsBelow } from "../src/sidepanel/tab-close-model";
+import { getClosableTabsAbove, getClosableTabsBelow } from "../src/sidepanel/tab-close-model";
 import { buildTabListItems } from "../src/sidepanel/tab-list-model";
 import type { TabViewModel } from "../src/sidepanel/tab-model";
 
@@ -69,5 +69,25 @@ describe("getClosableTabsBelow", () => {
       visibleItems.flatMap((item) => item.kind === "tab" ? [item.tab.id] : []),
     ).toEqual([2, 5]);
     expect(getClosableTabsBelow(fullTabs, 2)).toEqual([3, 4, 5]);
+  });
+});
+
+describe("getClosableTabsAbove", () => {
+  const tabs = [
+    fakeTabModel({ id: 1, index: 0, pinned: true }),
+    fakeTabModel({ id: 2, index: 1 }),
+    fakeTabModel({ id: 3, index: 2, pinned: true }),
+    fakeTabModel({ id: 4, index: 3 }),
+    fakeTabModel({ id: 5, index: 4 }),
+  ];
+
+  it("returns ordinary tabs above the target and skips pinned tabs", () => {
+    expect(getClosableTabsAbove(tabs, 5)).toEqual([2, 4]);
+    expect(getClosableTabsAbove(tabs, 2)).toEqual([]);
+  });
+
+  it("returns an empty list for an unknown target or no closable tabs", () => {
+    expect(getClosableTabsAbove(tabs, 99)).toEqual([]);
+    expect(getClosableTabsAbove(tabs, 1)).toEqual([]);
   });
 });

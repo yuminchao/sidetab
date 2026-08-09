@@ -5,8 +5,10 @@ export type TabContextCommand =
   | { action: "duplicate"; tabId: number }
   | { action: "set-pinned"; tabId: number; pinned: boolean }
   | { action: "add-shortcut"; tabId: number }
+  | { action: "open-all-shortcuts"; tabId: number }
   | { action: "group-same-site"; tabId: number }
   | { action: "close-below"; tabId: number }
+  | { action: "close-above"; tabId: number }
   | { action: "close-same-site"; tabId: number }
   | { action: "create-group"; tabId: number }
   | { action: "add-to-group"; tabId: number; groupId: number }
@@ -15,7 +17,10 @@ export type TabContextCommand =
 
 export type TabContextMenuContext = {
   tab: TabViewModel;
+  canDuplicate?: boolean;
   canCloseBelow: boolean;
+  canCloseAbove?: boolean;
+  canOpenAllShortcuts?: boolean;
   canGroupSameSite: boolean;
   canCloseOtherSameSite: boolean;
 };
@@ -43,6 +48,7 @@ export function createTabContextMenu(
   const duplicate = createItem("duplicate", "复制标签页");
   const setPinned = createItem("set-pinned", "固定标签");
   const addShortcut = createItem("add-shortcut", "设为快捷网站");
+  const openAllShortcuts = createItem("open-all-shortcuts", "打开所有快捷网站");
   const addToGroup = createItem("add-to-group", "添加到分组");
   addToGroup.setAttribute("aria-haspopup", "menu");
   addToGroup.setAttribute("aria-expanded", "false");
@@ -56,6 +62,7 @@ export function createTabContextMenu(
   closeSeparator.setAttribute("role", "separator");
   const removeFromGroup = createItem("remove-from-group", "从分组中移除");
   const closeBelow = createItem("close-below", "关闭下方标签页");
+  const closeAbove = createItem("close-above", "关闭上方标签页");
   const restoreRecentlyClosed = createItem(
     "restore-recently-closed",
     "打开最近关闭标签页",
@@ -64,12 +71,14 @@ export function createTabContextMenu(
     duplicate,
     setPinned,
     addShortcut,
+    openAllShortcuts,
     groupSeparator,
     addToGroup,
     removeFromGroup,
     groupSameSite,
     closeSeparator,
     closeBelow,
+    closeAbove,
     closeSameSite,
     restoreRecentlyClosed,
   );
@@ -178,9 +187,12 @@ export function createTabContextMenu(
     returnFocus = focusTarget;
     setPinned.textContent = tab.pinned ? "取消固定" : "固定标签";
     setPinned.dataset.nextPinned = String(!tab.pinned);
+    duplicate.disabled = context.canDuplicate === false;
     removeFromGroup.hidden = !isValidTabGroupId(tab.groupId);
     groupSameSite.disabled = !context.canGroupSameSite;
     closeBelow.disabled = !context.canCloseBelow;
+    closeAbove.disabled = context.canCloseAbove !== true;
+    openAllShortcuts.disabled = context.canOpenAllShortcuts !== true;
     closeSameSite.disabled = !context.canCloseOtherSameSite;
     const sessionId = callbacks.getRecentlyClosedSessionId?.();
     restoreRecentlyClosed.disabled = !sessionId;
@@ -251,11 +263,17 @@ export function createTabContextMenu(
       case "add-shortcut":
         command = { action: "add-shortcut", tabId: openTabId };
         break;
+      case "open-all-shortcuts":
+        command = { action: "open-all-shortcuts", tabId: openTabId };
+        break;
       case "group-same-site":
         command = { action: "group-same-site", tabId: openTabId };
         break;
       case "close-below":
         command = { action: "close-below", tabId: openTabId };
+        break;
+      case "close-above":
+        command = { action: "close-above", tabId: openTabId };
         break;
       case "close-same-site":
         command = { action: "close-same-site", tabId: openTabId };

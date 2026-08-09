@@ -10,8 +10,11 @@ export type Shortcut = {
 export type ShortcutSettings = {
   enabled: boolean;
   tabTitleFontSize: number;
+  newTabBehavior: NewTabBehavior;
   items: Shortcut[];
 };
+
+export type NewTabBehavior = "root" | "child";
 
 export const DEFAULT_TAB_TITLE_FONT_SIZE = 14;
 export const MIN_TAB_TITLE_FONT_SIZE = 12;
@@ -33,6 +36,7 @@ export function createDefaultShortcutSettings(): ShortcutSettings {
   return {
     enabled: true,
     tabTitleFontSize: DEFAULT_TAB_TITLE_FONT_SIZE,
+    newTabBehavior: "root",
     items: defaultShortcuts.map((shortcut) => ({ ...shortcut })),
   };
 }
@@ -56,6 +60,38 @@ export function normalizeShortcutUrl(raw: string): string {
   }
 }
 
+export function getShortcutUrlsToOpen(
+  shortcuts: readonly Shortcut[],
+  tabs: readonly { url: string }[],
+): string[] {
+  const openedDomains = new Set<string>();
+  for (const tab of tabs) {
+    try {
+      const parsed = new URL(tab.url);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+        openedDomains.add(parsed.hostname.toLowerCase());
+      }
+    } catch {
+      // Ignore tabs whose URL is not parseable as an HTTP(S) URL.
+    }
+  }
+
+  const seenDomains = new Set<string>();
+  const urls: string[] = [];
+  for (const shortcut of shortcuts) {
+    try {
+      const parsed = new URL(normalizeShortcutUrl(shortcut.url));
+      const domain = parsed.hostname.toLowerCase();
+      if (openedDomains.has(domain) || seenDomains.has(domain)) continue;
+      seenDomains.add(domain);
+      urls.push(parsed.href);
+    } catch {
+      // Settings are validated on save; skip malformed legacy entries defensively.
+    }
+  }
+  return urls;
+}
+
 export function appendTabShortcut(
   settings: ShortcutSettings,
   tab: { id: string; title: string; url: string },
@@ -65,6 +101,7 @@ export function appendTabShortcut(
   const validation = validateShortcutSettings({
     enabled: settings.enabled,
     tabTitleFontSize: settings.tabTitleFontSize,
+    newTabBehavior: settings.newTabBehavior,
     items: [
       ...settings.items.map((item) => ({ ...item })),
       { id: tab.id, name, url, icon: "letter" },
@@ -85,11 +122,17 @@ export function validateShortcutSettings(input: unknown): ValidationResult {
     const hasEnabled = Object.hasOwn(input, "enabled");
     const enabled = hasEnabled ? input.enabled : true;
     const rawItems = input.items;
+    const hasNewTabBehavior = Object.hasOwn(input, "newTabBehavior");
+    const newTabBehavior = hasNewTabBehavior ? input.newTabBehavior : "root";
     const hasTabTitleFontSize = Object.hasOwn(input, "tabTitleFontSize");
     const rawTabTitleFontSize = hasTabTitleFontSize
       ? input.tabTitleFontSize
       : DEFAULT_TAB_TITLE_FONT_SIZE;
-    if (typeof enabled !== "boolean" || !Array.isArray(rawItems)) {
+    if (
+      typeof enabled !== "boolean" ||
+      !isNewTabBehavior(newTabBehavior) ||
+      !Array.isArray(rawItems)
+    ) {
       return invalidFormat();
     }
 
@@ -155,7 +198,7 @@ export function validateShortcutSettings(input: unknown): ValidationResult {
       items.push({ id, name, url, icon });
     }
 
-    return { ok: true, value: { enabled, tabTitleFontSize, items } };
+    return { ok: true, value: { enabled, tabTitleFontSize, newTabBehavior, items } };
   } catch {
     return invalidFormat();
   }
@@ -171,4 +214,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isShortcutIcon(value: unknown): value is ShortcutIcon {
   return typeof value === "string" && supportedIcons.has(value as ShortcutIcon);
+}
+
+function isNewTabBehavior(value: unknown): value is NewTabBehavior {
+  return value === "root" || value === "child";
 }

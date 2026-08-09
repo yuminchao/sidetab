@@ -1,4 +1,4 @@
-import { appendTabShortcut, createDefaultShortcutSettings } from "./shortcut-model";
+import { appendTabShortcut, createDefaultShortcutSettings, getShortcutUrlsToOpen } from "./shortcut-model";
 import { createShortcutActions } from "./shortcut-actions";
 import { createShortcutRenderer } from "./shortcut-renderer";
 import { createShortcutStore, type StorageArea } from "./shortcut-store";
@@ -14,7 +14,7 @@ import {
   type HistorySearchApi,
 } from "./history-search";
 import { createTabActions } from "./tab-actions";
-import { getClosableTabsBelow } from "./tab-close-model";
+import { getClosableTabsAbove, getClosableTabsBelow } from "./tab-close-model";
 import { createTabContextMenu } from "./tab-context-menu";
 import { createTabDragController } from "./tab-drag-controller";
 import { subscribeToTabEvents } from "./tab-events";
@@ -26,11 +26,17 @@ import { createTabGroupRenameDialog } from "./tab-group-rename-dialog";
 import { TabGroupStore } from "./tab-group-store";
 import { buildTabListItems } from "./tab-list-model";
 import { createTabMiddleClickController } from "./tab-middle-click";
-import { createTabReorderPlan } from "./tab-reorder-model";
+import {
+  createTabBlockReorderPlan,
+  createTabReorderPlan,
+  shouldDetachTreeTabOnDrop,
+} from "./tab-reorder-model";
 import { createTabGroupReorderPlan } from "./tab-group-reorder-model";
 import type { TabDragIntent } from "./tab-drag-controller";
 import { createTabRenderer } from "./tab-renderer";
 import { TabStore } from "./tab-store";
+import { createTabTreeSessionStore } from "./tab-tree-session-store";
+import { getTabSubtreeIds } from "./tab-tree-model";
 import {
   createSameSiteGroupPlan,
   getOtherSameSiteTabIds,
@@ -43,6 +49,7 @@ export type SidebarDependencies = {
   tabGroups: typeof chrome.tabGroups;
   windows: Pick<typeof chrome.windows, "getCurrent">;
   storage: StorageArea;
+  sessionStorage?: StorageArea;
   bookmarks: BookmarkSearchApi;
   history: HistorySearchApi;
   sessions: SessionsApi;
@@ -66,6 +73,7 @@ type SidebarElements = {
   dialogTitle: HTMLElement;
   shortcutEnabled: HTMLInputElement;
   tabTitleFontSize: HTMLInputElement;
+  newTabBehavior: NodeListOf<HTMLInputElement>;
   shortcutEditor: HTMLElement;
   shortcutError: HTMLElement;
   shortcutAdd: HTMLButtonElement;
@@ -101,6 +109,7 @@ async function startSidebarInternal(
   const tabActions = createTabActions(deps.tabs);
   const groupActions = createTabGroupActions(deps.tabs, deps.tabGroups);
   const shortcutStore = createShortcutStore(deps.storage);
+  const treeSessionStore = createTabTreeSessionStore(deps.sessionStorage);
   const faviconCacheStore = createShortcutFaviconCacheStore(deps.storage);
   const shortcutActions = createShortcutActions(deps.tabs);
   const tabRenderer = createTabRenderer({ list: elements.list, empty: elements.empty });
@@ -122,6 +131,13 @@ async function startSidebarInternal(
   const bufferedAttachedTabs = new WeakSet<chrome.tabs.Tab>();
   const bufferedReplacementTabs = new WeakSet<chrome.tabs.Tab>();
   let shortcutSettingsReady = false;
+  let treeSessionReady = false;
+  let tabsReady = false;
+  let shortcutSettings = createDefaultShortcutSettings();
+  let lastScrolledActiveTabId: number | undefined;
+  const collapsedTabIds = new Set<number>();
+  const detachedTabIds = new Set<number>();
+  const replacementTabIds = new Map<number, number>();
   let operationGeneration = 0;
   let reorderBusy = false;
   type ResyncPhase = "idle" | "querying" | "replaying";
@@ -183,6 +199,7 @@ async function startSidebarInternal(
     }
   };
   elements.settingsButton.disabled = true;
+  elements.newTabButton.disabled = true;
   elements.settingsButton.addEventListener("click", blockPendingSettings, true);
 
   const discardPendingAsyncEvents = (): void => {
@@ -209,8 +226,39 @@ async function startSidebarInternal(
     return replayed;
   };
 
+  const isTreeEnabled = (): boolean =>
+    treeSessionReady && shortcutSettings.newTabBehavior === "child";
+
   const renderTabList = (): void => {
-    tabRenderer.render(buildTabListItems(tabStore.list(), groupStore.list()));
+    const tabs = tabStore.list();
+    tabRenderer.render(buildTabListItems(tabs, groupStore.list(), {
+      treeEnabled: isTreeEnabled(),
+      collapsedTabIds,
+      detachedTabIds,
+    }));
+    const activeTabId = tabs.find((tab) => tab.active)?.id;
+    if (
+      isTreeEnabled() &&
+      activeTabId !== undefined &&
+      activeTabId !== lastScrolledActiveTabId
+    ) {
+      lastScrolledActiveTabId = activeTabId;
+      queueMicrotask(() => {
+        if (!active) return;
+        elements.list.querySelector<HTMLElement>('[data-active="true"]')
+          ?.scrollIntoView?.({ block: "nearest" });
+      });
+    } else if (!isTreeEnabled()) {
+      lastScrolledActiveTabId = undefined;
+    }
+  };
+
+  const persistTreeSession = (): void => {
+    if (!isTreeEnabled() || currentWindowId === undefined) return;
+    void treeSessionStore.save(
+      currentWindowId,
+      { collapsedTabIds, detachedTabIds },
+    ).catch(() => undefined);
   };
 
   const flushFaviconCache = (): void => {
@@ -230,6 +278,7 @@ async function startSidebarInternal(
       form: elements.form,
       enabled: elements.shortcutEnabled,
       fontSize: elements.tabTitleFontSize,
+      newTabBehavior: elements.newTabBehavior,
       editor: elements.shortcutEditor,
       error: elements.shortcutError,
       add: elements.shortcutAdd,
@@ -270,6 +319,16 @@ async function startSidebarInternal(
       },
       async onSave(settings) {
         const saved = await shortcutStore.save(settings);
+        if (saved.newTabBehavior === "root") {
+          collapsedTabIds.clear();
+          detachedTabIds.clear();
+          if (currentWindowId !== undefined) {
+            void treeSessionStore.clear(currentWindowId).catch(() => undefined);
+          }
+        }
+        shortcutSettings = saved;
+        renderTabList();
+        updateDragEnabled();
         faviconCacheStore.prune(createShortcutOrigins(saved));
         shortcutRenderer.setCachedFaviconsByOrigin(faviconCacheStore.snapshot());
         flushFaviconCache();
@@ -449,6 +508,7 @@ async function startSidebarInternal(
       shortcutRenderer.setCachedFaviconsByOrigin(faviconCacheStore.snapshot());
       flushFaviconCache();
       shortcutRenderer.render(saved);
+      shortcutSettings = saved;
       syncShortcutFavicons();
       setStatus("shortcuts", "已添加到快捷网站");
     } catch (error) {
@@ -464,7 +524,15 @@ async function startSidebarInternal(
   };
 
   const updateDragEnabled = (): void => {
-    tabRenderer.setTabDragEnabled(!reorderBusy);
+    const dragInteractionsReady = shortcutSettingsReady && (
+      shortcutSettings.newTabBehavior !== "child" || treeSessionReady
+    );
+    tabRenderer.setDragEnabled(dragInteractionsReady);
+    if (dragInteractionsReady) tabRenderer.setTabDragEnabled(!reorderBusy);
+  };
+
+  const updateNewTabEnabled = (): void => {
+    elements.newTabButton.disabled = !shortcutSettingsReady || !tabsReady;
   };
 
   let groupContextMenu: ReturnType<typeof createTabGroupContextMenu> | undefined;
@@ -483,7 +551,12 @@ async function startSidebarInternal(
         );
         return {
           tab,
+          canDuplicate: shortcutSettings.newTabBehavior !== "child" || treeSessionReady,
           canCloseBelow: getClosableTabsBelow(tabs, id).length > 0,
+          canCloseAbove: getClosableTabsAbove(tabs, id).length > 0,
+          canOpenAllShortcuts: shortcutSettingsReady
+            && shortcutSettings.enabled
+            && getShortcutUrlsToOpen(shortcutSettings.items, tabs).length > 0,
           ...sameSite,
           canGroupSameSite: quickGroupingReady && sameSite.canGroupSameSite,
         };
@@ -499,6 +572,17 @@ async function startSidebarInternal(
         if (command.action === "close-below") {
           const tabIds = getClosableTabsBelow(tabStore.list(), command.tabId);
           runTabOperation(tabActions.closeMany(tabIds));
+          return;
+        }
+        if (command.action === "close-above") {
+          const tabIds = getClosableTabsAbove(tabStore.list(), command.tabId);
+          runTabOperation(tabActions.closeAbove(tabIds));
+          return;
+        }
+        if (command.action === "open-all-shortcuts") {
+          if (!shortcutSettingsReady || !shortcutSettings.enabled) return;
+          const urls = getShortcutUrlsToOpen(shortcutSettings.items, tabStore.list());
+          runTabOperation(shortcutActions.openMany(urls));
           return;
         }
         if (command.action === "close-same-site") {
@@ -539,7 +623,17 @@ async function startSidebarInternal(
           return;
         }
         if (command.action === "duplicate") {
-          runTabOperation(tabActions.duplicate(command.tabId));
+          if (shortcutSettings.newTabBehavior === "child" && !treeSessionReady) return;
+          runTabOperation(tabActions.duplicate(command.tabId).then((duplicatedTabId) => {
+            if (
+              duplicatedTabId !== undefined &&
+              isTreeEnabled()
+            ) {
+              detachedTabIds.add(duplicatedTabId);
+              persistTreeSession();
+              renderTabList();
+            }
+          }));
           return;
         }
         if (command.action === "restore-recently-closed") {
@@ -670,7 +764,9 @@ async function startSidebarInternal(
     { list: elements.list, viewport: deps.document.defaultView! },
     {
       canStartGroupDrag: (groupId) =>
-        Boolean(groupStore.get(groupId))
+        shortcutSettingsReady
+        && (shortcutSettings.newTabBehavior !== "child" || treeSessionReady)
+        && Boolean(groupStore.get(groupId))
         && !groupCommandBusy.has(groupId)
         && !groupToggleBusy.has(groupId),
       onDrop(intent: TabDragIntent) {
@@ -690,14 +786,37 @@ async function startSidebarInternal(
           return;
         }
         if (reorderBusy) return;
+        const tabs = tabStore.list();
+        const sourceIds = isTreeEnabled()
+          ? getTabSubtreeIds(tabs, intent.sourceId, detachedTabIds)
+          : [intent.sourceId];
+        const blockPlan = sourceIds.length > 1
+          ? createTabBlockReorderPlan(tabs, sourceIds, intent.target)
+          : undefined;
         const plan = createTabReorderPlan(
-          tabStore.list(), intent.sourceId, intent.target,
+          tabs, intent.sourceId, intent.target,
         );
-        if (!plan) return;
+        if (!plan || (sourceIds.length > 1 && !blockPlan)) return;
+        const shouldDetach = isTreeEnabled()
+          && shouldDetachTreeTabOnDrop(
+            tabs,
+            intent.sourceId,
+            intent.target,
+            detachedTabIds,
+          );
         reorderBusy = true;
         updateDragEnabled();
+        const reorderOperation = blockPlan
+          ? tabActions.reorderMany(blockPlan)
+          : tabActions.reorder(plan);
         runTabOperation(
-          tabActions.reorder(plan),
+          shouldDetach
+            ? reorderOperation.then(() => {
+              detachedTabIds.add(intent.sourceId);
+              persistTreeSession();
+              renderTabList();
+            })
+            : reorderOperation,
           () => {
             if (!active) return;
             reorderBusy = false;
@@ -717,7 +836,10 @@ async function startSidebarInternal(
   const onNewTabClick = (): void => {
     if (elements.newTabButton.disabled) return;
     elements.newTabButton.disabled = true;
-    runTabOperation(tabActions.create(), () => {
+    const openerTabId = shortcutSettings.newTabBehavior === "child"
+      ? tabStore.list().find((tab) => tab.active)?.id
+      : undefined;
+    runTabOperation(tabActions.create(openerTabId), () => {
       if (active) elements.newTabButton.disabled = false;
     });
   };
@@ -769,6 +891,7 @@ async function startSidebarInternal(
     bufferedEvents.length = 0;
     discardPendingAsyncEvents();
     elements.list.removeEventListener("click", onListClick);
+    elements.list.removeEventListener("keydown", onListKeyDown);
     elements.newTabButton.removeEventListener("click", onNewTabClick);
     elements.tabScroll.removeEventListener("scroll", onTabScroll);
     elements.settingsButton.removeEventListener("click", onSettingsClick);
@@ -835,6 +958,13 @@ async function startSidebarInternal(
     }
 
     const action = actionElement.dataset.action;
+    if (action === "toggle-tree") {
+      if (collapsedTabIds.has(tabId)) collapsedTabIds.delete(tabId);
+      else collapsedTabIds.add(tabId);
+      renderTabList();
+      persistTreeSession();
+      return;
+    }
     const operation = action === "activate"
       ? tabActions.activate(tabId)
       : action === "close"
@@ -845,7 +975,27 @@ async function startSidebarInternal(
     }
   };
 
+  const onListKeyDown = (event: KeyboardEvent): void => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const main = target.closest<HTMLElement>("[data-action='activate']");
+    const row = main?.closest<HTMLElement>("[data-tab-id][data-tree-parent='true']");
+    if (!main || !row || !elements.list.contains(row)) return;
+    const tabId = Number(row.dataset.tabId);
+    if (!Number.isSafeInteger(tabId)) return;
+    const shouldCollapse = event.key === "ArrowLeft";
+    if (shouldCollapse === collapsedTabIds.has(tabId)) return;
+    event.preventDefault();
+    if (shouldCollapse) collapsedTabIds.add(tabId);
+    else collapsedTabIds.delete(tabId);
+    renderTabList();
+    persistTreeSession();
+    row.querySelector<HTMLButtonElement>(".tab-main")?.focus();
+  };
+
   elements.list.addEventListener("click", onListClick);
+  elements.list.addEventListener("keydown", onListKeyDown);
   elements.newTabButton.addEventListener("click", onNewTabClick);
   elements.tabScroll.addEventListener("scroll", onTabScroll);
   elements.settingsButton.addEventListener("click", onSettingsClick);
@@ -881,10 +1031,23 @@ async function startSidebarInternal(
     applyEvent(
       () => {
         tabStore.remove(tabId);
+        collapsedTabIds.delete(tabId);
+        detachedTabIds.delete(tabId);
+        persistTreeSession();
       },
       renderTabList,
       true,
     );
+  };
+
+  const replaceTab = (tab: chrome.tabs.Tab, removedTabId: number): void => {
+    contextMenu.closeForTab(removedTabId);
+    tabStore.replaceId(removedTabId, tab);
+    if (tab.id === undefined) return;
+    replacementTabIds.set(removedTabId, tab.id);
+    if (collapsedTabIds.delete(removedTabId)) collapsedTabIds.add(tab.id);
+    if (detachedTabIds.delete(removedTabId)) detachedTabIds.add(tab.id);
+    persistTreeSession();
   };
 
   const tabEventHandlers = {
@@ -913,10 +1076,9 @@ async function startSidebarInternal(
       if (bufferedReplacementTabs.delete(tab)) {
         return;
       }
-      contextMenu.closeForTab(removedTabId);
       applyEvent(
         () => {
-          tabStore.replaceId(removedTabId, tab);
+          replaceTab(tab, removedTabId);
         },
         renderTabList,
         true,
@@ -1136,8 +1298,7 @@ async function startSidebarInternal(
               bufferedReplacementTabs.add(tab);
               slot.resolve(() => {
                 if (slot.removedTabId !== undefined) {
-                  contextMenu.closeForTab(slot.removedTabId);
-                  tabStore.replaceId(slot.removedTabId, tab);
+                  replaceTab(tab, slot.removedTabId);
                 }
               });
             }
@@ -1175,8 +1336,11 @@ async function startSidebarInternal(
     }
     shortcutRenderer.setCachedFaviconsByOrigin(cachedFavicons);
     shortcutRenderer.render(settings);
+    shortcutSettings = settings;
     shortcutSettingsReady = true;
     elements.settingsButton.disabled = false;
+    updateNewTabEnabled();
+    updateDragEnabled();
   };
 
   const loadShortcuts = Promise.all([
@@ -1213,7 +1377,29 @@ async function startSidebarInternal(
     if (!active) return cleanup;
 
     currentWindowId = windowId;
+    void Promise.all([
+      loadShortcuts,
+      treeSessionStore.load(windowId).catch(() => ({
+        collapsedTabIds: new Set<number>(),
+        detachedTabIds: new Set<number>(),
+      })),
+    ]).then(([, treeState]) => {
+      if (!active || currentWindowId !== windowId) return;
+      collapsedTabIds.clear();
+      detachedTabIds.clear();
+      if (shortcutSettings.newTabBehavior === "child") {
+        copyMigratedIds(treeState.collapsedTabIds, collapsedTabIds, replacementTabIds);
+        copyMigratedIds(treeState.detachedTabIds, detachedTabIds, replacementTabIds);
+      } else {
+        void treeSessionStore.clear(windowId).catch(() => undefined);
+      }
+      treeSessionReady = true;
+      renderTabList();
+      updateDragEnabled();
+    });
     tabStore.initialize(tabs);
+    tabsReady = true;
+    updateNewTabEnabled();
     groupStore.initialize([], windowId);
     syncShortcutFavicons();
     renderTabList();
@@ -1234,6 +1420,24 @@ async function startSidebarInternal(
   }
 
   return cleanup;
+}
+
+function copyMigratedIds(
+  source: ReadonlySet<number>,
+  target: Set<number>,
+  replacements: ReadonlyMap<number, number>,
+): void {
+  for (const sourceId of source) {
+    let id = sourceId;
+    const visited = new Set<number>();
+    while (!visited.has(id)) {
+      visited.add(id);
+      const replacement = replacements.get(id);
+      if (replacement === undefined) break;
+      id = replacement;
+    }
+    target.add(id);
+  }
 }
 
 function getSidebarElements(document: Document): SidebarElements {
@@ -1258,6 +1462,9 @@ function getSidebarElements(document: Document): SidebarElements {
     dialogTitle: requireElement(document, "shortcut-dialog-title", HTMLElement),
     shortcutEnabled: requireElement(document, "shortcut-enabled", HTMLInputElement),
     tabTitleFontSize: requireElement(document, "tab-title-font-size", HTMLInputElement),
+    newTabBehavior: document.querySelectorAll<HTMLInputElement>(
+      "input[type='radio'][name='new-tab-behavior']",
+    ),
     shortcutEditor: requireElement(document, "shortcut-editor-list", HTMLElement),
     shortcutError: requireElement(document, "shortcut-error", HTMLElement),
     shortcutAdd: requireElement(document, "shortcut-add", HTMLButtonElement),
@@ -1381,6 +1588,7 @@ if (typeof chrome !== "undefined" && typeof document !== "undefined") {
     history: chrome.history,
     sessions: chrome.sessions,
     storage: chrome.storage.local,
+    sessionStorage: chrome.storage.session,
     document,
   }, window);
 }

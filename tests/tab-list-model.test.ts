@@ -30,6 +30,37 @@ function group(overrides: Partial<TabGroupViewModel> = {}): TabGroupViewModel {
 }
 
 describe("buildTabListItems", () => {
+  it("renders opener subtrees continuously with tree decorations when enabled", () => {
+    const items = buildTabListItems([
+      tab({ id: 1, index: 0 }),
+      tab({ id: 3, index: 2, openerTabId: 1 }),
+      tab({ id: 2, index: 1 }),
+    ], [], { treeEnabled: true });
+
+    expect(items).toMatchObject([
+      { kind: "tab", tab: { id: 1 }, tree: { depth: 0, hasChildren: true } },
+      { kind: "tab", tab: { id: 3 }, tree: { depth: 1 } },
+      { kind: "tab", tab: { id: 2 }, tree: { depth: 0, hasChildren: false } },
+    ]);
+  });
+
+  it("keeps native group members in one tree block and counts hidden descendants", () => {
+    const items = buildTabListItems([
+      tab({ id: 1, index: 0, groupId: 7 }),
+      tab({ id: 2, index: 1, groupId: 7, openerTabId: 1 }),
+      tab({ id: 3, index: 2, groupId: 7, openerTabId: 2 }),
+    ], [group()], { treeEnabled: true, collapsedTabIds: new Set([1]) });
+
+    expect(items).toMatchObject([
+      { kind: "group", count: 3 },
+      {
+        kind: "tab",
+        tab: { id: 1 },
+        group: { position: "single" },
+        tree: { collapsed: true },
+      },
+    ]);
+  });
   it("sorts pinned and ordinary tabs by Chrome index and ID", () => {
     const tabs = [
       tab({ id: 6, index: 5 }),
@@ -54,7 +85,7 @@ describe("buildTabListItems", () => {
 
     expect(buildTabListItems(tabs, [group()])).toMatchObject([
       { kind: "tab", tab: { id: 1, pinned: true } },
-      { kind: "group", group: { id: 7, title: "Work", color: "blue" } },
+      { kind: "group", group: { id: 7, title: "Work", color: "blue" }, count: 1 },
       { kind: "tab", tab: { id: 2, groupId: 7 } },
       { kind: "tab", tab: { id: 3, groupId: -1 } },
     ]);
@@ -68,19 +99,18 @@ describe("buildTabListItems", () => {
     ];
 
     expect(buildTabListItems(tabs, [group({ collapsed: true })])).toMatchObject([
-      { kind: "group", group: { id: 7, collapsed: true } },
+      { kind: "group", group: { id: 7, collapsed: true }, count: 2 },
       { kind: "tab", tab: { id: 3 } },
     ]);
   });
 
-  it("preserves an empty group title and never adds a tab count", () => {
+  it("preserves an empty group title and adds its tab count", () => {
     const items = buildTabListItems(
       [tab({ groupId: 7 })],
       [group({ title: "" })],
     );
 
-    expect(items[0]).toEqual({ kind: "group", group: group({ title: "" }) });
-    expect(items[0]).not.toHaveProperty("count");
+    expect(items[0]).toEqual({ kind: "group", group: group({ title: "" }), count: 1 });
   });
 
   it("shows tabs with missing group metadata as ungrouped tabs", () => {
@@ -151,7 +181,7 @@ describe("buildTabListItems", () => {
       [group({ collapsed: true })],
     );
     expect(collapsedItems).toEqual([
-      { kind: "group", group: group({ collapsed: true }) },
+      { kind: "group", group: group({ collapsed: true }), count: 1 },
     ]);
 
     const visibleItems = buildTabListItems(

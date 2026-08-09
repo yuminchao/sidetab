@@ -16,41 +16,37 @@ function parseCsp(value: string): Record<string, string[]> {
 }
 
 describe("extension manifest", () => {
-  it("keeps the npm and extension release versions aligned at 0.10.0", () => {
+  it("keeps the npm and extension release versions aligned at 0.10.4", () => {
     const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
     const packageLock = JSON.parse(readFileSync("package-lock.json", "utf8"));
-    expect(manifest.version).toBe("0.10.0");
-    expect(packageJson.version).toBe("0.10.0");
-    expect(packageLock.version).toBe("0.10.0");
-    expect(packageLock.packages[""].version).toBe("0.10.0");
+    expect(manifest.version).toBe("0.10.4");
+    expect(packageJson.version).toBe("0.10.4");
+    expect(packageLock.version).toBe("0.10.4");
+    expect(packageLock.packages[""].version).toBe("0.10.4");
   });
 
-  it("records the 0.10.0 search and grouped drag release scope", () => {
+  it("records the 0.10.4 context actions and visual refinements release", () => {
     const readme = readFileSync("README.md", "utf8");
     const checklist = readFileSync("docs/chrome-web-store-checklist.md", "utf8");
     const updateLog = readFileSync("update.log", "utf8");
-    expect(readme).toContain("release/sidetab-lite-0.10.0.zip");
-    expect(checklist).toContain("release/sidetab-lite-0.10.0.zip");
+    expect(readme).toContain("release/sidetab-lite-0.10.4.zip");
+    expect(checklist).toContain("release/sidetab-lite-0.10.4.zip");
     for (const detail of [
-      "收藏夹",
-      "历史记录",
-      "来源标签",
-      "连续分组容器",
-      "整体拖动",
-      "chrome.tabGroups.move()",
-      "执行瞬间重算",
+      "打开所有快捷网站",
+      "完整 hostname",
+      "关闭上方标签页",
+      "4px",
+      "淡黄色背景",
       "无新增权限",
       "无新增查询",
       "无新增轮询",
-      "失败只执行一次合并重同步",
-      "O(n)",
       "无长期缓存",
       "无远程代码",
-      "0.10.0",
+      "0.10.4",
     ]) {
       expect(updateLog).toContain(detail);
     }
-    expect(checklist).toContain("0.10.0");
+    expect(checklist).toContain("0.10.4");
   });
 
   it("documents the current release archive, permissions, and file count", () => {
@@ -97,10 +93,12 @@ describe("extension manifest", () => {
       expect(document).toContain("OpenAI、Google、GitHub");
       expect(document).toContain("显式关闭");
       expect(document).toContain("恢复默认");
+      expect(document).toContain("默认值为 14 像素");
       expect(document).toContain("44x24");
       expect(document).toContain("文本 `+`");
       expect(document).toContain("边框");
       expect(document).not.toContain("快捷入口默认关闭");
+      expect(document).not.toContain("默认值为 16 像素");
       expect(document).not.toContain("新增标签页图标");
       expect(document).not.toContain("无边框样式");
     }
@@ -137,25 +135,21 @@ describe("extension manifest", () => {
     }
   });
 
-  it("records the 0.10.0 release scope and performance boundaries first", () => {
+  it("records the 0.10.4 release scope and boundaries first", () => {
     const updateLog = readFileSync("update.log", "utf8");
     const nextVersion = updateLog.search(/\r?\n(?=\d+\.\d+\.\d+\r?$)/m);
     const currentRelease = nextVersion === -1 ? updateLog : updateLog.slice(0, nextVersion);
 
-    expect(updateLog.split(/\r?\n/, 1)[0]).toBe("0.10.0");
+    expect(updateLog.split(/\r?\n/, 1)[0]).toBe("0.10.4");
     for (const detail of [
-      "收藏夹",
-      "历史记录",
-      "来源标签",
-      "连续分组容器",
-      "整体拖动",
-      "chrome.tabGroups.move()",
-      "执行瞬间重算",
+      "打开所有快捷网站",
+      "完整 hostname",
+      "关闭上方标签页",
+      "4px",
+      "淡黄色背景",
       "无新增权限",
       "无新增查询",
       "无新增轮询",
-      "失败只执行一次合并重同步",
-      "O(n)",
       "无长期缓存",
       "无远程代码",
     ]) {

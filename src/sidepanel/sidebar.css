@@ -341,7 +341,7 @@ input:focus-visible {
 
 .tab-group-main {
   display: grid;
-  grid-template-columns: 12px minmax(0, 1fr);
+  grid-template-columns: 12px minmax(0, 1fr) auto;
   gap: 6px;
   align-items: center;
   width: 100%;
@@ -392,6 +392,16 @@ input:focus-visible {
   white-space: nowrap;
 }
 
+.tab-group-count {
+  width: 3ch;
+  font-size: 12px;
+  line-height: 20px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  opacity: 0.86;
+}
+
 .tab-group-row[data-group-color="grey"] { background: #80868b; color: white; }
 .tab-group-row[data-group-color="blue"] { background: #1a73e8; color: white; }
 .tab-group-row[data-group-color="red"] { background: #d93025; color: white; }
@@ -427,6 +437,15 @@ input:focus-visible {
   font-size: 20px;
   line-height: 1;
   cursor: pointer;
+}
+
+.new-tab-glyph {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  line-height: 1;
+  transform: translateY(-1px);
 }
 
 .new-tab-button:hover:not(:disabled) {
@@ -543,7 +562,7 @@ input:focus-visible {
   width: 100%;
   height: var(--tab-row-height);
   min-width: 0;
-  padding: 2px 4px 2px 6px;
+  padding: 2px 4px 2px calc(6px + var(--tab-tree-indent, 0px));
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -642,6 +661,37 @@ input:focus-visible {
   box-shadow: 0 3px 10px rgb(0 0 0 / 22%);
   font-family: "Microsoft YaHei", "微软雅黑", "Segoe UI", system-ui, sans-serif;
   font-size: 14px;
+}
+
+.tab-tree-toggle {
+  position: absolute;
+  z-index: 1;
+  inset-inline-start: calc(6px + var(--tab-tree-indent, 0px));
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: GrayText;
+  font-size: 12px;
+  line-height: 1;
+  transform: rotate(90deg);
+  transform-origin: center;
+}
+
+.tab-tree-toggle[aria-expanded="false"] {
+  transform: none;
+}
+
+.tab-tree-toggle[hidden] {
+  display: none;
+}
+
+.tab-tree-toggle:hover {
+  color: CanvasText;
+  background: transparent;
 }
 
 .tab-context-separator {
@@ -1028,6 +1078,32 @@ input:focus-visible {
   border: 1px solid ButtonBorder;
   border-radius: 5px;
   background: Field;
+}
+
+.new-tab-behavior-options {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.new-tab-behavior-options label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .appearance-setting {

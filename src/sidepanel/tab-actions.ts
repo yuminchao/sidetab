@@ -1,4 +1,4 @@
-import type { TabReorderPlan } from "./tab-reorder-model";
+import type { TabBlockReorderPlan, TabReorderPlan } from "./tab-reorder-model";
 
 export type TabsActionApi = Pick<
   typeof chrome.tabs,
@@ -15,9 +15,12 @@ export function createTabActions(api: TabsActionApi) {
   };
 
   return {
-    async create(): Promise<void> {
+    async create(openerTabId?: number): Promise<void> {
       try {
-        await api.create({ active: true });
+        await api.create({
+          active: true,
+          ...(openerTabId === undefined ? {} : { openerTabId }),
+        });
       } catch {
         throw new Error("无法新建标签页");
       }
@@ -51,6 +54,15 @@ export function createTabActions(api: TabsActionApi) {
       }
     },
 
+    async closeAbove(tabIds: number[]): Promise<void> {
+      if (tabIds.length === 0) return;
+      try {
+        await api.remove(tabIds);
+      } catch {
+        throw new Error("无法关闭上方标签页");
+      }
+    },
+
     async closeOtherSameSite(tabIds: number[]): Promise<void> {
       if (tabIds.length === 0) {
         return;
@@ -63,9 +75,9 @@ export function createTabActions(api: TabsActionApi) {
       }
     },
 
-    async duplicate(tabId: number): Promise<void> {
+    async duplicate(tabId: number): Promise<number | undefined> {
       try {
-        await api.duplicate(tabId);
+        return (await api.duplicate(tabId))?.id;
       } catch {
         throw new Error("无法复制该标签页");
       }
@@ -94,6 +106,27 @@ export function createTabActions(api: TabsActionApi) {
         await api.move(plan.tabId, { index: plan.targetIndex });
       } catch (cause) {
         throw new Error("无法移动该标签页", { cause });
+      }
+    },
+
+    async reorderMany(plan: TabBlockReorderPlan): Promise<void> {
+      try {
+        if (plan.pinnedChanged && !plan.targetPinned) {
+          await Promise.all(plan.tabIds.map((tabId) => api.update(tabId, { pinned: false })));
+        }
+        if (plan.groupChanged) {
+          if (plan.targetGroupId >= 0) {
+            await api.group({ tabIds: plan.tabIds, groupId: plan.targetGroupId });
+          } else {
+            await api.ungroup(plan.tabIds);
+          }
+        }
+        if (plan.pinnedChanged && plan.targetPinned) {
+          await Promise.all(plan.tabIds.map((tabId) => api.update(tabId, { pinned: true })));
+        }
+        await api.move(plan.tabIds, { index: plan.targetIndex });
+      } catch (cause) {
+        throw new Error("无法移动标签子树", { cause });
       }
     },
   };

@@ -171,6 +171,9 @@ describe("side panel responsive CSS", () => {
     expect(rule.toString()).not.toMatch(/(?:mask|url\s*\()/);
     expect(css).not.toContain("add-tab.svg");
     expect(css).toMatch(
+      /\.new-tab-glyph\s*{[^}]*display:\s*grid[^}]*place-items:\s*center[^}]*width:\s*100%[^}]*height:\s*100%[^}]*transform:\s*translateY\(-1px\)/s,
+    );
+    expect(css).toMatch(
       /\.empty-message\s*{[^}]*position:\s*absolute[^}]*z-index:\s*1[^}]*inset:\s*30px\s+0\s+0[^}]*pointer-events:\s*none/s,
     );
   });
@@ -293,7 +296,7 @@ describe("side panel responsive CSS", () => {
       /\.tab-group-row\s*{[^}]*height:\s*20px[^}]*min-width:\s*0/s,
     );
     expect(css).toMatch(
-      /\.tab-group-main\s*{[^}]*grid-template-columns:\s*12px\s+minmax\(0,\s*1fr\)[^}]*width:\s*100%[^}]*height:\s*20px[^}]*padding:\s*0\s+6px[^}]*border:\s*0/s,
+      /\.tab-group-main\s*{[^}]*grid-template-columns:\s*12px\s+minmax\(0,\s*1fr\)\s+auto[^}]*width:\s*100%[^}]*height:\s*20px[^}]*padding:\s*0\s+6px[^}]*border:\s*0/s,
     );
     expect(css).toMatch(/\.tab-group-chevron\s*{[^}]*width:\s*12px[^}]*height:\s*12px/s);
     expect(css).not.toMatch(/\.tab-group-color\s*{/);
@@ -301,7 +304,9 @@ describe("side panel responsive CSS", () => {
       /\.tab-group-title\s*{[^}]*min-width:\s*0[^}]*font-family:\s*"Microsoft YaHei",\s*"微软雅黑",\s*"Segoe UI",\s*system-ui,\s*sans-serif[^}]*font-size:\s*14px[^}]*line-height:\s*20px[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s,
     );
     expect(css).not.toMatch(/\.tab-group-title\s*{[^}]*var\(--tab-title-font-size\)/s);
-    expect(css).not.toMatch(/\.tab-group-count\s*{/);
+    expect(css).toMatch(
+      /\.tab-group-count\s*{[^}]*width:\s*3ch[^}]*font-size:\s*12px[^}]*line-height:\s*20px[^}]*text-align:\s*right[^}]*font-variant-numeric:\s*tabular-nums[^}]*white-space:\s*nowrap/s,
+    );
   });
 
   it("maps every Chrome group color with dark-theme overrides", () => {

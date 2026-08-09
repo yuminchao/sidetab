@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  createTabBlockReorderPlan,
   createTabReorderPlan,
+  shouldDetachTreeTabOnDrop,
   type TabDropTarget,
 } from "../src/sidepanel/tab-reorder-model";
 import type { TabViewModel } from "../src/sidepanel/tab-model";
@@ -29,6 +31,39 @@ const tabTarget = (tabId: number, placement: "before" | "after"): TabDropTarget 
 const groupTarget = (groupId: number): TabDropTarget => ({ kind: "group", groupId });
 
 describe("createTabReorderPlan", () => {
+  it("detaches only when a child is dropped outside its sibling area", () => {
+    const tabs = [
+      fakeTabModel({ id: 1, index: 0 }),
+      fakeTabModel({ id: 2, index: 1, openerTabId: 1 }),
+      fakeTabModel({ id: 3, index: 2, openerTabId: 1 }),
+      fakeTabModel({ id: 4, index: 3 }),
+    ];
+    expect(shouldDetachTreeTabOnDrop(
+      tabs, 2, { kind: "tab", tabId: 1, placement: "after" }, new Set(),
+    )).toBe(false);
+    expect(shouldDetachTreeTabOnDrop(
+      tabs, 2, { kind: "tab", tabId: 3, placement: "before" }, new Set(),
+    )).toBe(false);
+    expect(shouldDetachTreeTabOnDrop(
+      tabs, 2, { kind: "tab", tabId: 1, placement: "before" }, new Set(),
+    )).toBe(true);
+    expect(shouldDetachTreeTabOnDrop(
+      tabs, 2, { kind: "tab", tabId: 4, placement: "after" }, new Set(),
+    )).toBe(true);
+  });
+  it("computes a destination after removing an entire source subtree", () => {
+    const tabs = [
+      fakeTabModel({ id: 1, index: 0 }),
+      fakeTabModel({ id: 2, index: 1 }),
+      fakeTabModel({ id: 3, index: 2 }),
+      fakeTabModel({ id: 4, index: 3 }),
+    ];
+    expect(createTabBlockReorderPlan(tabs, [1, 2], {
+      kind: "tab",
+      tabId: 4,
+      placement: "after",
+    })).toMatchObject({ tabIds: [1, 2], targetIndex: 2 });
+  });
   it("uses the Chrome-index-sorted snapshot when indexes are non-contiguous", () => {
     const tabs = [
       fakeTabModel({ id: 1, index: 10 }),
