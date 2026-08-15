@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SideTab Lite</title>
+    <link rel="stylesheet" href="./sidebar.css" />
+  </head>
+  <body>
+    <main class="sidebar-shell">
+      <div
+        id="shortcut-strip"
+        class="shortcut-region shortcut-strip"
+        aria-label="快捷网站"
+        hidden
+      >
+        <button
+          id="locate-active-tab"
+          class="locate-active-tab-button"
+          type="button"
+          title="定位当前标签"
+          aria-label="定位当前标签"
+          disabled
+        ></button>
+      </div>
+
+      <section id="tab-region" class="tab-region" aria-label="当前窗口标签页">
+        <p id="tab-empty" class="empty-message" hidden>没有匹配的标签页</p>
+        <div id="tab-scroll" class="tab-scroll">
+          <div id="tab-list" class="tab-list" role="list"></div>
+          <button
+            id="new-tab-button"
+            class="new-tab-button"
+            type="button"
+            title="新建标签页"
+            aria-label="新建标签页"
+          ><span class="new-tab-glyph" aria-hidden="true">+</span></button>
+        </div>
+      </section>
+
+      <p id="status-message" class="status-message" role="status" aria-live="polite"></p>
+
+      <footer class="bottom-toolbar">
+        <div
+          id="history-search-results"
+          role="listbox"
+          aria-label="收藏夹和历史记录搜索结果"
+          hidden
+        ></div>
+        <div class="search-shell">
+          <input
+            id="tab-search"
+            type="search"
+            placeholder="搜索收藏夹和历史记录"
+            aria-label="搜索收藏夹和历史记录"
+            autocomplete="off"
+          />
+          <button
+            id="shortcut-settings"
+            class="icon-button"
+            type="button"
+            title="设置"
+            aria-label="设置"
+          ></button>
+        </div>
+      </footer>
+    </main>
+
+    <dialog id="shortcut-dialog" aria-labelledby="shortcut-dialog-title">
+      <form id="shortcut-form" method="dialog" novalidate>
+        <header class="dialog-header">
+          <h2 id="shortcut-dialog-title">设置</h2>
+        </header>
+
+        <section class="settings-section" aria-labelledby="appearance-heading">
+          <h3 id="appearance-heading">外观</h3>
+          <label class="number-setting" for="tab-title-font-size">
+            <span>标签标题字号</span>
+            <input
+              id="tab-title-font-size"
+              type="number"
+              min="12"
+              max="18"
+              step="1"
+              inputmode="numeric"
+            />
+          </label>
+          <div class="appearance-setting">
+            <span>侧边栏位置</span>
+            <span class="appearance-setting-hint">请在 Chrome 外观设置中修改</span>
+            <button
+              id="chrome-appearance-settings"
+              class="appearance-settings-link"
+              type="button"
+              title="打开 Chrome 外观设置"
+              aria-label="打开 Chrome 外观设置"
+            >
+              ↗
+            </button>
+          </div>
+        </section>
+
+        <section class="settings-section" aria-labelledby="content-tree-heading">
+          <h3 id="content-tree-heading">内容树</h3>
+          <label class="toggle-label" for="content-tree-enabled">
+            <input id="content-tree-enabled" type="checkbox" />
+            <span>启用内容树</span>
+          </label>
+        </section>
+
+        <section class="settings-section" aria-labelledby="shortcuts-heading">
+          <h3 id="shortcuts-heading">快捷网站</h3>
+          <label class="toggle-label" for="shortcut-enabled">
+            <input id="shortcut-enabled" type="checkbox" />
+            <span>启用快捷入口</span>
+          </label>
+
+          <div id="shortcut-editor-list" class="editor-list"></div>
+        </section>
+        <p id="shortcut-error" class="shortcut-error" role="alert"></p>
+
+        <div class="dialog-actions dialog-actions-secondary">
+          <button id="shortcut-add" type="button">添加网站</button>
+          <button id="shortcut-reset" type="button">恢复默认</button>
+        </div>
+        <div class="dialog-actions dialog-actions-primary">
+          <button id="shortcut-cancel" type="button" data-action="cancel">取消</button>
+          <button id="shortcut-save" class="primary-button" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="tab-group-dialog" aria-labelledby="tab-group-dialog-title">
+      <form id="tab-group-form" method="dialog" novalidate>
+        <header class="dialog-header">
+          <h2 id="tab-group-dialog-title">新建分组</h2>
+        </header>
+
+        <label for="tab-group-name">
+          <span>名称</span>
+          <input id="tab-group-name" type="text" autocomplete="off" />
+        </label>
+
+        <fieldset class="tab-group-colors">
+          <legend>颜色</legend>
+          <label class="tab-group-color-option" title="灰色">
+            <input type="radio" name="tab-group-color" value="grey" aria-label="灰色" checked />
+            <span class="tab-group-color-swatch" data-color="grey" aria-hidden="true"></span>
+          </label>
+          <label class="tab-group-color-option" title="蓝色">
+            <input type="radio" name="tab-group-color" value="blue" aria-label="蓝色" />
+            <span class="tab-group-color-swatch" data-color="blue" aria-hidden="true"></span>
+          </label>
+          <label class="tab-group-color-option" title="红色">
+            <input type="radio" name="tab-group-color" value="red" aria-label="红色" />
+            <span class="tab-group-color-swatch" data-color="red" aria-hidden="true"></span>
+          </label>
+          <label class="tab-group-color-option" title="黄色">
+            <input type="radio" name="tab-group-color" value="yellow" aria-label="黄色" />
+            <span class="tab-group-color-swatch" data-color="yellow" aria-hidden="true"></span>
+          </label>
+          <label class="tab-group-color-option" title="绿色">
+            <input type="radio" name="tab-group-color" value="green" aria-label="绿色" />
+            <span class="tab-group-color-swatch" data-color="green" aria-hidden="true"></span>
+          </label>
+          <label class="tab-group-color-option" title="粉色">
+            <input type="radio" name="tab-group-color" value="pink" aria-label="粉色" />
+            <span class="tab-group-color-swatch" data-color="pink" aria-hidden="true"></span>
+          </label>
+          <label class="tab-group-color-option" title="紫色">
+            <input type="radio" name="tab-group-color" value="purple" aria-label="紫色" />
+            <span class="tab-group-color-swatch" data-color="purple" aria-hidden="true"></span>
+          </label>
+          <label class="tab-group-color-option" title="青色">
+            <input type="radio" name="tab-group-color" value="cyan" aria-label="青色" />
+            <span class="tab-group-color-swatch" data-color="cyan" aria-hidden="true"></span>
+          </label>
+          <label class="tab-group-color-option" title="橙色">
+            <input type="radio" name="tab-group-color" value="orange" aria-label="橙色" />
+            <span class="tab-group-color-swatch" data-color="orange" aria-hidden="true"></span>
+          </label>
+        </fieldset>
+
+        <p id="tab-group-error" class="tab-group-error" role="alert"></p>
+        <div class="dialog-actions dialog-actions-primary">
+          <button id="tab-group-cancel" type="button">取消</button>
+          <button id="tab-group-create" class="primary-button" type="submit">创建</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="tab-group-rename-dialog" aria-labelledby="tab-group-rename-title">
+      <form id="tab-group-rename-form" method="dialog" novalidate>
+        <header class="dialog-header">
+          <h2 id="tab-group-rename-title">重命名分组</h2>
+        </header>
+
+        <label for="tab-group-rename-name">
+          <span>名称</span>
+          <input id="tab-group-rename-name" type="text" autocomplete="off" />
+        </label>
+
+        <p id="tab-group-rename-error" role="alert"></p>
+        <div class="dialog-actions dialog-actions-primary">
+          <button id="tab-group-rename-cancel" type="button">取消</button>
+          <button id="tab-group-rename-save" class="primary-button" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="./sidebar.js"></script>
+  </body>
+</html>

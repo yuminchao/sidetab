@@ -1,0 +1,61 @@
+import {
+  normalizeTabGroupId,
+  TAB_GROUP_ID_NONE,
+} from "./tab-group-model";
+
+export { TAB_GROUP_ID_NONE } from "./tab-group-model";
+
+export type TabViewModel = {
+  id: number;
+  windowId: number;
+  index: number;
+  title: string;
+  url: string;
+  domain: string;
+  favIconUrl?: string;
+  active: boolean;
+  pinned: boolean;
+  groupId: number;
+  openerTabId?: number;
+};
+
+export function toTabViewModel(tab: chrome.tabs.Tab): TabViewModel {
+  if (tab.id === undefined) {
+    throw new Error("标签页缺少 ID");
+  }
+
+  const url = tab.url ?? tab.pendingUrl ?? "";
+  const title = (tab.title ?? "").trim() || "新标签页";
+  const model: TabViewModel = {
+    id: tab.id,
+    windowId: tab.windowId,
+    index: tab.index,
+    title,
+    url,
+    domain: getTabDomain(url),
+    active: tab.active,
+    pinned: tab.pinned,
+    groupId: normalizeTabGroupId(tab.groupId),
+  };
+
+  if (tab.favIconUrl) {
+    model.favIconUrl = tab.favIconUrl;
+  }
+  if (tab.openerTabId !== undefined) {
+    model.openerTabId = tab.openerTabId;
+  }
+
+  return model;
+}
+
+export function getTabDomain(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "chrome:") {
+      return "chrome";
+    }
+    return parsed.hostname || parsed.protocol.slice(0, -1);
+  } catch {
+    return url;
+  }
+}
