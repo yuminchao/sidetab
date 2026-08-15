@@ -16,13 +16,13 @@ function parseCsp(value: string): Record<string, string[]> {
 }
 
 describe("extension manifest", () => {
-  it("keeps the npm and extension release versions aligned at 0.11.1", () => {
+  it("keeps the npm and extension release versions aligned at 0.12.4", () => {
     const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
     const packageLock = JSON.parse(readFileSync("package-lock.json", "utf8"));
-    expect(manifest.version).toBe("0.11.1");
-    expect(packageJson.version).toBe("0.11.1");
-    expect(packageLock.version).toBe("0.11.1");
-    expect(packageLock.packages[""].version).toBe("0.11.1");
+    expect(manifest.version).toBe("0.12.4");
+    expect(packageJson.version).toBe("0.12.4");
+    expect(packageLock.version).toBe("0.12.4");
+    expect(packageLock.packages[""].version).toBe("0.12.4");
   });
 
   it("records the 0.10.4 context actions and visual refinements release", () => {
@@ -130,23 +130,24 @@ describe("extension manifest", () => {
     }
   });
 
-  it("records the 0.11.1 tab-tree drag-in fix and boundaries first", () => {
+  it("records the 0.12.4 content tree and smart grouping release first", () => {
     const updateLog = readFileSync("update.log", "utf8");
     const nextVersion = updateLog.search(/\r?\n(?=\d+\.\d+\.\d+\r?$)/m);
     const currentRelease = nextVersion === -1 ? updateLog : updateLog.slice(0, nextVersion);
 
-    expect(updateLog.split(/\r?\n/, 1)[0]).toBe("0.11.1");
+    expect(updateLog.split(/\r?\n/, 1)[0]).toBe("0.12.4");
     for (const detail of [
-      "普通根标签",
-      "父节点之后",
-      "叶子子标签",
-      "openerTabId",
-      "storage.session",
-      "自身子树",
-      "无意义",
-      "O(n)",
+      "内容树",
+      "默认关闭",
+      "同网站快速分组",
+      "一键分组",
+      "其他",
+      "固定标签不参加",
+      "部分失败",
       "无新增权限",
+      "无新增查询",
       "无新增轮询",
+      "无长期缓存",
       "无远程代码",
     ]) {
       expect(currentRelease).toContain(detail);
@@ -217,6 +218,11 @@ describe("extension manifest", () => {
     expect(manifest.action.default_icon).toEqual({
       "16": "assets/icons/icon-16.png",
       "32": "assets/icons/icon-32.png",
+    });
+    expect(manifest.commands).toEqual({
+      _execute_action: {
+        suggested_key: { default: "Alt+V" },
+      },
     });
   });
 });

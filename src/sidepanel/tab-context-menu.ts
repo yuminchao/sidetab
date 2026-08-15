@@ -7,6 +7,9 @@ export type TabContextCommand =
   | { action: "add-shortcut"; tabId: number }
   | { action: "open-all-shortcuts"; tabId: number }
   | { action: "group-same-site"; tabId: number }
+  | { action: "group-all"; tabId: number }
+  | { action: "dissolve-tree"; tabId: number }
+  | { action: "delete-subtree"; tabId: number }
   | { action: "close-below"; tabId: number }
   | { action: "close-above"; tabId: number }
   | { action: "close-same-site"; tabId: number }
@@ -21,8 +24,11 @@ export type TabContextMenuContext = {
   canCloseBelow: boolean;
   canCloseAbove?: boolean;
   canOpenAllShortcuts?: boolean;
-  canGroupSameSite: boolean;
+  canQuickGroupSameSite: boolean;
+  canGroupAll: boolean;
   canCloseOtherSameSite: boolean;
+  canDissolveTree?: boolean;
+  canDeleteSubtree?: boolean;
 };
 
 export function createTabContextMenu(
@@ -52,8 +58,14 @@ export function createTabContextMenu(
   const addToGroup = createItem("add-to-group", "添加到分组");
   addToGroup.setAttribute("aria-haspopup", "menu");
   addToGroup.setAttribute("aria-expanded", "false");
-  const groupSameSite = createItem("group-same-site", "快速分组");
+  const groupSameSite = createItem("group-same-site", "同网站快速分组");
+  const groupAll = createItem("group-all", "一键分组");
   const closeSameSite = createItem("close-same-site", "关闭其他同类网站标签页");
+  const treeSeparator = elements.document.createElement("div");
+  treeSeparator.className = "tab-context-separator";
+  treeSeparator.setAttribute("role", "separator");
+  const dissolveTree = createItem("dissolve-tree", "解散树节点");
+  const deleteSubtree = createItem("delete-subtree", "删除树节点及子标签");
   const groupSeparator = elements.document.createElement("div");
   groupSeparator.className = "tab-context-separator";
   groupSeparator.setAttribute("role", "separator");
@@ -76,6 +88,10 @@ export function createTabContextMenu(
     addToGroup,
     removeFromGroup,
     groupSameSite,
+    groupAll,
+    treeSeparator,
+    dissolveTree,
+    deleteSubtree,
     closeSeparator,
     closeBelow,
     closeAbove,
@@ -189,11 +205,14 @@ export function createTabContextMenu(
     setPinned.dataset.nextPinned = String(!tab.pinned);
     duplicate.disabled = context.canDuplicate === false;
     removeFromGroup.hidden = !isValidTabGroupId(tab.groupId);
-    groupSameSite.disabled = !context.canGroupSameSite;
+    groupSameSite.disabled = !context.canQuickGroupSameSite;
+    groupAll.disabled = !context.canGroupAll;
     closeBelow.disabled = !context.canCloseBelow;
     closeAbove.disabled = context.canCloseAbove !== true;
     openAllShortcuts.disabled = context.canOpenAllShortcuts !== true;
     closeSameSite.disabled = !context.canCloseOtherSameSite;
+    dissolveTree.disabled = context.canDissolveTree !== true;
+    deleteSubtree.disabled = context.canDeleteSubtree !== true;
     const sessionId = callbacks.getRecentlyClosedSessionId?.();
     restoreRecentlyClosed.disabled = !sessionId;
     if (sessionId) {
@@ -268,6 +287,15 @@ export function createTabContextMenu(
         break;
       case "group-same-site":
         command = { action: "group-same-site", tabId: openTabId };
+        break;
+      case "group-all":
+        command = { action: "group-all", tabId: openTabId };
+        break;
+      case "dissolve-tree":
+        command = { action: "dissolve-tree", tabId: openTabId };
+        break;
+      case "delete-subtree":
+        command = { action: "delete-subtree", tabId: openTabId };
         break;
       case "close-below":
         command = { action: "close-below", tabId: openTabId };

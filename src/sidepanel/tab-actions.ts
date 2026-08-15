@@ -54,6 +54,15 @@ export function createTabActions(api: TabsActionApi) {
       }
     },
 
+    async closeSubtree(tabIds: number[]): Promise<void> {
+      if (tabIds.length === 0) return;
+      try {
+        await api.remove(tabIds);
+      } catch {
+        throw new Error("无法删除树节点及子标签");
+      }
+    },
+
     async closeAbove(tabIds: number[]): Promise<void> {
       if (tabIds.length === 0) return;
       try {

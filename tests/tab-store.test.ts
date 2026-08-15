@@ -15,6 +15,17 @@ function tab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
 }
 
 describe("TabStore", () => {
+  it("gets an isolated tab by ID and returns undefined for a missing ID", () => {
+    const store = new TabStore();
+    store.initialize([tab({ id: 7, title: "Stored" })]);
+
+    const result = store.get(7);
+    expect(result).toMatchObject({ id: 7, title: "Stored" });
+    expect(store.get(99)).toBeUndefined();
+    result!.title = "Mutated";
+    expect(store.get(7)?.title).toBe("Stored");
+  });
+
   it("lists pinned tabs first while preserving each group's Chrome index order", () => {
     const store = new TabStore();
     store.initialize([

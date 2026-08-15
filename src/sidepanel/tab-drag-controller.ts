@@ -1,5 +1,6 @@
 import type { GroupDropTarget } from "./tab-group-reorder-model";
 import type { TabDropTarget } from "./tab-reorder-model";
+import type { TabTreeDropRequest } from "./tab-tree-drop-model";
 
 export type TabDragIntent =
   | { kind: "tab"; sourceId: number; target: TabDropTarget }
@@ -22,6 +23,7 @@ type ActiveTarget = {
   elements: HTMLElement[];
   feedback: HTMLElement;
   groupMarker?: HTMLElement;
+  relation?: "sibling" | "child";
 };
 
 type HoverTarget = {
@@ -33,8 +35,7 @@ type GroupDragHandlers = {
   canStartGroupDrag?(groupId: number): boolean;
   canDropTab?(sourceId: number, target: TabDropTarget): boolean;
   prepareTabDrag?(sourceId: number): (
-    target: TabDropTarget,
-    requestedDepth: number,
+    request: TabTreeDropRequest,
   ) => TabDropTarget | undefined;
   onDrop(intent: TabDragIntent): void;
 };
@@ -57,8 +58,6 @@ export function createTabDragController(
   let resolvePreparedTabTarget:
     | ReturnType<NonNullable<GroupDragHandlers["prepareTabDrag"]>>
     | undefined;
-  let dragListBounds: DOMRect | undefined;
-  let dragDirection: "ltr" | "rtl" = "ltr";
 
   const tabRowFrom = (eventTarget: EventTarget | null): HTMLElement | undefined => {
     if (!(eventTarget instanceof Element)) return undefined;
@@ -136,6 +135,8 @@ export function createTabDragController(
   const clearTarget = (): void => {
     target?.feedback.removeAttribute("data-drop-placement");
     target?.feedback.removeAttribute("data-drop-depth");
+    target?.feedback.removeAttribute("data-drop-relation");
+    target?.feedback.removeAttribute("data-drop-child-target");
     target?.feedback.style.removeProperty("--drop-depth-indent");
     target?.groupMarker?.removeAttribute("data-drop-target");
     target = undefined;
@@ -151,7 +152,6 @@ export function createTabDragController(
     dropRows = [];
     dropTabRowsById.clear();
     resolvePreparedTabTarget = undefined;
-    dragListBounds = undefined;
     source = undefined;
   };
 
@@ -170,39 +170,61 @@ export function createTabDragController(
   const setTarget = (next: ActiveTarget): void => {
     clearTarget();
     target = next;
-    if (next.intentTarget.kind === "end") {
-      next.feedback.dataset.dropPlacement = "after";
-    } else if (next.intentTarget.kind === "tab" || "placement" in next.intentTarget) {
-      next.feedback.dataset.dropPlacement = next.intentTarget.placement;
-    }
-    const tree = "tree" in next.intentTarget ? next.intentTarget.tree : undefined;
-    if (tree) {
-      next.feedback.dataset.dropDepth = String(tree.depth);
-      next.feedback.style.setProperty("--drop-depth-indent", `${4 + tree.depth * 12}px`);
+    if (next.relation === "child") {
+      next.feedback.dataset.dropRelation = "child";
+      next.feedback.dataset.dropChildTarget = "true";
+    } else {
+      if (next.relation === "sibling") next.feedback.dataset.dropRelation = "sibling";
+      if (next.intentTarget.kind === "end") {
+        next.feedback.dataset.dropPlacement = "after";
+      } else if ("placement" in next.intentTarget) {
+        next.feedback.dataset.dropPlacement = next.intentTarget.placement;
+      }
+      const tree = "tree" in next.intentTarget ? next.intentTarget.tree : undefined;
+      if (tree) {
+        next.feedback.dataset.dropDepth = String(tree.depth);
+        next.feedback.style.setProperty("--drop-depth-indent", `${4 + tree.depth * 12}px`);
+      }
     }
     if (next.groupMarker) next.groupMarker.dataset.dropTarget = "true";
   };
 
-  const requestedDepthFrom = (clientX: number): number => {
-    if (!dragListBounds) return 0;
-    const inlineOffset = dragDirection === "rtl"
-      ? dragListBounds.right - clientX
-      : clientX - dragListBounds.left;
-    return Math.max(0, Math.min(4, Math.round((inlineOffset - 4) / 12)));
-  };
-
-  const prepareTarget = (
-    target: TabDropTarget,
-    clientX: number,
+  const prepareSiblingTarget = (
+    target: Exclude<TabDropTarget, { kind: "group" }>,
   ): TabDropTarget | undefined => resolvePreparedTabTarget
-    ? resolvePreparedTabTarget(target, requestedDepthFrom(clientX))
+    ? resolvePreparedTabTarget({ relation: "sibling", target })
     : target;
 
-  const treeParentElement = (intentTarget: TabDropTarget): HTMLElement | undefined => {
-    const parentId = intentTarget.kind === "group" ? undefined : intentTarget.tree?.parentId;
-    return parentId === undefined
+  const prepareChildTarget = (parentId: number): TabDropTarget | undefined =>
+    resolvePreparedTabTarget?.({ relation: "child", parentId });
+
+  const uniqueElements = (...elements: Array<HTMLElement | undefined>): HTMLElement[] => {
+    const unique = new Set<HTMLElement>();
+    for (const element of elements) {
+      if (element) unique.add(element);
+    }
+    return [...unique];
+  };
+
+  const tabTarget = (
+    intentTarget: TabDropTarget,
+    hoverRow: HTMLElement,
+    relation: "sibling" | "child",
+  ): ActiveTarget => {
+    const tree = intentTarget.kind === "group" ? undefined : intentTarget.tree;
+    const anchor = intentTarget.kind === "tab"
+      ? dropTabRowsById.get(intentTarget.tabId)
+      : undefined;
+    const parent = tree?.parentId === undefined
       ? undefined
-      : dropTabRowsById.get(parentId);
+      : dropTabRowsById.get(tree.parentId);
+    const feedback = relation === "child" ? hoverRow : anchor ?? hoverRow;
+    return {
+      intentTarget,
+      elements: uniqueElements(hoverRow, feedback, anchor, parent),
+      feedback,
+      relation,
+    };
   };
 
   const groupTarget = (
@@ -231,17 +253,23 @@ export function createTabDragController(
     const directGroupRow = groupRowFrom(event.target);
     let tailTarget: ActiveTarget | undefined;
     let tailHover: HoverTarget | undefined;
-    if (source.kind === "tab" && event.target === list) {
+    const onTailSurface = event.target === list || (
+      event.target instanceof Node
+      && scrollContainer.contains(event.target)
+      && !list.contains(event.target)
+    );
+    if (source.kind === "tab" && !directTabRow && !directGroupRow && onTailSurface) {
       const lastRow = dropRows.at(-1);
       if (lastRow) {
         const distanceAfterLast = event.clientY - lastRow.getBoundingClientRect().bottom;
         if (distanceAfterLast > 4) {
-          const intentTarget = prepareTarget({ kind: "end" }, event.clientX);
+          const intentTarget = prepareSiblingTarget({ kind: "end" });
           if (intentTarget) {
             tailTarget = {
               intentTarget,
               elements: [list],
               feedback: list,
+              relation: "sibling",
             };
           }
         } else if (distanceAfterLast >= 0) {
@@ -266,15 +294,20 @@ export function createTabDragController(
         if (tabRow) {
           const tabId = tabIdFrom(tabRow);
           if (tabId === undefined || tabId === source.id) continue;
-          const placement = hoverTarget.placement ?? placementFrom(tabRow, event.clientY);
-          const intentTarget = prepareTarget({ kind: "tab", tabId, placement }, event.clientX);
+          const bounds = tabRow.getBoundingClientRect();
+          const offset = event.clientY - bounds.top;
+          const relation = hoverTarget.placement === undefined
+            && offset >= bounds.height * 0.25
+            && offset <= bounds.height * 0.75
+            ? "child"
+            : "sibling";
+          const placement = hoverTarget.placement
+            ?? (offset < bounds.height * 0.25 ? "before" : "after");
+          const intentTarget = relation === "child"
+            ? prepareChildTarget(tabId)
+            : prepareSiblingTarget({ kind: "tab", tabId, placement });
           if (!intentTarget) continue;
-          const parentElement = treeParentElement(intentTarget);
-          return {
-            intentTarget,
-            elements: parentElement ? [tabRow, parentElement] : [tabRow],
-            feedback: tabRow,
-          };
+          return tabTarget(intentTarget, tabRow, relation);
         }
         if (groupRow) {
           const groupId = groupIdFrom(groupRow);
@@ -327,11 +360,16 @@ export function createTabDragController(
       const rightTree = "tree" in right ? right.tree : undefined;
       return left.tabId === right.tabId
         && left.placement === right.placement
+        && leftTree?.relation === rightTree?.relation
+        && leftTree?.referenceId === rightTree?.referenceId
         && leftTree?.depth === rightTree?.depth
         && leftTree?.parentId === rightTree?.parentId;
     }
     if (left.kind === "end" && right.kind === "end") {
-      return left.tree?.depth === right.tree?.depth;
+      return left.tree?.relation === right.tree?.relation
+        && left.tree?.referenceId === right.tree?.referenceId
+        && left.tree?.depth === right.tree?.depth
+        && left.tree?.parentId === right.tree?.parentId;
     }
     if (left.kind !== "group" || right.kind !== "group") return false;
     const leftPlacement = "placement" in left ? left.placement : undefined;
@@ -351,8 +389,6 @@ export function createTabDragController(
       }
       source = { kind: "tab", id, row: tabRow };
       resolvePreparedTabTarget = prepareTabDrag?.(id);
-      dragListBounds = list.getBoundingClientRect();
-      dragDirection = getComputedStyle(list).direction === "rtl" ? "rtl" : "ltr";
       sourceElements = [tabRow];
       tabRow.dataset.dragSource = "true";
     } else {
@@ -419,15 +455,18 @@ export function createTabDragController(
   };
 
   const onDragLeave = (event: DragEvent): void => {
-    if (!(event.relatedTarget instanceof Node) || !list.contains(event.relatedTarget)) clear();
+    if (
+      !(event.relatedTarget instanceof Node)
+      || !scrollContainer.contains(event.relatedTarget)
+    ) clear();
   };
   const onInterrupt = (): void => clear();
 
-  list.addEventListener("dragstart", onDragStart);
-  list.addEventListener("dragover", onDragOver);
-  list.addEventListener("drop", onDropEvent);
-  list.addEventListener("dragend", onInterrupt);
-  list.addEventListener("dragleave", onDragLeave);
+  scrollContainer.addEventListener("dragstart", onDragStart);
+  scrollContainer.addEventListener("dragover", onDragOver);
+  scrollContainer.addEventListener("drop", onDropEvent);
+  scrollContainer.addEventListener("dragend", onInterrupt);
+  scrollContainer.addEventListener("dragleave", onDragLeave);
   scrollContainer.addEventListener("scroll", onInterrupt);
   viewport.addEventListener("resize", onInterrupt);
 
@@ -438,11 +477,11 @@ export function createTabDragController(
     },
     destroy(): void {
       clear();
-      list.removeEventListener("dragstart", onDragStart);
-      list.removeEventListener("dragover", onDragOver);
-      list.removeEventListener("drop", onDropEvent);
-      list.removeEventListener("dragend", onInterrupt);
-      list.removeEventListener("dragleave", onDragLeave);
+      scrollContainer.removeEventListener("dragstart", onDragStart);
+      scrollContainer.removeEventListener("dragover", onDragOver);
+      scrollContainer.removeEventListener("drop", onDropEvent);
+      scrollContainer.removeEventListener("dragend", onInterrupt);
+      scrollContainer.removeEventListener("dragleave", onDragLeave);
       scrollContainer.removeEventListener("scroll", onInterrupt);
       viewport.removeEventListener("resize", onInterrupt);
     },

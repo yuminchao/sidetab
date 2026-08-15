@@ -7,14 +7,12 @@ export type Shortcut = {
   icon: ShortcutIcon;
 };
 
-export type ShortcutSettings = {
+export interface ShortcutSettings {
   enabled: boolean;
   tabTitleFontSize: number;
-  newTabBehavior: NewTabBehavior;
+  contentTreeEnabled: boolean;
   items: Shortcut[];
-};
-
-export type NewTabBehavior = "root" | "child";
+}
 
 export const DEFAULT_TAB_TITLE_FONT_SIZE = 14;
 export const MIN_TAB_TITLE_FONT_SIZE = 12;
@@ -36,7 +34,7 @@ export function createDefaultShortcutSettings(): ShortcutSettings {
   return {
     enabled: true,
     tabTitleFontSize: DEFAULT_TAB_TITLE_FONT_SIZE,
-    newTabBehavior: "root",
+    contentTreeEnabled: false,
     items: defaultShortcuts.map((shortcut) => ({ ...shortcut })),
   };
 }
@@ -101,7 +99,7 @@ export function appendTabShortcut(
   const validation = validateShortcutSettings({
     enabled: settings.enabled,
     tabTitleFontSize: settings.tabTitleFontSize,
-    newTabBehavior: settings.newTabBehavior,
+    contentTreeEnabled: settings.contentTreeEnabled,
     items: [
       ...settings.items.map((item) => ({ ...item })),
       { id: tab.id, name, url, icon: "letter" },
@@ -122,15 +120,16 @@ export function validateShortcutSettings(input: unknown): ValidationResult {
     const hasEnabled = Object.hasOwn(input, "enabled");
     const enabled = hasEnabled ? input.enabled : true;
     const rawItems = input.items;
-    const hasNewTabBehavior = Object.hasOwn(input, "newTabBehavior");
-    const newTabBehavior = hasNewTabBehavior ? input.newTabBehavior : "root";
+    const rawContentTreeEnabled = input.contentTreeEnabled;
+    const contentTreeEnabled = typeof rawContentTreeEnabled === "boolean"
+      ? rawContentTreeEnabled
+      : input.newTabBehavior === "child";
     const hasTabTitleFontSize = Object.hasOwn(input, "tabTitleFontSize");
     const rawTabTitleFontSize = hasTabTitleFontSize
       ? input.tabTitleFontSize
       : DEFAULT_TAB_TITLE_FONT_SIZE;
     if (
       typeof enabled !== "boolean" ||
-      !isNewTabBehavior(newTabBehavior) ||
       !Array.isArray(rawItems)
     ) {
       return invalidFormat();
@@ -198,7 +197,7 @@ export function validateShortcutSettings(input: unknown): ValidationResult {
       items.push({ id, name, url, icon });
     }
 
-    return { ok: true, value: { enabled, tabTitleFontSize, newTabBehavior, items } };
+    return { ok: true, value: { enabled, tabTitleFontSize, contentTreeEnabled, items } };
   } catch {
     return invalidFormat();
   }
@@ -214,8 +213,4 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isShortcutIcon(value: unknown): value is ShortcutIcon {
   return typeof value === "string" && supportedIcons.has(value as ShortcutIcon);
-}
-
-function isNewTabBehavior(value: unknown): value is NewTabBehavior {
-  return value === "root" || value === "child";
 }

@@ -37,15 +37,19 @@ function menuContext(
     canCloseBelow: boolean;
     canCloseAbove: boolean;
     canOpenAllShortcuts: boolean;
-    canGroupSameSite: boolean;
+    canQuickGroupSameSite: boolean;
+    canGroupAll: boolean;
     canCloseOtherSameSite: boolean;
+    canDissolveTree: boolean;
+    canDeleteSubtree: boolean;
   }> = {},
 ) {
   const tab = tabs.find((candidate) => candidate.id === id);
   return tab && {
     tab,
     canCloseBelow: false,
-    canGroupSameSite: false,
+    canQuickGroupSameSite: false,
+    canGroupAll: false,
     canCloseOtherSameSite: false,
     ...availability,
   };
@@ -75,7 +79,7 @@ describe("tab context menu", () => {
     expect(popup.style.top).toBe(`${window.innerHeight - 90}px`);
     expect(document.querySelectorAll(".tab-context-menu:not(.tab-context-submenu)")).toHaveLength(1);
     expect(document.querySelectorAll(".tab-context-submenu")).toHaveLength(1);
-    expect(popup.children).toHaveLength(13);
+    expect(popup.children).toHaveLength(17);
     expect(Array.from(popup.children, (item) => item instanceof HTMLButtonElement
       ? item.dataset.menuAction
       : item.className)).toEqual([
@@ -87,6 +91,10 @@ describe("tab context menu", () => {
       "add-to-group",
       "remove-from-group",
       "group-same-site",
+      "group-all",
+      "tab-context-separator",
+      "dissolve-tree",
+      "delete-subtree",
       "tab-context-separator",
       "close-below",
       "close-above",
@@ -94,7 +102,7 @@ describe("tab context menu", () => {
       "restore-recently-closed",
     ]);
     const separators = popup.querySelectorAll<HTMLElement>(".tab-context-separator");
-    expect(separators).toHaveLength(2);
+    expect(separators).toHaveLength(3);
     for (const separator of Array.from(separators)) {
       expect(separator.tagName).not.toBe("BUTTON");
       expect(separator.getAttribute("role")).toBe("separator");
@@ -116,7 +124,10 @@ describe("tab context menu", () => {
       "设为快捷网站",
       "打开所有快捷网站",
       "添加到分组",
-      "快速分组",
+      "同网站快速分组",
+      "一键分组",
+      "解散树节点",
+      "删除树节点及子标签",
       "关闭下方标签页",
       "关闭上方标签页",
       "关闭其他同类网站标签页",
@@ -127,6 +138,63 @@ describe("tab context menu", () => {
     (popup.querySelector("[data-menu-action='duplicate']") as HTMLElement).click();
     expect(onCommand).toHaveBeenCalledWith({ action: "duplicate", tabId: 1 });
     expect(popup.hidden).toBe(true);
+    menu.destroy();
+  });
+
+  it("shows tree commands in their own section and dispatches them only for a parent", () => {
+    const onCommand = vi.fn();
+    const menu = createTabContextMenu(
+      { document, list, viewport: window },
+      {
+        getContext: (id) => menuContext(id, {
+          canDissolveTree: id === 1,
+          canDeleteSubtree: id === 1,
+        }),
+        getGroups: () => [],
+        onCommand,
+      },
+    );
+    const popup = document.querySelector<HTMLElement>(
+      ".tab-context-menu:not(.tab-context-submenu)",
+    )!;
+
+    context(row(2));
+    const dissolveLeaf = popup.querySelector<HTMLButtonElement>(
+      "[data-menu-action='dissolve-tree']",
+    )!;
+    const deleteLeaf = popup.querySelector<HTMLButtonElement>(
+      "[data-menu-action='delete-subtree']",
+    )!;
+    expect(dissolveLeaf.disabled).toBe(true);
+    expect(deleteLeaf.disabled).toBe(true);
+    dissolveLeaf.click();
+    deleteLeaf.click();
+    expect(onCommand).not.toHaveBeenCalled();
+
+    context(row(1));
+    const dissolve = popup.querySelector<HTMLButtonElement>(
+      "[data-menu-action='dissolve-tree']",
+    )!;
+    const deleteSubtree = popup.querySelector<HTMLButtonElement>(
+      "[data-menu-action='delete-subtree']",
+    )!;
+    expect(dissolve.textContent).toBe("解散树节点");
+    expect(deleteSubtree.textContent).toBe("删除树节点及子标签");
+    expect(dissolve.disabled).toBe(false);
+    expect(deleteSubtree.disabled).toBe(false);
+    expect(dissolve.previousElementSibling).toMatchObject({
+      className: "tab-context-separator",
+    });
+    expect(deleteSubtree.previousElementSibling).toBe(dissolve);
+    expect(deleteSubtree.nextElementSibling).toMatchObject({
+      className: "tab-context-separator",
+    });
+
+    dissolve.click();
+    expect(onCommand).toHaveBeenLastCalledWith({ action: "dissolve-tree", tabId: 1 });
+    context(row(1));
+    deleteSubtree.click();
+    expect(onCommand).toHaveBeenLastCalledWith({ action: "delete-subtree", tabId: 1 });
     menu.destroy();
   });
 
@@ -268,7 +336,7 @@ describe("tab context menu", () => {
       { document, list, viewport: window },
       {
         getContext: (id) => menuContext(id, {
-          canGroupSameSite: id === 1,
+          canQuickGroupSameSite: id === 1,
           canCloseBelow: id === 1,
         }),
         getGroups: () => [],
@@ -291,13 +359,42 @@ describe("tab context menu", () => {
     menu.destroy();
   });
 
-  it("configures same-site actions on open, skips disabled actions, and dispatches mouse and keyboard commands", () => {
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ] as const)(
+    "configures quick-site=%s and group-all=%s independently",
+    (canQuickGroupSameSite, canGroupAll) => {
+      const menu = createTabContextMenu(
+        { document, list, viewport: window },
+        {
+          getContext: (id) => menuContext(id, { canQuickGroupSameSite, canGroupAll }),
+          getGroups: () => [],
+          onCommand: vi.fn(),
+        },
+      );
+
+      context(row(1));
+      expect(document.querySelector<HTMLButtonElement>(
+        "[data-menu-action='group-same-site']",
+      )?.disabled).toBe(!canQuickGroupSameSite);
+      expect(document.querySelector<HTMLButtonElement>(
+        "[data-menu-action='group-all']",
+      )?.disabled).toBe(!canGroupAll);
+      menu.destroy();
+    },
+  );
+
+  it("skips disabled grouping actions and dispatches mouse, Enter, and Space commands", () => {
     const onCommand = vi.fn();
     const menu = createTabContextMenu(
       { document, list, viewport: window },
       {
         getContext: (id) => menuContext(id, {
-          canGroupSameSite: id === 1,
+          canQuickGroupSameSite: id === 1,
+          canGroupAll: id === 2,
           canCloseOtherSameSite: id === 2,
           canCloseBelow: true,
         }),
@@ -309,8 +406,10 @@ describe("tab context menu", () => {
 
     context(row(1));
     const groupSameSite = popup.querySelector<HTMLButtonElement>("[data-menu-action='group-same-site']")!;
+    const groupAll = popup.querySelector<HTMLButtonElement>("[data-menu-action='group-all']")!;
     const closeSameSite = popup.querySelector<HTMLButtonElement>("[data-menu-action='close-same-site']")!;
     expect(groupSameSite.disabled).toBe(false);
+    expect(groupAll.disabled).toBe(true);
     expect(closeSameSite.disabled).toBe(true);
     closeSameSite.click();
     closeSameSite.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -321,10 +420,25 @@ describe("tab context menu", () => {
 
     context(row(2));
     const keyboardGroupSameSite = popup.querySelector<HTMLButtonElement>("[data-menu-action='group-same-site']")!;
+    const keyboardGroupAll = popup.querySelector<HTMLButtonElement>("[data-menu-action='group-all']")!;
     expect(keyboardGroupSameSite.disabled).toBe(true);
+    expect(keyboardGroupAll.disabled).toBe(false);
     popup.querySelector<HTMLButtonElement>("[data-menu-action='remove-from-group']")!.focus();
     popup.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-    expect(document.activeElement).toBe(popup.querySelector("[data-menu-action='close-below']"));
+    expect(document.activeElement).toBe(keyboardGroupAll);
+    popup.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(onCommand).toHaveBeenLastCalledWith({ action: "group-all", tabId: 2 });
+
+    context(row(2));
+    keyboardGroupAll.focus();
+    popup.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    expect(onCommand).toHaveBeenLastCalledWith({ action: "group-all", tabId: 2 });
+
+    context(row(2));
+    keyboardGroupAll.click();
+    expect(onCommand).toHaveBeenLastCalledWith({ action: "group-all", tabId: 2 });
+
+    context(row(2));
     popup.querySelector<HTMLButtonElement>("[data-menu-action='close-same-site']")!.focus();
     popup.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(onCommand).toHaveBeenLastCalledWith({ action: "close-same-site", tabId: 2 });
@@ -337,7 +451,8 @@ describe("tab context menu", () => {
       return tab && {
         tab,
         canCloseBelow: true,
-        canGroupSameSite: true,
+        canQuickGroupSameSite: true,
+        canGroupAll: false,
         canCloseOtherSameSite: false,
       };
     });
@@ -558,7 +673,7 @@ describe("tab context menu", () => {
 
   it("builds a dynamic group submenu with colors, unnamed fallback, and current selection", () => {
     const onCommand = vi.fn();
-    createTabContextMenu(
+    const menu = createTabContextMenu(
       { document, list, viewport: window },
       { getContext: menuContext, getGroups: () => groups, onCommand },
     );
@@ -589,6 +704,7 @@ describe("tab context menu", () => {
     expect(onCommand).toHaveBeenCalledWith({ action: "add-to-group", tabId: 2, groupId: 5 });
     expect(popup.hidden).toBe(true);
     expect(submenu.hidden).toBe(true);
+    menu.destroy();
   });
 
   it("rebuilds groups on each open and dispatches create and remove commands", () => {
@@ -618,7 +734,7 @@ describe("tab context menu", () => {
   });
 
   it("opens the submenu on hover and flips it left and upward when space is constrained", () => {
-    createTabContextMenu(
+    const menu = createTabContextMenu(
       { document, list, viewport: window },
       { getContext: menuContext, getGroups: () => groups.slice(0, 2), onCommand: vi.fn() },
     );
@@ -634,11 +750,12 @@ describe("tab context menu", () => {
     expect(submenu.hidden).toBe(false);
     expect(submenu.style.left).toBe(`${window.innerWidth - 200}px`);
     expect(submenu.style.top).toBe(`${window.innerHeight - 100}px`);
+    menu.destroy();
   });
 
   it("supports right, left, vertical navigation, activation, and Escape across both levels", () => {
     const onCommand = vi.fn();
-    createTabContextMenu(
+    const menu = createTabContextMenu(
       { document, list, viewport: window },
       { getContext: menuContext, getGroups: () => groups.slice(0, 3), onCommand },
     );
@@ -677,6 +794,7 @@ describe("tab context menu", () => {
     expect(popup.hidden).toBe(true);
     expect(submenu.hidden).toBe(true);
     expect(document.activeElement).toBe(row(2));
+    menu.destroy();
   });
 
   it("closes both menu levels on outside input, scroll, resize, target removal, and destroy", () => {

@@ -2,10 +2,21 @@ import type { TabViewModel } from "./tab-model";
 
 export type DropPlacement = "before" | "after";
 
-export type TabTreeDropPlacement = {
-  depth: number;
-  parentId?: number;
-};
+export type TabTreeDropRelation = "sibling" | "child";
+
+export type TabTreeDropPlacement =
+  | {
+      relation: "sibling";
+      referenceId?: number;
+      depth: number;
+      parentId?: number;
+    }
+  | {
+      relation: "child";
+      referenceId: number;
+      depth: number;
+      parentId: number;
+    };
 
 export type TabDropTarget =
   | {

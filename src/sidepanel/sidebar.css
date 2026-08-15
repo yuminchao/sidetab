@@ -109,6 +109,10 @@ input:focus-visible {
   background: transparent;
 }
 
+.locate-active-tab-button {
+  margin-inline-start: auto;
+}
+
 .locate-active-tab-button::before {
   content: "";
   width: 20px;
@@ -569,6 +573,13 @@ input:focus-visible {
   background: ButtonFace;
 }
 
+.tab-row[data-drop-child-target="true"],
+.tab-row[data-drop-child-target="true"]:hover {
+  background: color-mix(in srgb, AccentColor 14%, Canvas);
+  outline: 2px solid AccentColor;
+  outline-offset: -2px;
+}
+
 .tab-main {
   display: grid;
   grid-template-columns: 12px 16px minmax(0, 1fr);
@@ -929,6 +940,11 @@ input:focus-visible {
     box-shadow: inset 0 0 0 1px #8ab4f8;
   }
 
+  .tab-row[data-drop-child-target="true"],
+  .tab-row[data-drop-child-target="true"]:hover {
+    background: color-mix(in srgb, AccentColor 22%, Canvas);
+  }
+
   .tab-group-row[data-context-selected="true"] {
     box-shadow: inset 0 0 0 1px #8ab4f8;
   }
@@ -1112,20 +1128,6 @@ input:focus-visible {
   border: 1px solid ButtonBorder;
   border-radius: 5px;
   background: Field;
-}
-
-.new-tab-behavior-options {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.new-tab-behavior-options label {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
 }
 
 .visually-hidden {
@@ -1322,6 +1324,14 @@ input:focus-visible {
   .tab-row[data-context-selected="true"] {
     outline: 1px solid Highlight;
     outline-offset: -1px;
+  }
+
+  .tab-row[data-drop-child-target="true"],
+  .tab-row[data-drop-child-target="true"]:hover {
+    background: Highlight;
+    color: HighlightText;
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
   }
 
   .tab-group-row[data-context-selected="true"] {

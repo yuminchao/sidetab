@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   PartialTabGroupAddError,
   PartialTabGroupCreationError,
+  assertValidTabGroupId,
   createTabGroupActions,
+  updateCreatedTabGroup,
 } from "../src/sidepanel/tab-group-actions";
 import type { TabGroupReorderPlan } from "../src/sidepanel/tab-group-reorder-model";
 
@@ -33,6 +35,24 @@ function createApis() {
 }
 
 describe("tab group actions", () => {
+  it("exports the shared group ID validator", () => {
+    expect(() => assertValidTabGroupId(7)).not.toThrow();
+    expect(() => assertValidTabGroupId(-1)).toThrow("标签组 ID 无效");
+  });
+
+  it("exports the shared created-group metadata update", async () => {
+    const update = vi.fn().mockResolvedValue(undefined);
+
+    await updateCreatedTabGroup(
+      { update } as unknown as Pick<typeof chrome.tabGroups, "update">,
+      7,
+      "Work",
+      "blue",
+    );
+
+    expect(update).toHaveBeenCalledWith(7, { title: "Work", color: "blue" });
+  });
+
   it("moves a whole group with exactly one tabGroups.move call", async () => {
     const { actions, groupMove } = createApis();
     const reorderPlan: TabGroupReorderPlan = {

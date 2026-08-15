@@ -74,7 +74,7 @@ describe("shortcut model", () => {
     const full = {
       enabled: true,
       tabTitleFontSize: 14,
-      newTabBehavior: "root" as const,
+      contentTreeEnabled: false,
       items: Array.from({ length: 12 }, (_, index) => ({
         id: `item-${index}`,
         name: `Item ${index}`,
@@ -103,7 +103,7 @@ describe("shortcut model", () => {
     expect(createDefaultShortcutSettings()).toEqual({
       enabled: true,
       tabTitleFontSize: 14,
-      newTabBehavior: "root",
+      contentTreeEnabled: false,
       items: [
         { id: "openai", name: "OpenAI", url: "https://chatgpt.com/", icon: "openai" },
         { id: "google", name: "Google", url: "https://www.google.com/", icon: "google" },
@@ -123,7 +123,7 @@ describe("shortcut model", () => {
   it.each([12, 14, 16, 18])("accepts tab title font size %s", (tabTitleFontSize) => {
     expect(validateShortcutSettings({ enabled: true, items: [], tabTitleFontSize })).toEqual({
       ok: true,
-      value: { enabled: true, items: [], tabTitleFontSize, newTabBehavior: "root" },
+      value: { enabled: true, items: [], tabTitleFontSize, contentTreeEnabled: false },
     });
   });
 
@@ -139,7 +139,7 @@ describe("shortcut model", () => {
   it("migrates a valid legacy object to the default tab title font size", () => {
     expect(validateShortcutSettings({ enabled: true, items: [] })).toEqual({
       ok: true,
-      value: { enabled: true, items: [], tabTitleFontSize: 14, newTabBehavior: "root" },
+      value: { enabled: true, items: [], tabTitleFontSize: 14, contentTreeEnabled: false },
     });
   });
 
@@ -150,7 +150,7 @@ describe("shortcut model", () => {
         enabled: true,
         items: [shortcut({ url: "https://example.com/" })],
         tabTitleFontSize: 14,
-        newTabBehavior: "root",
+        contentTreeEnabled: false,
       },
     });
   });
@@ -158,7 +158,7 @@ describe("shortcut model", () => {
   it("preserves an explicitly disabled setting", () => {
     expect(validateShortcutSettings({ enabled: false, items: [], tabTitleFontSize: 16 })).toEqual({
       ok: true,
-      value: { enabled: false, items: [], tabTitleFontSize: 16, newTabBehavior: "root" },
+      value: { enabled: false, items: [], tabTitleFontSize: 16, contentTreeEnabled: false },
     });
   });
 
@@ -271,8 +271,25 @@ describe("shortcut model", () => {
 
     expect(validateShortcutSettings(input)).toEqual({
       ok: true,
-      value: { enabled: true, items: [shortcut({ url: "https://example.com/" })], tabTitleFontSize: 14, newTabBehavior: "root" },
+      value: { enabled: true, items: [shortcut({ url: "https://example.com/" })], tabTitleFontSize: 14, contentTreeEnabled: false },
     });
+  });
+
+  it("captures content tree enabled once when its getter changes", () => {
+    let reads = 0;
+    const input = {
+      enabled: true,
+      get contentTreeEnabled() {
+        return reads++ === 0;
+      },
+      items: [],
+    };
+
+    expect(validateShortcutSettings(input)).toMatchObject({
+      ok: true,
+      value: { contentTreeEnabled: true },
+    });
+    expect(reads).toBe(1);
   });
 
   it("captures an icon once when its getter changes", () => {
@@ -288,7 +305,7 @@ describe("shortcut model", () => {
 
     expect(validateShortcutSettings({ enabled: true, items: [item] })).toEqual({
       ok: true,
-      value: { enabled: true, items: [shortcut({ url: "https://example.com/" })], tabTitleFontSize: 14, newTabBehavior: "root" },
+      value: { enabled: true, items: [shortcut({ url: "https://example.com/" })], tabTitleFontSize: 14, contentTreeEnabled: false },
     });
   });
 
@@ -333,7 +350,7 @@ describe("shortcut model", () => {
 
     expect(result).toEqual({
       ok: true,
-      value: { enabled: true, items: [shortcut({ id: " stable-id ", name: "Example", url: "https://example.com/" })], tabTitleFontSize: 14, newTabBehavior: "root" },
+      value: { enabled: true, items: [shortcut({ id: " stable-id ", name: "Example", url: "https://example.com/" })], tabTitleFontSize: 14, contentTreeEnabled: false },
     });
     expect(input).toEqual({
       enabled: true,
@@ -352,24 +369,25 @@ describe("shortcut model", () => {
       value: {
         enabled: true,
         tabTitleFontSize: 14,
-        newTabBehavior: "root",
+        contentTreeEnabled: false,
         items: [shortcut({ id: " stable-id ", url: "https://one.example/" }), shortcut({ id: "stable-id", url: "https://two.example/" })],
       },
     });
   });
 
-  it("accepts child mode and rejects unknown new-tab behavior", () => {
+  it.each([
+    [{ contentTreeEnabled: true, newTabBehavior: "root" }, true],
+    [{ contentTreeEnabled: false, newTabBehavior: "child" }, false],
+    [{ newTabBehavior: "child" }, true],
+    [{ newTabBehavior: "root" }, false],
+    [{}, false],
+    [{ newTabBehavior: "unknown" }, false],
+  ])("migrates content tree settings", (extra, expected) => {
     expect(validateShortcutSettings({
       enabled: true,
       items: [],
       tabTitleFontSize: 14,
-      newTabBehavior: "child",
-    })).toMatchObject({ ok: true, value: { newTabBehavior: "child" } });
-    expect(validateShortcutSettings({
-      enabled: true,
-      items: [],
-      tabTitleFontSize: 14,
-      newTabBehavior: "unknown",
-    }).ok).toBe(false);
+      ...extra,
+    })).toMatchObject({ ok: true, value: { contentTreeEnabled: expected } });
   });
 });

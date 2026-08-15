@@ -38,8 +38,7 @@ function installFixture(): void {
       <form id="shortcut-form">
         <h2 id="shortcut-dialog-title"></h2>
         <input id="tab-title-font-size" type="number" min="12" max="18" step="1" />
-        <input type="radio" name="new-tab-behavior" value="root" checked />
-        <input type="radio" name="new-tab-behavior" value="child" />
+        <input id="content-tree-enabled" type="checkbox" />
         <button id="chrome-appearance-settings" type="button"></button>
         <input id="shortcut-enabled" type="checkbox" />
         <div id="shortcut-editor-list"></div>
@@ -167,6 +166,7 @@ function enabledShortcuts(
       enabled: true,
       items,
       tabTitleFontSize: 14,
+      contentTreeEnabled: false,
     },
   };
 }
@@ -1283,6 +1283,7 @@ describe("sidebar lifecycle", () => {
 
   it("closes transient tab UI when the shared tab region scrolls", async () => {
     const fake = createFakeChrome({
+      stored: enabledShortcuts(),
       tabs: [
         fakeTab({ id: 1, index: 0 }),
         fakeTab({ id: 2, index: 1, title: "Two" }),
@@ -1560,37 +1561,35 @@ describe("sidebar lifecycle", () => {
     expect(contextMenuItem("group-same-site").disabled).toBe(false);
     expect(contextMenuItem("close-same-site").disabled).toBe(false);
     expect(contextMenuItem("duplicate").disabled).toBe(false);
-    for (const tabId of [2, 3]) {
+    for (const [tabId, quickDisabled] of [[2, false], [3, true]] as const) {
       openTabContextMenu(tabId);
-      expect(contextMenuItem("group-same-site").disabled).toBe(true);
+      expect(contextMenuItem("group-same-site").disabled).toBe(quickDisabled);
       expect(contextMenuItem("close-same-site").disabled).toBe(false);
       expect(contextMenuItem("duplicate").disabled).toBe(false);
     }
     openTabContextMenu(4);
-    expect(contextMenuItem("group-same-site").disabled).toBe(true);
+    expect(contextMenuItem("group-same-site").disabled).toBe(false);
     expect(contextMenuItem("close-same-site").disabled).toBe(true);
     expect(contextMenuItem("duplicate").disabled).toBe(false);
     cleanup();
   });
 
-  it("builds one tab snapshot when opening a tab context menu", async () => {
+  it("plans a tab context menu from stores without querying Chrome", async () => {
     const fake = createFakeChrome({
       tabs: [
         fakeTab({ id: 1, index: 0, url: "https://example.com/target" }),
         fakeTab({ id: 2, index: 1, url: "https://example.com/other" }),
       ],
     });
-    const list = vi.spyOn(TabStore.prototype, "list");
     const cleanup = await startSidebar(fake);
-    list.mockClear();
+    const tabQueries = fake.methods.query.mock.calls.length;
+    const groupQueries = fake.methods.groupQuery.mock.calls.length;
 
-    try {
-      openTabContextMenu(1);
-      expect(list).toHaveBeenCalledOnce();
-    } finally {
-      cleanup();
-      list.mockRestore();
-    }
+    openTabContextMenu(1);
+    expect(contextMenuItem("group-same-site").disabled).toBe(false);
+    expect(fake.methods.query).toHaveBeenCalledTimes(tabQueries);
+    expect(fake.methods.groupQuery).toHaveBeenCalledTimes(groupQueries);
+    cleanup();
   });
 
   it("allows quick grouping but disables closing for a lone ordinary HTTP tab", async () => {
@@ -1912,13 +1911,9 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.group).toHaveBeenCalledOnce();
     expect(fake.methods.group).toHaveBeenCalledWith({
       tabIds: [1, 3],
-      createProperties: { windowId: 10 },
+      groupId: 7,
     });
-    expect(fake.methods.groupUpdate).toHaveBeenCalledOnce();
-    expect(fake.methods.groupUpdate).toHaveBeenCalledWith(777, {
-      title: "example.com",
-      color: "red",
-    });
+    expect(fake.methods.groupUpdate).not.toHaveBeenCalled();
     expect(latestRows).not.toEqual(rowsBefore);
     expect(rowIds()).toEqual(latestRows);
     expect(fake.methods.query).toHaveBeenCalledOnce();
@@ -1949,7 +1944,6 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.group).toHaveBeenCalledOnce();
     expect(fake.methods.group).toHaveBeenCalledWith({
       tabIds: [1, 2],
-      createProperties: { windowId: 10 },
     });
     pendingGroup.resolve(777);
     await vi.waitFor(() => expect(fake.methods.groupUpdate).toHaveBeenCalledOnce());
@@ -1977,7 +1971,6 @@ describe("sidebar lifecycle", () => {
 
     expect(fake.methods.group).toHaveBeenCalledWith({
       tabIds: [1],
-      createProperties: { windowId: 10 },
     });
     expect(fake.methods.groupUpdate).toHaveBeenCalledWith(777, {
       title: "example.com",
@@ -2003,7 +1996,7 @@ describe("sidebar lifecycle", () => {
 
     await vi.waitFor(() =>
       expect(element("status-message").textContent).toBe(
-        "无法快速分组",
+        "同网站快速分组失败",
       ),
     );
     expect(fake.methods.query).toHaveBeenCalledTimes(2);
@@ -2032,7 +2025,7 @@ describe("sidebar lifecycle", () => {
 
     await vi.waitFor(() =>
       expect(element("status-message").textContent).toBe(
-        "分组已创建，但无法保存名称或颜色",
+        "同网站快速分组失败",
       ),
     );
     expect(fake.methods.group).toHaveBeenCalledOnce();
@@ -2065,6 +2058,606 @@ describe("sidebar lifecycle", () => {
     expect(element("status-message").textContent).toBe(statusBefore);
     expect(fake.methods.query).toHaveBeenCalledOnce();
     expect(fake.methods.groupQuery).toHaveBeenCalledOnce();
+  });
+
+  it("plans one-click grouping from the latest stores and applies model metadata", async () => {
+    const otherMetadata = deferred<chrome.tabGroups.TabGroup | undefined>();
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://a.example/one", groupId: -1 }),
+        fakeTab({ id: 2, index: 1, url: "https://a.example/two", groupId: -1 }),
+        fakeTab({ id: 3, index: 2, url: "https://b.example/", groupId: -1 }),
+        fakeTab({ id: 4, index: 3, url: "file:///tmp/readme.txt", groupId: -1 }),
+      ],
+    });
+    const sessionStorage = {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn().mockResolvedValue(undefined),
+    };
+    base.methods.groupUpdate
+      .mockImplementationOnce(async (groupId, metadata) => fakeGroup({ id: groupId, ...metadata }))
+      .mockReturnValueOnce(otherMetadata.promise);
+    const cleanup = await startSidebarRaw({ ...base, sessionStorage });
+    await vi.waitFor(() => {
+      openTabContextMenu(1);
+      expect(contextMenuItem("group-all").disabled).toBe(false);
+    });
+
+    expect(contextMenuItem("group-all").disabled).toBe(false);
+    click(contextMenuItem("group-all"));
+    await vi.waitFor(() => expect(base.methods.groupUpdate).toHaveBeenCalledTimes(2));
+    base.groupEvents.onCreated.emit(fakeGroup({ id: 778, title: "其他", color: "blue" }));
+    otherMetadata.resolve(fakeGroup({ id: 778, title: "其他", color: "blue" }));
+    await vi.waitFor(() => expect(base.methods.group).toHaveBeenCalledTimes(3));
+
+    expect(base.methods.group.mock.calls.map(([options]) => options.tabIds)).toEqual([
+      [1, 2],
+      [3],
+      [4],
+    ]);
+    expect(base.methods.groupUpdate.mock.calls.map(([groupId, metadata]) => ({
+      groupId,
+      metadata,
+    }))).toEqual([
+      { groupId: 777, metadata: { title: "a.example", color: "grey" } },
+      { groupId: 778, metadata: { title: "其他", color: "blue" } },
+      { groupId: 779, metadata: { title: "本地文件", color: "red" } },
+    ]);
+    expect(sessionStorage.set).toHaveBeenCalledWith({
+      "smartGroupSession:10": { otherGroupId: 778 },
+    });
+    cleanup();
+  });
+
+  it("continues an original one-click operation after unrelated store changes", async () => {
+    const firstMetadata = deferred<chrome.tabGroups.TabGroup | undefined>();
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://a.example/one", groupId: -1 }),
+        fakeTab({ id: 2, index: 1, url: "https://a.example/two", groupId: -1 }),
+        fakeTab({ id: 3, index: 2, url: "file:///tmp/readme.txt", groupId: -1 }),
+      ],
+    });
+    fake.methods.groupUpdate.mockReturnValueOnce(firstMetadata.promise);
+    const cleanup = await startSidebar(fake);
+
+    openTabContextMenu(1);
+    click(contextMenuItem("group-all"));
+    await vi.waitFor(() => expect(fake.methods.groupUpdate).toHaveBeenCalledOnce());
+    fake.events.onCreated.emit(fakeTab({
+      id: 4,
+      index: 3,
+      url: "https://a.example/late",
+      groupId: -1,
+    }));
+    fake.groupEvents.onCreated.emit(fakeGroup({ id: 9, title: "Unrelated" }));
+    firstMetadata.resolve(fakeGroup({ id: 777, title: "a.example", color: "grey" }));
+
+    await vi.waitFor(() => expect(fake.methods.group).toHaveBeenCalledTimes(2));
+    expect(fake.methods.group).toHaveBeenNthCalledWith(2, { tabIds: [3] });
+    cleanup();
+  });
+
+  it("validates a large multi-operation smart plan with linear store reads", async () => {
+    const tabs = Array.from({ length: 500 }, (_, offset) => fakeTab({
+      id: offset + 1,
+      index: offset,
+      url: `https://site-${Math.floor(offset / 2)}.example/`,
+      groupId: -1,
+    }));
+    const fake = createFakeChrome({ tabs });
+    const cleanup = await startSidebar(fake);
+    const list = vi.spyOn(TabStore.prototype, "list");
+    const get = vi.spyOn(TabStore.prototype, "get");
+    list.mockClear();
+    get.mockClear();
+
+    try {
+      openTabContextMenu(1);
+      click(contextMenuItem("group-all"));
+      await vi.waitFor(() => expect(fake.methods.group).toHaveBeenCalledTimes(250));
+      expect(list.mock.calls.length).toBeLessThanOrEqual(3);
+      expect(get.mock.calls.length).toBeLessThanOrEqual(tabs.length * 4);
+      expect(fake.methods.query).toHaveBeenCalledOnce();
+      expect(fake.methods.groupQuery).toHaveBeenCalledOnce();
+    } finally {
+      cleanup();
+      list.mockRestore();
+      get.mockRestore();
+    }
+  });
+
+  it("shares busy state between quick and one-click grouping", async () => {
+    const pending = deferred<number>();
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://a.example/one", groupId: -1 }),
+        fakeTab({ id: 2, index: 1, url: "https://a.example/two", groupId: -1 }),
+        fakeTab({ id: 3, index: 2, url: "https://b.example/", groupId: 7 }),
+      ],
+      groups: [fakeGroup({ id: 7 })],
+    });
+    base.methods.group.mockReturnValueOnce(pending.promise);
+    const cleanup = await startSidebar(base);
+
+    openTabContextMenu(1);
+    click(contextMenuItem("group-same-site"));
+    openTabContextMenu(2);
+    expect(contextMenuItem("group-same-site").disabled).toBe(true);
+    expect(contextMenuItem("group-all").disabled).toBe(true);
+    click(contextMenuItem("group-all"));
+    click(contextMenuItem("add-to-group"));
+    click(document.querySelector(".tab-context-submenu [data-group-id='7']")!);
+    openTabContextMenu(3);
+    click(contextMenuItem("remove-from-group"));
+    expect(base.methods.group).toHaveBeenCalledOnce();
+    expect(base.methods.ungroup).not.toHaveBeenCalled();
+
+    pending.resolve(777);
+    await vi.waitFor(() => expect(base.methods.groupUpdate).toHaveBeenCalledOnce());
+    cleanup();
+  });
+
+  it.each(["group-same-site", "group-all"] as const)(
+    "blocks %s only when its latest plan intersects a pending tab group operation",
+    async (action) => {
+      const pendingAdd = deferred<number>();
+      const fake = createFakeChrome({
+        tabs: [
+          fakeTab({ id: 1, index: 0, url: "https://a.example/one", groupId: -1 }),
+          fakeTab({ id: 2, index: 1, url: "https://a.example/two", groupId: -1 }),
+          fakeTab({ id: 3, index: 2, url: "https://b.example/", groupId: 7 }),
+        ],
+        groups: [fakeGroup({ id: 7 })],
+      });
+      fake.methods.group.mockReturnValueOnce(pendingAdd.promise);
+      const cleanup = await startSidebar(fake);
+
+      openTabContextMenu(1);
+      click(contextMenuItem("add-to-group"));
+      click(document.querySelector(".tab-context-submenu [data-group-id='7']")!);
+      openTabContextMenu(2);
+      expect(contextMenuItem(action).disabled).toBe(true);
+      click(contextMenuItem(action));
+      expect(fake.methods.group).toHaveBeenCalledOnce();
+
+      pendingAdd.resolve(7);
+      await flush();
+      cleanup();
+    },
+  );
+
+  it.each(["dissolve", "rename"] as const)(
+    "blocks smart reuse while a conflicting group %s is pending",
+    async (action) => {
+      const pending = deferred<unknown>();
+      const fake = createFakeChrome({
+        tabs: [
+          fakeTab({ id: 1, index: 0, url: "https://one.example/", groupId: -1 }),
+          fakeTab({ id: 2, index: 1, url: "https://member.example/", groupId: 7 }),
+        ],
+        groups: [fakeGroup({ id: 7, title: "其他" })],
+      });
+      const sessionStorage = {
+        get: vi.fn().mockResolvedValue({
+          "smartGroupSession:10": { otherGroupId: 7 },
+        }),
+        set: vi.fn().mockResolvedValue(undefined),
+      };
+      if (action === "dissolve") fake.methods.ungroup.mockReturnValueOnce(pending.promise as Promise<void>);
+      else fake.methods.groupUpdate.mockReturnValueOnce(
+        pending.promise as Promise<chrome.tabGroups.TabGroup | undefined>,
+      );
+      const cleanup = await startSidebarRaw({ ...fake, sessionStorage });
+      await vi.waitFor(() => {
+        openTabContextMenu(1);
+        expect(contextMenuItem("group-all").disabled).toBe(false);
+      });
+
+      openGroupContextMenu(7);
+      click(groupContextMenuItem(action));
+      if (action === "rename") {
+        element<HTMLInputElement>("tab-group-rename-name").value = "Pending";
+        element<HTMLFormElement>("tab-group-rename-form").dispatchEvent(
+          new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+        );
+      }
+      await flush();
+      openTabContextMenu(1);
+      expect(contextMenuItem("group-all").disabled).toBe(true);
+      click(contextMenuItem("group-all"));
+      expect(fake.methods.group).not.toHaveBeenCalled();
+
+      pending.resolve(undefined);
+      await flush();
+      cleanup();
+    },
+  );
+
+  it("blocks conflicting group commands, toggles, and drags while smart reuse is pending", async () => {
+    const pendingReuse = deferred<number>();
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://one.example/", groupId: -1 }),
+        fakeTab({ id: 2, index: 1, url: "https://member.example/", groupId: 7 }),
+      ],
+      groups: [fakeGroup({ id: 7, title: "其他" })],
+    });
+    const sessionStorage = {
+      get: vi.fn().mockResolvedValue({
+        "smartGroupSession:10": { otherGroupId: 7 },
+      }),
+      set: vi.fn().mockResolvedValue(undefined),
+    };
+    fake.methods.group.mockReturnValueOnce(pendingReuse.promise);
+    const cleanup = await startSidebarRaw({ ...fake, sessionStorage });
+    await vi.waitFor(() => {
+      openTabContextMenu(1);
+      expect(contextMenuItem("group-all").disabled).toBe(false);
+    });
+
+    click(contextMenuItem("group-all"));
+    await vi.waitFor(() => expect(fake.methods.group).toHaveBeenCalledOnce());
+    openGroupContextMenu(7);
+    expect(groupContextMenuItem("rename").disabled).toBe(true);
+    expect(groupContextMenuItem("dissolve").disabled).toBe(true);
+    click(groupContextMenuItem("rename"));
+    click(groupContextMenuItem("dissolve"));
+    click(groupRow(7).querySelector("[data-action='toggle-group']")!);
+    groupRow(7).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
+    expect(element<HTMLDialogElement>("tab-group-rename-dialog").open).toBe(false);
+    expect(fake.methods.ungroup).not.toHaveBeenCalled();
+    expect(fake.methods.groupUpdate).not.toHaveBeenCalled();
+    expect(groupRow(7).hasAttribute("data-drag-source")).toBe(false);
+
+    pendingReuse.resolve(7);
+    await flush();
+    cleanup();
+  });
+
+  it("actively clears an invalid stored Other role after role and group hydration", async () => {
+    const base = createFakeChrome({
+      tabs: [fakeTab({ id: 1 })],
+      groups: [fakeGroup({ id: 7 })],
+    });
+    const sessionStorage = {
+      get: vi.fn().mockResolvedValue({
+        "smartGroupSession:10": { otherGroupId: 99 },
+      }),
+      set: vi.fn().mockResolvedValue(undefined),
+    };
+    const cleanup = await startSidebarRaw({ ...base, sessionStorage });
+
+    await vi.waitFor(() => expect(sessionStorage.set.mock.calls.some(([items]) =>
+      Object.hasOwn(items, "smartGroupSession:10")
+      && JSON.stringify(items["smartGroupSession:10"]) === "{}"))
+      .toBe(true));
+    cleanup();
+  });
+
+  it("clears Other after a removal races its deferred role save", async () => {
+    const pendingSave = deferred<void>();
+    const writes: Array<Record<string, unknown>> = [];
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://one.example/", groupId: -1 }),
+        fakeTab({ id: 2, index: 1, url: "https://two.example/", groupId: -1 }),
+      ],
+    });
+    const sessionStorage = {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn((items: Record<string, unknown>) => {
+        if (Object.hasOwn(items, "smartGroupSession:10")) writes.push(items);
+        return writes.length === 1 && Object.hasOwn(items, "smartGroupSession:10")
+          ? pendingSave.promise
+          : Promise.resolve();
+      }),
+    };
+    const cleanup = await startSidebarRaw({ ...base, sessionStorage });
+    await vi.waitFor(() => {
+      openTabContextMenu(1);
+      expect(contextMenuItem("group-all").disabled).toBe(false);
+    });
+
+    click(contextMenuItem("group-all"));
+    await vi.waitFor(() => expect(writes).toEqual([
+      { "smartGroupSession:10": { otherGroupId: 777 } },
+    ]));
+    base.groupEvents.onRemoved.emit(fakeGroup({ id: 9 }));
+    await flush();
+    expect(writes).toEqual([{ "smartGroupSession:10": { otherGroupId: 777 } }]);
+    base.groupEvents.onRemoved.emit(fakeGroup({ id: 777 }));
+    pendingSave.resolve();
+
+    await vi.waitFor(() => expect(writes).toEqual([
+      { "smartGroupSession:10": { otherGroupId: 777 } },
+      { "smartGroupSession:10": {} },
+    ]));
+    await vi.waitFor(() => expect(element("status-message").textContent)
+      .toBe("一键分组部分失败"));
+    expect(base.methods.query).toHaveBeenCalledTimes(2);
+    expect(base.methods.groupQuery).toHaveBeenCalledTimes(2);
+    cleanup();
+  });
+
+  it("confirms Other immediately when group events arrive before role save settles", async () => {
+    const pendingSave = deferred<void>();
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://one.example/", groupId: -1 }),
+        fakeTab({ id: 2, index: 1, url: "https://two.example/", groupId: -1 }),
+      ],
+    });
+    const sessionStorage = {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn((items: Record<string, unknown>) =>
+        Object.hasOwn(items, "smartGroupSession:10") ? pendingSave.promise : Promise.resolve()),
+    };
+    const cleanup = await startSidebarRaw({ ...base, sessionStorage });
+    await vi.waitFor(() => {
+      openTabContextMenu(1);
+      expect(contextMenuItem("group-all").disabled).toBe(false);
+    });
+
+    click(contextMenuItem("group-all"));
+    await vi.waitFor(() => expect(sessionStorage.set).toHaveBeenCalledWith({
+      "smartGroupSession:10": { otherGroupId: 777 },
+    }));
+    base.groupEvents.onCreated.emit(fakeGroup({ id: 777, title: "其他" }));
+    base.events.onUpdated.emit(1, { groupId: 777 }, fakeTab({
+      id: 1, index: 0, url: "https://one.example/", groupId: 777,
+    }));
+    base.events.onUpdated.emit(2, { groupId: 777 }, fakeTab({
+      id: 2, index: 1, url: "https://two.example/", groupId: 777,
+    }));
+    pendingSave.resolve();
+
+    base.events.onCreated.emit(fakeTab({
+      id: 3,
+      index: 2,
+      url: "https://three.example/",
+      groupId: -1,
+    }));
+    await vi.waitFor(() => {
+      openTabContextMenu(3);
+      expect(contextMenuItem("group-all").disabled).toBe(false);
+    });
+    expect(sessionStorage.set).not.toHaveBeenCalledWith({ "smartGroupSession:10": {} });
+    cleanup();
+  });
+
+  it("confirms a large Other group with linear store reads after role save settles", async () => {
+    const pendingSave = deferred<void>();
+    const tabs = Array.from({ length: 500 }, (_, offset) => fakeTab({
+      id: offset + 1,
+      index: offset,
+      url: `https://site-${offset}.example/`,
+      groupId: -1,
+    }));
+    const base = createFakeChrome({ tabs });
+    const sessionStorage = {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn((items: Record<string, unknown>) =>
+        Object.hasOwn(items, "smartGroupSession:10") ? pendingSave.promise : Promise.resolve()),
+    };
+    const cleanup = await startSidebarRaw({ ...base, sessionStorage });
+    await vi.waitFor(() => {
+      openTabContextMenu(1);
+      expect(contextMenuItem("group-all").disabled).toBe(false);
+    });
+
+    click(contextMenuItem("group-all"));
+    await vi.waitFor(() => expect(sessionStorage.set).toHaveBeenCalledWith({
+      "smartGroupSession:10": { otherGroupId: 777 },
+    }));
+    base.setTabs(tabs.map((tab) => ({ ...tab, groupId: 777 })));
+    base.methods.get.mockRejectedValueOnce(new Error("replacement missing"));
+    base.events.onReplaced.emit(999, 998);
+    await vi.waitFor(() => expect(base.methods.query).toHaveBeenCalledTimes(2));
+    const list = vi.spyOn(TabStore.prototype, "list");
+    const get = vi.spyOn(TabStore.prototype, "get");
+    list.mockClear();
+    get.mockClear();
+    const tabQueries = base.methods.query.mock.calls.length;
+    const groupQueries = base.methods.groupQuery.mock.calls.length;
+    pendingSave.resolve();
+
+    try {
+      base.events.onCreated.emit(fakeTab({
+        id: 501,
+        index: 500,
+        url: "https://late.example/",
+        groupId: -1,
+      }));
+      await vi.waitFor(() => {
+        openTabContextMenu(501);
+        expect(contextMenuItem("group-all").disabled).toBe(false);
+      });
+      expect(list.mock.calls.length).toBeLessThanOrEqual(6);
+      expect(get.mock.calls.length).toBeGreaterThanOrEqual(tabs.length);
+      expect(get.mock.calls.length).toBeLessThanOrEqual(tabs.length * 4);
+      expect(base.methods.query).toHaveBeenCalledTimes(tabQueries);
+      expect(base.methods.groupQuery).toHaveBeenCalledTimes(groupQueries);
+    } finally {
+      cleanup();
+      list.mockRestore();
+      get.mockRestore();
+    }
+  });
+
+  it("waits for an authoritative snapshot before reusing a saved Other role", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://one.example/", groupId: -1 }),
+        fakeTab({ id: 2, index: 1, url: "https://two.example/", groupId: -1 }),
+      ],
+    });
+    const sessionStorage = {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn().mockResolvedValue(undefined),
+    };
+    const cleanup = await startSidebarRaw({ ...base, sessionStorage });
+    await vi.waitFor(() => {
+      openTabContextMenu(1);
+      expect(contextMenuItem("group-all").disabled).toBe(false);
+    });
+
+    click(contextMenuItem("group-all"));
+    await vi.waitFor(() => expect(sessionStorage.set).toHaveBeenCalledWith({
+      "smartGroupSession:10": { otherGroupId: 777 },
+    }));
+    await vi.waitFor(() => expect(element("status-message").textContent).toBe(""));
+    expect(base.methods.query).toHaveBeenCalledOnce();
+    expect(base.methods.groupQuery).toHaveBeenCalledOnce();
+    expect(sessionStorage.set).not.toHaveBeenCalledWith({ "smartGroupSession:10": {} });
+
+    openTabContextMenu(1);
+    expect(contextMenuItem("group-all").disabled).toBe(true);
+    click(contextMenuItem("group-all"));
+    await flush();
+    expect(base.methods.group).toHaveBeenCalledOnce();
+
+    base.groupEvents.onCreated.emit(fakeGroup({ id: 777, title: "其他" }));
+    openTabContextMenu(1);
+    expect(contextMenuItem("group-all").disabled).toBe(true);
+    base.methods.get.mockRejectedValueOnce(new Error("replacement missing"));
+    base.events.onReplaced.emit(99, 98);
+    await vi.waitFor(() => expect(base.methods.query).toHaveBeenCalledTimes(2));
+    await flush();
+
+    base.events.onCreated.emit(fakeTab({
+      id: 3,
+      index: 2,
+      url: "https://three.example/",
+      groupId: -1,
+    }));
+    openTabContextMenu(3);
+    click(contextMenuItem("group-all"));
+    await vi.waitFor(() => expect(base.methods.group).toHaveBeenLastCalledWith({
+      tabIds: [3],
+      groupId: 777,
+    }));
+    expect(sessionStorage.set).not.toHaveBeenCalledWith({ "smartGroupSession:10": {} });
+    base.groupEvents.onRemoved.emit(fakeGroup({ id: 777 }));
+    await vi.waitFor(() => expect(sessionStorage.set).toHaveBeenCalledWith({
+      "smartGroupSession:10": {},
+    }));
+    cleanup();
+  });
+
+  it("clears an unconfirmed Other role when an authoritative snapshot omits it", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://one.example/", groupId: -1 }),
+        fakeTab({ id: 2, index: 1, url: "https://two.example/", groupId: -1 }),
+      ],
+    });
+    const sessionStorage = {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn().mockResolvedValue(undefined),
+    };
+    const cleanup = await startSidebarRaw({ ...base, sessionStorage });
+    await vi.waitFor(() => {
+      openTabContextMenu(1);
+      expect(contextMenuItem("group-all").disabled).toBe(false);
+    });
+
+    click(contextMenuItem("group-all"));
+    await vi.waitFor(() => expect(sessionStorage.set).toHaveBeenCalledWith({
+      "smartGroupSession:10": { otherGroupId: 777 },
+    }));
+    base.methods.groupQuery.mockResolvedValueOnce([]);
+    base.methods.get.mockRejectedValueOnce(new Error("replacement missing"));
+    base.events.onReplaced.emit(99, 98);
+
+    await vi.waitFor(() => expect(sessionStorage.set).toHaveBeenCalledWith({
+      "smartGroupSession:10": {},
+    }));
+    expect(sessionStorage.set.mock.calls.filter(([value]) =>
+      JSON.stringify(value) === JSON.stringify({ "smartGroupSession:10": {} })))
+      .toHaveLength(1);
+    expect(base.methods.group).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it("confirms an Other role when an original member closes before authoritative resync", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://one.example/", groupId: -1 }),
+        fakeTab({ id: 2, index: 1, url: "https://two.example/", groupId: -1 }),
+      ],
+    });
+    const sessionStorage = {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn().mockResolvedValue(undefined),
+    };
+    const cleanup = await startSidebarRaw({ ...base, sessionStorage });
+    await vi.waitFor(() => {
+      openTabContextMenu(1);
+      expect(contextMenuItem("group-all").disabled).toBe(false);
+    });
+
+    click(contextMenuItem("group-all"));
+    await vi.waitFor(() => expect(sessionStorage.set).toHaveBeenCalledWith({
+      "smartGroupSession:10": { otherGroupId: 777 },
+    }));
+    base.setTabs([
+      fakeTab({ id: 1, index: 0, url: "https://one.example/", groupId: 777 }),
+    ]);
+    base.methods.get.mockRejectedValueOnce(new Error("replacement missing"));
+    base.events.onReplaced.emit(99, 98);
+    await vi.waitFor(() => expect(base.methods.query).toHaveBeenCalledTimes(2));
+
+    base.events.onCreated.emit(fakeTab({
+      id: 3,
+      index: 1,
+      url: "https://three.example/",
+      groupId: -1,
+    }));
+    await vi.waitFor(() => {
+      openTabContextMenu(3);
+      expect(contextMenuItem("group-all").disabled).toBe(false);
+    });
+    click(contextMenuItem("group-all"));
+    await vi.waitFor(() => expect(base.methods.group).toHaveBeenLastCalledWith({
+      tabIds: [3],
+      groupId: 777,
+    }));
+    expect(sessionStorage.set).not.toHaveBeenCalledWith({ "smartGroupSession:10": {} });
+    cleanup();
+  });
+
+  it("reuses only the stored Other role and clears it when that group is removed", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, url: "https://one.example/", groupId: -1 }),
+        fakeTab({ id: 2, index: 1, url: "https://two.example/", groupId: -1 }),
+        fakeTab({ id: 3, index: 2, url: "https://member.example/", groupId: 9 }),
+      ],
+      groups: [fakeGroup({ id: 9, title: "其他" })],
+    });
+    const sessionStorage = {
+      get: vi.fn().mockResolvedValue({
+        "smartGroupSession:10": { otherGroupId: 9 },
+      }),
+      set: vi.fn().mockResolvedValue(undefined),
+    };
+    const cleanup = await startSidebarRaw({ ...base, sessionStorage });
+    await vi.waitFor(() => {
+      openTabContextMenu(1);
+      expect(contextMenuItem("group-all").disabled).toBe(false);
+    });
+
+    click(contextMenuItem("group-all"));
+    await vi.waitFor(() => expect(base.methods.group).toHaveBeenCalledWith({
+      tabIds: [1, 2],
+      groupId: 9,
+    }));
+    base.groupEvents.onRemoved.emit(fakeGroup({ id: 9 }));
+    await vi.waitFor(() => expect(sessionStorage.set).toHaveBeenCalledWith({
+      "smartGroupSession:10": {},
+    }));
+    cleanup();
   });
 
   it("opens the group dialog from the context menu and retries only partial metadata creation", async () => {
@@ -2797,6 +3390,7 @@ describe("sidebar lifecycle", () => {
   it("submits one cross-group reorder and keeps dragging enabled during history search", async () => {
     const pendingMove = deferred<chrome.tabs.Tab>();
     const fake = createFakeChrome({
+      stored: enabledShortcuts(),
       tabs: [
         fakeTab({ id: 1, index: 0, pinned: true }),
         fakeTab({ id: 2, index: 1 }),
@@ -3483,7 +4077,7 @@ describe("sidebar lifecycle", () => {
       stored: {
         shortcutSettings: {
           ...createDefaultShortcutSettings(),
-          newTabBehavior: "child",
+          contentTreeEnabled: true,
         },
       },
     });
@@ -3514,6 +4108,126 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
+  it("dissolves a tab subtree into root tabs without closing them", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, active: true }),
+        fakeTab({ id: 2, index: 1, openerTabId: 1 }),
+        fakeTab({ id: 3, index: 2, openerTabId: 2 }),
+        fakeTab({ id: 4, index: 3 }),
+      ],
+      stored: {
+        shortcutSettings: {
+          ...createDefaultShortcutSettings(),
+          contentTreeEnabled: true,
+        },
+      },
+    });
+    const sessionSet = vi.fn().mockResolvedValue(undefined);
+    const fake = {
+      ...base,
+      sessionStorage: {
+        get: vi.fn().mockResolvedValue({
+          "tabTreeSessionState:10": { collapsedTabIds: [2] },
+        }),
+        set: sessionSet,
+      },
+    };
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(rowIds()).toEqual([1, 2, 4]));
+
+    openTabContextMenu(1);
+    expect(contextMenuItem("dissolve-tree").disabled).toBe(false);
+    click(contextMenuItem("dissolve-tree"));
+
+    expect(rowIds()).toEqual([1, 2, 3, 4]);
+    for (const tabId of [1, 2, 3]) {
+      expect(row(tabId).dataset.treeDepth).toBe("0");
+    }
+    expect(fake.methods.remove).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(sessionSet).toHaveBeenLastCalledWith({
+      "tabTreeSessionState:10": {
+        collapsedTabIds: [],
+        detachedTabIds: [1, 2, 3],
+        attachedTabParentIds: [],
+      },
+    }));
+    cleanup();
+  });
+
+  it("deletes a collapsed tab subtree without closing unrelated tabs", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, active: true }),
+        fakeTab({ id: 2, index: 1, openerTabId: 1 }),
+        fakeTab({ id: 3, index: 2, openerTabId: 2 }),
+        fakeTab({ id: 4, index: 3 }),
+      ],
+      stored: {
+        shortcutSettings: {
+          ...createDefaultShortcutSettings(),
+          contentTreeEnabled: true,
+        },
+      },
+    });
+    const fake = {
+      ...base,
+      sessionStorage: {
+        get: vi.fn().mockResolvedValue({
+          "tabTreeSessionState:10": { collapsedTabIds: [1] },
+        }),
+        set: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(rowIds()).toEqual([1, 4]));
+
+    openTabContextMenu(1);
+    expect(contextMenuItem("delete-subtree").disabled).toBe(false);
+    click(contextMenuItem("delete-subtree"));
+    await flush();
+
+    expect(fake.methods.remove).toHaveBeenCalledOnce();
+    expect(fake.methods.remove).toHaveBeenCalledWith([1, 2, 3]);
+    expect(rowIds()).toEqual([1, 4]);
+    cleanup();
+  });
+
+  it("keeps a tab subtree when deleting it fails", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0, active: true }),
+        fakeTab({ id: 2, index: 1, openerTabId: 1 }),
+        fakeTab({ id: 3, index: 2 }),
+      ],
+      stored: {
+        shortcutSettings: {
+          ...createDefaultShortcutSettings(),
+          contentTreeEnabled: true,
+        },
+      },
+    });
+    base.methods.remove.mockRejectedValueOnce(new Error("browser failed"));
+    const fake = {
+      ...base,
+      sessionStorage: {
+        get: vi.fn().mockResolvedValue({ "tabTreeSessionState:10": {} }),
+        set: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(row(1).dataset.treeParent).toBe("true"));
+
+    openTabContextMenu(1);
+    click(contextMenuItem("delete-subtree"));
+
+    await vi.waitFor(() => expect(element("status-message").textContent).toBe(
+      "无法删除树节点及子标签",
+    ));
+    expect(rowIds()).toEqual([1, 2, 3]);
+    cleanup();
+  });
+
   it("keeps an active descendant collapsed and expands for a newly active child", async () => {
     const base = createFakeChrome({
       tabs: [
@@ -3524,7 +4238,7 @@ describe("sidebar lifecycle", () => {
       stored: {
         shortcutSettings: {
           ...createDefaultShortcutSettings(),
-          newTabBehavior: "child",
+          contentTreeEnabled: true,
         },
       },
     });
@@ -3569,7 +4283,7 @@ describe("sidebar lifecycle", () => {
       stored: {
         shortcutSettings: {
           ...createDefaultShortcutSettings(),
-          newTabBehavior: "child",
+          contentTreeEnabled: true,
         },
       },
     });
@@ -3601,7 +4315,7 @@ describe("sidebar lifecycle", () => {
       stored: {
         shortcutSettings: {
           ...createDefaultShortcutSettings(),
-          newTabBehavior: "child",
+          contentTreeEnabled: true,
         },
       },
     });
@@ -3637,7 +4351,7 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
-  it("attaches a root tab to a tree when dropped after its new parent", async () => {
+  it("attaches a root tab after its new parent's complete subtree", async () => {
     const base = createFakeChrome({
       tabs: [
         fakeTab({ id: 1, index: 0, active: true }),
@@ -3647,7 +4361,7 @@ describe("sidebar lifecycle", () => {
       stored: {
         shortcutSettings: {
           ...createDefaultShortcutSettings(),
-          newTabBehavior: "child",
+          contentTreeEnabled: true,
         },
       },
     });
@@ -3668,15 +4382,15 @@ describe("sidebar lifecycle", () => {
 
     row(3).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
     const over = new Event("dragover", { bubbles: true, cancelable: true });
-    Object.defineProperty(over, "clientY", { value: 29 });
+    Object.defineProperty(over, "clientY", { value: 15 });
     Object.defineProperty(over, "clientX", { value: 16 });
     parent.dispatchEvent(over);
     const drop = new Event("drop", { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, "clientY", { value: 29 });
+    Object.defineProperty(drop, "clientY", { value: 15 });
     Object.defineProperty(drop, "clientX", { value: 16 });
     parent.dispatchEvent(drop);
 
-    await vi.waitFor(() => expect(fake.methods.move).toHaveBeenCalledWith(3, { index: 1 }));
+    expect(fake.methods.move).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(row(3).dataset.treeDepth).toBe("1"));
     expect(fake.sessionStorage.set).toHaveBeenCalledWith({
       "tabTreeSessionState:10": {
@@ -3688,7 +4402,7 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
-  it("attaches an already adjacent root without issuing a no-op Chrome move", async () => {
+  it("moves an interleaved root after the new parent's complete subtree", async () => {
     const base = createFakeChrome({
       tabs: [
         fakeTab({ id: 1, index: 0, active: true }),
@@ -3698,7 +4412,7 @@ describe("sidebar lifecycle", () => {
       stored: {
         shortcutSettings: {
           ...createDefaultShortcutSettings(),
-          newTabBehavior: "child",
+          contentTreeEnabled: true,
         },
       },
     });
@@ -3719,16 +4433,181 @@ describe("sidebar lifecycle", () => {
 
     row(3).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
     const over = new Event("dragover", { bubbles: true, cancelable: true });
-    Object.defineProperty(over, "clientY", { value: 29 });
+    Object.defineProperty(over, "clientY", { value: 15 });
     Object.defineProperty(over, "clientX", { value: 16 });
     parent.dispatchEvent(over);
     const drop = new Event("drop", { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, "clientY", { value: 29 });
+    Object.defineProperty(drop, "clientY", { value: 15 });
     Object.defineProperty(drop, "clientX", { value: 16 });
     parent.dispatchEvent(drop);
 
-    expect(fake.methods.move).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(fake.methods.move).toHaveBeenCalledWith(3, { index: 2 }));
     await vi.waitFor(() => expect(row(3).dataset.treeDepth).toBe("1"));
+    cleanup();
+  });
+
+  it.each([
+    {
+      name: "Root to Root sibling",
+      sourceId: 5,
+      targetId: 1,
+      clientY: 1,
+      expectedMoveIds: 5,
+      expectedMoveIndex: 0,
+      expectedParentId: undefined,
+      expectedSession: undefined,
+    },
+    {
+      name: "Root to Child sibling",
+      sourceId: 5,
+      targetId: 2,
+      clientY: 1,
+      expectedMoveIds: 5,
+      expectedMoveIndex: 1,
+      expectedParentId: 1,
+      expectedSession: { detachedTabIds: [], attachedTabParentIds: [[5, 1]] },
+    },
+    {
+      name: "Root to Root child",
+      sourceId: 5,
+      targetId: 1,
+      clientY: 15,
+      expectedMoveIds: undefined,
+      expectedMoveIndex: undefined,
+      expectedParentId: 1,
+      expectedSession: { detachedTabIds: [], attachedTabParentIds: [[5, 1]] },
+    },
+    {
+      name: "Root to Child child",
+      sourceId: 5,
+      targetId: 2,
+      clientY: 15,
+      expectedMoveIds: 5,
+      expectedMoveIndex: 3,
+      expectedParentId: 2,
+      expectedSession: { detachedTabIds: [], attachedTabParentIds: [[5, 2]] },
+    },
+    {
+      name: "Child to Root sibling",
+      sourceId: 2,
+      targetId: 5,
+      clientY: 1,
+      expectedMoveIds: [2, 3],
+      expectedMoveIndex: 2,
+      expectedParentId: undefined,
+      expectedSession: { detachedTabIds: [2], attachedTabParentIds: [] },
+    },
+    {
+      name: "Child to Child sibling",
+      sourceId: 2,
+      targetId: 4,
+      clientY: 29,
+      expectedMoveIds: [2, 3],
+      expectedMoveIndex: 2,
+      expectedParentId: 1,
+      expectedSession: undefined,
+    },
+    {
+      name: "Child to Root child",
+      sourceId: 2,
+      targetId: 5,
+      clientY: 15,
+      expectedMoveIds: [2, 3],
+      expectedMoveIndex: 3,
+      expectedParentId: 5,
+      expectedSession: { detachedTabIds: [], attachedTabParentIds: [[2, 5]] },
+    },
+    {
+      name: "Child to Child child",
+      sourceId: 2,
+      targetId: 4,
+      clientY: 15,
+      expectedMoveIds: [2, 3],
+      expectedMoveIndex: 2,
+      expectedParentId: 4,
+      expectedSession: { detachedTabIds: [], attachedTabParentIds: [[2, 4]] },
+    },
+  ])("supports $name tree drops", async ({
+    sourceId,
+    targetId,
+    clientY,
+    expectedMoveIds,
+    expectedMoveIndex,
+    expectedParentId,
+    expectedSession,
+  }) => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0 }),
+        fakeTab({ id: 2, index: 1, openerTabId: 1 }),
+        fakeTab({ id: 3, index: 2, openerTabId: 2 }),
+        fakeTab({ id: 4, index: 3, openerTabId: 1 }),
+        fakeTab({ id: 5, index: 4 }),
+      ],
+      stored: {
+        shortcutSettings: {
+          ...createDefaultShortcutSettings(),
+          contentTreeEnabled: true,
+        },
+      },
+    });
+    const sessionSet = vi.fn().mockResolvedValue(undefined);
+    const fake = {
+      ...base,
+      sessionStorage: {
+        get: vi.fn().mockResolvedValue({ "tabTreeSessionState:10": {} }),
+        set: sessionSet,
+      },
+    };
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(row(1).dataset.treeParent).toBe("true"));
+    const target = row(targetId);
+    vi.spyOn(target, "getBoundingClientRect").mockReturnValue({
+      top: 0, height: 30, bottom: 30, left: 0, right: 100, width: 100,
+      x: 0, y: 0, toJSON: () => ({}),
+    });
+
+    row(sourceId).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
+    const over = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.defineProperty(over, "clientY", { value: clientY });
+    target.dispatchEvent(over);
+    const drop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, "clientY", { value: clientY });
+    target.dispatchEvent(drop);
+
+    if (expectedMoveIds === undefined) {
+      expect(fake.methods.move).not.toHaveBeenCalled();
+    } else {
+      await vi.waitFor(() => expect(fake.methods.move).toHaveBeenCalledWith(
+        expectedMoveIds,
+        { index: expectedMoveIndex },
+      ));
+    }
+    await flush();
+
+    if (expectedSession === undefined) {
+      expect(sessionSet).not.toHaveBeenCalled();
+    } else {
+      const expectedDetachedTabIds: readonly number[] = expectedSession.detachedTabIds;
+      const expectedAttachedTabParentIds: ReadonlyArray<readonly [number, number]> =
+        expectedSession.attachedTabParentIds.map(([childId, parentId]) => [
+          childId!,
+          parentId!,
+        ]);
+      const expectedState = {
+        collapsedTabIds: [],
+        detachedTabIds: expectedDetachedTabIds,
+        attachedTabParentIds: expectedAttachedTabParentIds,
+      };
+      await vi.waitFor(() => expect(sessionSet).toHaveBeenLastCalledWith({
+        "tabTreeSessionState:10": expectedState,
+      }));
+    }
+    if (expectedParentId === undefined) {
+      await vi.waitFor(() => expect(row(sourceId).dataset.treeDepth).toBe("0"));
+    } else {
+      await vi.waitFor(() => expect(row(sourceId).dataset.treeDepth).not.toBe("0"));
+    }
     cleanup();
   });
 
@@ -3742,7 +4621,7 @@ describe("sidebar lifecycle", () => {
       stored: {
         shortcutSettings: {
           ...createDefaultShortcutSettings(),
-          newTabBehavior: "child",
+          contentTreeEnabled: true,
         },
       },
     });
@@ -3763,7 +4642,7 @@ describe("sidebar lifecycle", () => {
 
     row(3).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
     const over = new Event("dragover", { bubbles: true, cancelable: true });
-    Object.defineProperties(over, { clientY: { value: 29 }, clientX: { value: 16 } });
+    Object.defineProperties(over, { clientY: { value: 15 }, clientX: { value: 16 } });
     parent.dispatchEvent(over);
     fake.events.onUpdated.emit(
       1,
@@ -3771,7 +4650,7 @@ describe("sidebar lifecycle", () => {
       fakeTab({ id: 1, index: 0, pinned: true }),
     );
     const drop = new Event("drop", { bubbles: true, cancelable: true });
-    Object.defineProperties(drop, { clientY: { value: 29 }, clientX: { value: 16 } });
+    Object.defineProperties(drop, { clientY: { value: 15 }, clientX: { value: 16 } });
     parent.dispatchEvent(drop);
 
     expect(fake.methods.move).not.toHaveBeenCalled();
@@ -3779,17 +4658,434 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
-  it("does not persist a tree parent removed while Chrome is moving the source", async () => {
+  it("cancels a child drop when the intended parent enters a native group", async () => {
     const base = createFakeChrome({
       tabs: [
         fakeTab({ id: 1, index: 0 }),
         fakeTab({ id: 2, index: 1, openerTabId: 1 }),
         fakeTab({ id: 3, index: 2 }),
+        fakeTab({ id: 4, index: 3, groupId: 7 }),
+      ],
+      groups: [fakeGroup({ id: 7 })],
+      stored: {
+        shortcutSettings: {
+          ...createDefaultShortcutSettings(),
+          contentTreeEnabled: true,
+        },
+      },
+    });
+    const fake = {
+      ...base,
+      sessionStorage: {
+        get: vi.fn().mockResolvedValue({ "tabTreeSessionState:10": {} }),
+        set: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(row(1).dataset.treeParent).toBe("true"));
+    const parent = row(1);
+    vi.spyOn(parent, "getBoundingClientRect").mockReturnValue({
+      top: 0, height: 30, bottom: 30, left: 0, right: 100, width: 100,
+      x: 0, y: 0, toJSON: () => ({}),
+    });
+
+    row(3).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
+    const over = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.defineProperties(over, { clientY: { value: 15 }, clientX: { value: 16 } });
+    parent.dispatchEvent(over);
+    expect(parent.dataset.dropRelation).toBe("child");
+
+    await fake.tabs.group({ groupId: 7, tabIds: 1 });
+    const groupedParent = fakeTab({ id: 1, index: 0, groupId: 7 });
+    fake.events.onUpdated.emit(1, { groupId: 7 }, groupedParent);
+    const drop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperties(drop, { clientY: { value: 15 }, clientX: { value: 16 } });
+    parent.dispatchEvent(drop);
+
+    expect(fake.methods.move).not.toHaveBeenCalled();
+    expect(fake.sessionStorage.set).not.toHaveBeenCalled();
+    expect(element("tab-list").querySelector(
+      "[data-drag-source], [data-drop-placement], [data-drop-relation], [data-drop-target]",
+    )).toBeNull();
+    cleanup();
+  });
+
+  it.each(["pinned", "grouped", "tree-disabled"] as const)(
+    "cancels a prepared child drop when the source becomes %s",
+    async (sourceState) => {
+      const base = createFakeChrome({
+        tabs: [
+          fakeTab({ id: 1, index: 0 }),
+          fakeTab({ id: 3, index: 1 }),
+          fakeTab({ id: 2, index: 2, openerTabId: 1 }),
+          fakeTab({ id: 4, index: 3, groupId: 7 }),
+        ],
+        groups: [fakeGroup({ id: 7 })],
+        stored: {
+          shortcutSettings: {
+            ...createDefaultShortcutSettings(),
+            contentTreeEnabled: true,
+          },
+        },
+      });
+      const sessionSet = vi.fn().mockResolvedValue(undefined);
+      const fake = {
+        ...base,
+        sessionStorage: {
+          get: vi.fn().mockResolvedValue({ "tabTreeSessionState:10": {} }),
+          set: sessionSet,
+        },
+      };
+      const cleanup = await startSidebar(fake);
+      await vi.waitFor(() => expect(row(1).dataset.treeParent).toBe("true"));
+      const parent = row(1);
+      vi.spyOn(parent, "getBoundingClientRect").mockReturnValue({
+        top: 0, height: 30, bottom: 30, left: 0, right: 100, width: 100,
+        x: 0, y: 0, toJSON: () => ({}),
+      });
+
+      row(3).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
+      const over = new Event("dragover", { bubbles: true, cancelable: true });
+      Object.defineProperty(over, "clientY", { value: 15 });
+      parent.dispatchEvent(over);
+      expect(parent.dataset.dropRelation).toBe("child");
+
+      if (sourceState === "pinned") {
+        const pinnedSource = await fake.tabs.update(3, { pinned: true });
+        if (!pinnedSource) throw new Error("expected updated source tab");
+        fake.events.onUpdated.emit(3, { pinned: true }, pinnedSource);
+      } else if (sourceState === "grouped") {
+        await fake.tabs.group({ groupId: 7, tabIds: 3 });
+        fake.events.onUpdated.emit(3, { groupId: 7 }, fakeTab({
+          id: 3,
+          index: 1,
+          groupId: 7,
+        }));
+      } else {
+        click(element("shortcut-settings"));
+        const contentTreeEnabled = document.querySelector<HTMLInputElement>(
+          "#content-tree-enabled",
+        )!;
+        contentTreeEnabled.checked = false;
+        element<HTMLFormElement>("shortcut-form").dispatchEvent(
+          new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+        );
+        await vi.waitFor(() => expect(fake.methods.storageSet).toHaveBeenCalled());
+        await vi.waitFor(() => expect(sessionSet).toHaveBeenCalled());
+      }
+      fake.methods.move.mockClear();
+      fake.methods.update.mockClear();
+      fake.methods.group.mockClear();
+      sessionSet.mockClear();
+
+      const drop = new Event("drop", { bubbles: true, cancelable: true });
+      Object.defineProperty(drop, "clientY", { value: 15 });
+      parent.dispatchEvent(drop);
+      await flush();
+
+      expect(fake.methods.move).not.toHaveBeenCalled();
+      expect(fake.methods.update).not.toHaveBeenCalled();
+      expect(fake.methods.group).not.toHaveBeenCalled();
+      expect(sessionSet).not.toHaveBeenCalled();
+      expect(element("tab-list").querySelector(
+        "[data-drag-source], [data-drop-placement], [data-drop-relation], [data-drop-target]",
+      )).toBeNull();
+      cleanup();
+    },
+  );
+
+  it("does not revive a tree attachment when tree mode changes during Chrome move", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0 }),
+        fakeTab({ id: 3, index: 1 }),
+        fakeTab({ id: 2, index: 2, openerTabId: 1 }),
       ],
       stored: {
         shortcutSettings: {
           ...createDefaultShortcutSettings(),
-          newTabBehavior: "child",
+          contentTreeEnabled: true,
+        },
+      },
+    });
+    const move = deferred<chrome.tabs.Tab>();
+    base.methods.move.mockReturnValueOnce(move.promise);
+    const sessionSet = vi.fn().mockResolvedValue(undefined);
+    const fake = {
+      ...base,
+      sessionStorage: {
+        get: vi.fn().mockResolvedValue({ "tabTreeSessionState:10": {} }),
+        set: sessionSet,
+      },
+    };
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(row(1).dataset.treeParent).toBe("true"));
+    const parent = row(1);
+    vi.spyOn(parent, "getBoundingClientRect").mockReturnValue({
+      top: 0, height: 30, bottom: 30, left: 0, right: 100, width: 100,
+      x: 0, y: 0, toJSON: () => ({}),
+    });
+
+    row(3).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
+    const over = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.defineProperty(over, "clientY", { value: 15 });
+    parent.dispatchEvent(over);
+    const drop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, "clientY", { value: 15 });
+    parent.dispatchEvent(drop);
+    await vi.waitFor(() => expect(fake.methods.move).toHaveBeenCalledWith(3, { index: 2 }));
+
+    click(element("shortcut-settings"));
+    const contentTreeEnabled = document.querySelector<HTMLInputElement>(
+      "#content-tree-enabled",
+    )!;
+    contentTreeEnabled.checked = false;
+    element<HTMLFormElement>("shortcut-form").dispatchEvent(
+      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+    );
+    await vi.waitFor(() => expect(sessionSet).toHaveBeenCalled());
+    expect(row(3).dataset.treeDepth).toBeUndefined();
+    sessionSet.mockClear();
+
+    move.resolve(fakeTab({ id: 3, index: 2 }));
+    await flush();
+    expect(sessionSet).not.toHaveBeenCalled();
+    expect(row(3).dataset.treeDepth).toBeUndefined();
+
+    click(element("shortcut-settings"));
+    contentTreeEnabled.checked = true;
+    element<HTMLFormElement>("shortcut-form").dispatchEvent(
+      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+    );
+    await vi.waitFor(() => expect(fake.methods.storageSet).toHaveBeenCalledWith({
+      shortcutSettings: expect.objectContaining({ contentTreeEnabled: true }),
+    }));
+    await vi.waitFor(() => expect(row(3).dataset.treeDepth).toBeDefined());
+    expect(row(3).dataset.treeDepth).toBe("0");
+    expect(sessionSet).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("does not restore an old tree session after switching tree mode off", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0 }),
+        fakeTab({ id: 3, index: 1 }),
+      ],
+      stored: {
+        shortcutSettings: {
+          ...createDefaultShortcutSettings(),
+          contentTreeEnabled: true,
+        },
+      },
+    });
+    const pendingSave = deferred<void>();
+    const sessionSet = vi.fn()
+      .mockReturnValueOnce(pendingSave.promise)
+      .mockResolvedValue(undefined);
+    const fake = {
+      ...base,
+      sessionStorage: {
+        get: vi.fn().mockResolvedValue({
+          "tabTreeSessionState:10": {
+            collapsedTabIds: [],
+            detachedTabIds: [],
+            attachedTabParentIds: [[3, 1]],
+          },
+        }),
+        set: sessionSet,
+      },
+    };
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(row(3).dataset.treeDepth).toBe("1"));
+
+    click(row(1).querySelector("[data-action='toggle-tree']")!);
+    await vi.waitFor(() => expect(sessionSet).toHaveBeenCalledTimes(1));
+
+    click(element("shortcut-settings"));
+    const contentTreeEnabled = document.querySelector<HTMLInputElement>(
+      "#content-tree-enabled",
+    )!;
+    contentTreeEnabled.checked = false;
+    element<HTMLFormElement>("shortcut-form").dispatchEvent(
+      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+    );
+    await vi.waitFor(() => expect(fake.methods.storageSet).toHaveBeenCalledWith({
+      shortcutSettings: expect.objectContaining({ contentTreeEnabled: false }),
+    }));
+    await vi.waitFor(() => expect(row(3).dataset.treeDepth).toBeUndefined());
+
+    pendingSave.reject(new Error("old child session save failed"));
+    await vi.waitFor(() => expect(sessionSet).toHaveBeenCalledTimes(2));
+
+    click(element("shortcut-settings"));
+    contentTreeEnabled.checked = true;
+    element<HTMLFormElement>("shortcut-form").dispatchEvent(
+      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+    );
+    await vi.waitFor(() => expect(fake.methods.storageSet).toHaveBeenCalledWith({
+      shortcutSettings: expect.objectContaining({ contentTreeEnabled: true }),
+    }));
+    await vi.waitFor(() => expect(row(3).dataset.treeDepth).toBeDefined());
+
+    expect(row(3).dataset.treeDepth).toBe("0");
+    cleanup();
+  });
+
+  it("does not overwrite a dissolved tree when an older Chrome move completes", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0 }),
+        fakeTab({ id: 3, index: 1 }),
+        fakeTab({ id: 2, index: 2, openerTabId: 1 }),
+      ],
+      stored: {
+        shortcutSettings: {
+          ...createDefaultShortcutSettings(),
+          contentTreeEnabled: true,
+        },
+      },
+    });
+    const move = deferred<chrome.tabs.Tab>();
+    base.methods.move.mockReturnValueOnce(move.promise);
+    const sessionSet = vi.fn().mockResolvedValue(undefined);
+    const fake = {
+      ...base,
+      sessionStorage: {
+        get: vi.fn().mockResolvedValue({ "tabTreeSessionState:10": {} }),
+        set: sessionSet,
+      },
+    };
+    const cleanup = await startSidebar(fake);
+    await vi.waitFor(() => expect(row(1).dataset.treeParent).toBe("true"));
+    const parent = row(1);
+    vi.spyOn(parent, "getBoundingClientRect").mockReturnValue({
+      top: 0, height: 30, bottom: 30, left: 0, right: 100, width: 100,
+      x: 0, y: 0, toJSON: () => ({}),
+    });
+
+    row(3).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
+    const over = new Event("dragover", { bubbles: true, cancelable: true });
+    Object.defineProperty(over, "clientY", { value: 15 });
+    parent.dispatchEvent(over);
+    const drop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, "clientY", { value: 15 });
+    parent.dispatchEvent(drop);
+    await vi.waitFor(() => expect(fake.methods.move).toHaveBeenCalledWith(3, { index: 2 }));
+
+    openTabContextMenu(1);
+    click(contextMenuItem("dissolve-tree"));
+    await vi.waitFor(() => expect(sessionSet).toHaveBeenLastCalledWith({
+      "tabTreeSessionState:10": {
+        collapsedTabIds: [],
+        detachedTabIds: [1, 2],
+        attachedTabParentIds: [],
+      },
+    }));
+    expect(row(3).dataset.treeDepth).toBe("0");
+    sessionSet.mockClear();
+
+    move.resolve(fakeTab({ id: 3, index: 2 }));
+    await vi.waitFor(() => expect(row(3).draggable).toBe(true));
+
+    expect(sessionSet).not.toHaveBeenCalled();
+    expect(row(3).dataset.treeDepth).toBe("0");
+    cleanup();
+  });
+
+  it.each(["pinned", "grouped"] as const)(
+    "does not detach a source that becomes %s while sibling move is pending",
+    async (sourceState) => {
+      const base = createFakeChrome({
+        tabs: [
+          fakeTab({ id: 1, index: 0 }),
+          fakeTab({ id: 5, index: 1 }),
+          fakeTab({ id: 2, index: 2, openerTabId: 1 }),
+          fakeTab({ id: 4, index: 3, groupId: 7 }),
+        ],
+        groups: [fakeGroup({ id: 7 })],
+        stored: {
+          shortcutSettings: {
+            ...createDefaultShortcutSettings(),
+            contentTreeEnabled: true,
+          },
+        },
+      });
+      const move = deferred<chrome.tabs.Tab>();
+      base.methods.move.mockReturnValueOnce(move.promise);
+      const sessionSet = vi.fn().mockResolvedValue(undefined);
+      const fake = {
+        ...base,
+        sessionStorage: {
+          get: vi.fn().mockResolvedValue({ "tabTreeSessionState:10": {} }),
+          set: sessionSet,
+        },
+      };
+      const cleanup = await startSidebar(fake);
+      await vi.waitFor(() => expect(row(2).dataset.treeDepth).toBe("1"));
+      const rootTarget = row(5);
+      vi.spyOn(rootTarget, "getBoundingClientRect").mockReturnValue({
+        top: 0, height: 30, bottom: 30, left: 0, right: 100, width: 100,
+        x: 0, y: 0, toJSON: () => ({}),
+      });
+
+      row(2).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
+      const over = new Event("dragover", { bubbles: true, cancelable: true });
+      Object.defineProperty(over, "clientY", { value: 1 });
+      rootTarget.dispatchEvent(over);
+      const drop = new Event("drop", { bubbles: true, cancelable: true });
+      Object.defineProperty(drop, "clientY", { value: 1 });
+      rootTarget.dispatchEvent(drop);
+      await vi.waitFor(() => expect(fake.methods.move).toHaveBeenCalledWith(2, { index: 1 }));
+
+      if (sourceState === "pinned") {
+        const pinnedSource = await fake.tabs.update(2, { pinned: true });
+        if (!pinnedSource) throw new Error("expected pinned source tab");
+        fake.events.onUpdated.emit(2, { pinned: true }, pinnedSource);
+      } else {
+        await fake.tabs.group({ groupId: 7, tabIds: 2 });
+        fake.events.onUpdated.emit(2, { groupId: 7 }, fakeTab({
+          id: 2,
+          index: 2,
+          openerTabId: 1,
+          groupId: 7,
+        }));
+      }
+
+      move.resolve(fakeTab({ id: 2, index: 1 }));
+      await vi.waitFor(() => expect(row(5).draggable).toBe(true));
+      expect(sessionSet).not.toHaveBeenCalled();
+
+      if (sourceState === "pinned") {
+        const unpinnedSource = await fake.tabs.update(2, { pinned: false });
+        if (!unpinnedSource) throw new Error("expected unpinned source tab");
+        fake.events.onUpdated.emit(2, { pinned: false }, unpinnedSource);
+      } else {
+        await fake.tabs.ungroup(2);
+        fake.events.onUpdated.emit(2, { groupId: -1 }, fakeTab({
+          id: 2,
+          index: 2,
+          openerTabId: 1,
+          groupId: -1,
+        }));
+      }
+      await vi.waitFor(() => expect(row(2).dataset.treeDepth).toBe("1"));
+      expect(sessionSet).not.toHaveBeenCalled();
+      cleanup();
+    },
+  );
+
+  it("does not persist a tree parent removed while Chrome is moving the source", async () => {
+    const base = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 1, index: 0 }),
+        fakeTab({ id: 3, index: 1 }),
+        fakeTab({ id: 2, index: 2, openerTabId: 1 }),
+      ],
+      stored: {
+        shortcutSettings: {
+          ...createDefaultShortcutSettings(),
+          contentTreeEnabled: true,
         },
       },
     });
@@ -3812,10 +5108,10 @@ describe("sidebar lifecycle", () => {
 
     row(3).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
     const over = new Event("dragover", { bubbles: true, cancelable: true });
-    Object.defineProperties(over, { clientY: { value: 29 }, clientX: { value: 16 } });
+    Object.defineProperties(over, { clientY: { value: 15 }, clientX: { value: 16 } });
     row(1).dispatchEvent(over);
     const drop = new Event("drop", { bubbles: true, cancelable: true });
-    Object.defineProperties(drop, { clientY: { value: 29 }, clientX: { value: 16 } });
+    Object.defineProperties(drop, { clientY: { value: 15 }, clientX: { value: 16 } });
     row(1).dispatchEvent(drop);
     await vi.waitFor(() => expect(fake.methods.move).toHaveBeenCalled());
 
@@ -3834,13 +5130,13 @@ describe("sidebar lifecycle", () => {
     const base = createFakeChrome({
       tabs: [
         fakeTab({ id: 1, index: 0 }),
-        fakeTab({ id: 3, index: 1 }),
-        fakeTab({ id: 2, index: 2, openerTabId: 1 }),
+        fakeTab({ id: 2, index: 1, openerTabId: 1 }),
+        fakeTab({ id: 3, index: 2 }),
       ],
       stored: {
         shortcutSettings: {
           ...createDefaultShortcutSettings(),
-          newTabBehavior: "child",
+          contentTreeEnabled: true,
         },
       },
     });
@@ -3860,10 +5156,10 @@ describe("sidebar lifecycle", () => {
 
     row(3).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
     const over = new Event("dragover", { bubbles: true, cancelable: true });
-    Object.defineProperties(over, { clientY: { value: 29 }, clientX: { value: 16 } });
+    Object.defineProperties(over, { clientY: { value: 15 }, clientX: { value: 16 } });
     row(1).dispatchEvent(over);
     const drop = new Event("drop", { bubbles: true, cancelable: true });
-    Object.defineProperties(drop, { clientY: { value: 29 }, clientX: { value: 16 } });
+    Object.defineProperties(drop, { clientY: { value: 15 }, clientX: { value: 16 } });
     row(1).dispatchEvent(drop);
 
     await vi.waitFor(() => expect(element("status-message").textContent)
@@ -3884,7 +5180,7 @@ describe("sidebar lifecycle", () => {
       stored: {
         shortcutSettings: {
           ...createDefaultShortcutSettings(),
-          newTabBehavior: "child",
+          contentTreeEnabled: true,
         },
       },
     });

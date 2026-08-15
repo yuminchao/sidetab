@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTabDragController } from "../src/sidepanel/tab-drag-controller";
 import type { TabDropTarget } from "../src/sidepanel/tab-reorder-model";
+import type { TabTreeDropRequest } from "../src/sidepanel/tab-tree-drop-model";
 
 function drag(
   target: Element,
@@ -22,6 +23,8 @@ const dirtySelector = [
   "[data-drag-group-source]",
   "[data-drop-placement]",
   "[data-drop-depth]",
+  "[data-drop-relation]",
+  "[data-drop-child-target]",
   "[data-drop-target]",
 ].join(", ");
 
@@ -59,8 +62,7 @@ describe("tab drag controller", () => {
     onDrop = vi.fn(),
     canStartGroupDrag?: (groupId: number) => boolean,
     prepareTabDrag?: (sourceId: number) => (
-      target: TabDropTarget,
-      requestedDepth: number,
+      request: TabTreeDropRequest,
     ) => TabDropTarget | undefined,
     canDropTab?: (sourceId: number, target: TabDropTarget) => boolean,
   ) => ({
@@ -71,44 +73,110 @@ describe("tab drag controller", () => {
     ),
   });
 
-  it("previews and emits the resolved horizontal tree depth", () => {
-    vi.spyOn(list, "getBoundingClientRect").mockReturnValue({
-      top: 0, height: 300, bottom: 300, left: 0, right: 200, width: 200,
+  it.each([
+    [5, "before", 180],
+    [20, "child", 8],
+    [35, "after", 180],
+  ] as const)("uses three vertical zones at y=%s for a %s intent regardless of clientX", (
+    clientY,
+    zone,
+    dropClientX,
+  ) => {
+    vi.spyOn(tabs.get(6)!, "getBoundingClientRect").mockReturnValue({
+      top: 0, height: 40, bottom: 40, left: 0, right: 200, width: 200,
       x: 0, y: 0, toJSON: () => ({}),
     });
-    const prepareTabDrag = vi.fn(() => (
-      target: TabDropTarget,
-      requestedDepth: number,
-    ): TabDropTarget => target.kind === "group"
-      ? target
-      : {
-          ...target,
-          tree: { depth: requestedDepth, parentId: 6 },
-        });
+    const resolver = vi.fn((request: TabTreeDropRequest): TabDropTarget | undefined => {
+      if (request.relation === "child") {
+        return {
+          kind: "tab", tabId: 6, placement: "after",
+          tree: { relation: "child", referenceId: 6, depth: 1, parentId: 6 },
+        };
+      }
+      if (request.target.kind === "end") return undefined;
+      return {
+        ...request.target,
+        tree: { relation: "sibling", referenceId: 6, depth: 0 },
+      };
+    });
+    const prepareTabDrag = vi.fn(() => resolver);
     const { onDrop, controller } = create(vi.fn(), undefined, prepareTabDrag);
 
     drag(tabs.get(3)!, "dragstart");
-    drag(tabs.get(6)!, "dragover", 39, undefined, 28);
-    expect(tabs.get(6)!.dataset.dropDepth).toBe("2");
-    drag(tabs.get(6)!, "drop", 39, undefined, 28);
+    drag(tabs.get(6)!, "dragover", clientY, undefined, 4);
+    expect(tabs.get(6)!.dataset.dropRelation).toBe(zone === "child" ? "child" : "sibling");
+    if (zone === "child") {
+      expect(tabs.get(6)!.dataset.dropChildTarget).toBe("true");
+      expect(tabs.get(6)!.dataset.dropPlacement).toBeUndefined();
+      expect(tabs.get(6)!.dataset.dropDepth).toBeUndefined();
+      expect(tabs.get(6)!.style.getPropertyValue("--drop-depth-indent")).toBe("");
+    } else {
+      expect(tabs.get(6)!.dataset.dropChildTarget).toBeUndefined();
+      expect(tabs.get(6)!.dataset.dropPlacement).toBe(zone);
+      expect(tabs.get(6)!.dataset.dropDepth).toBe("0");
+      expect(tabs.get(6)!.style.getPropertyValue("--drop-depth-indent")).toBe("4px");
+    }
+    drag(tabs.get(6)!, "drop", clientY, undefined, dropClientX);
 
     expect(prepareTabDrag).toHaveBeenCalledWith(3);
+    expect(resolver).toHaveBeenLastCalledWith(zone === "child"
+      ? { relation: "child", parentId: 6 }
+      : {
+          relation: "sibling",
+          target: { kind: "tab", tabId: 6, placement: zone },
+        });
+    expect(onDrop).toHaveBeenCalledOnce();
+    controller.destroy();
+  });
+
+  it("keeps a flat list sibling drop but rejects its middle child zone", () => {
+    vi.spyOn(tabs.get(6)!, "getBoundingClientRect").mockReturnValue({
+      top: 0, height: 40, bottom: 40, left: 0, right: 100, width: 100,
+      x: 0, y: 0, toJSON: () => ({}),
+    });
+    const { onDrop, controller } = create();
+
+    drag(tabs.get(3)!, "dragstart");
+    expect(drag(tabs.get(6)!, "dragover", 20).defaultPrevented).toBe(false);
+    expect(list.querySelector(dirtySelector)).toBe(tabs.get(3));
+    expect(drag(tabs.get(6)!, "dragover", 5).defaultPrevented).toBe(true);
+    drag(tabs.get(6)!, "drop", 5);
+
     expect(onDrop).toHaveBeenCalledWith({
-      kind: "tab",
-      sourceId: 3,
-      target: {
-        kind: "tab",
-        tabId: 6,
-        placement: "after",
-        tree: { depth: 2, parentId: 6 },
-      },
+      kind: "tab", sourceId: 3, target: { kind: "tab", tabId: 6, placement: "before" },
     });
     controller.destroy();
   });
 
+  it.each([10, 30])("includes the 25%%/75%% boundary y=%s in the child zone", (clientY) => {
+    vi.spyOn(tabs.get(6)!, "getBoundingClientRect").mockReturnValue({
+      top: 0, height: 40, bottom: 40, left: 0, right: 100, width: 100,
+      x: 0, y: 0, toJSON: () => ({}),
+    });
+    const resolver = vi.fn((request: TabTreeDropRequest): TabDropTarget | undefined =>
+      request.relation === "child"
+        ? {
+            kind: "tab", tabId: 6, placement: "after",
+            tree: { relation: "child", referenceId: 6, depth: 1, parentId: 6 },
+          }
+        : undefined);
+    const { controller } = create(vi.fn(), undefined, () => resolver);
+
+    drag(tabs.get(3)!, "dragstart");
+    drag(tabs.get(6)!, "dragover", clientY);
+
+    expect(resolver).toHaveBeenLastCalledWith({ relation: "child", parentId: 6 });
+    controller.destroy();
+  });
+
   it("cancels when the resolved tree parent disappears before drop", () => {
-    const prepareTabDrag = () => (target: TabDropTarget): TabDropTarget =>
-      target.kind === "group" ? target : { ...target, tree: { depth: 1, parentId: 2 } };
+    const prepareTabDrag = () => (request: TabTreeDropRequest): TabDropTarget | undefined =>
+      request.relation === "sibling"
+        ? {
+            ...request.target,
+            tree: { relation: "sibling", referenceId: 6, depth: 1, parentId: 2 },
+          }
+        : undefined;
     const { onDrop, controller } = create(vi.fn(), undefined, prepareTabDrag);
 
     drag(tabs.get(3)!, "dragstart");
@@ -158,12 +226,10 @@ describe("tab drag controller", () => {
       top: 0, height: 500, bottom: 500, left: 0, right: 200, width: 200,
       x: 0, y: 0, toJSON: () => ({}),
     });
-    const prepareTabDrag = () => (
-      target: TabDropTarget,
-      requestedDepth: number,
-    ): TabDropTarget => target.kind === "group"
-      ? target
-      : { ...target, tree: { depth: target.kind === "end" ? 0 : requestedDepth } };
+    const prepareTabDrag = () => (request: TabTreeDropRequest): TabDropTarget | undefined =>
+      request.relation === "sibling"
+        ? { ...request.target, tree: { relation: "sibling", depth: 0 } }
+        : undefined;
     const { onDrop, controller } = create(vi.fn(), undefined, prepareTabDrag);
     const lastBottom = 8 * 34 + 30;
 
@@ -178,7 +244,44 @@ describe("tab drag controller", () => {
     expect(onDrop).toHaveBeenCalledWith({
       kind: "tab",
       sourceId: 3,
-      target: { kind: "end", tree: { depth: 0 } },
+      target: { kind: "end", tree: { relation: "sibling", depth: 0 } },
+    });
+    controller.destroy();
+  });
+
+  it("keeps the root tail line while crossing onto the new-tab control", () => {
+    const newTab = document.createElement("button");
+    newTab.id = "new-tab-button";
+    scroller.append(newTab);
+    const rows = Array.from(list.querySelectorAll<HTMLElement>(".tab-row, .tab-group-row"));
+    rows.forEach((row, index) => {
+      const top = index * 30;
+      vi.spyOn(row, "getBoundingClientRect").mockReturnValue({
+        top, height: 30, bottom: top + 30, left: 0, right: 200, width: 200,
+        x: 0, y: top, toJSON: () => ({}),
+      });
+    });
+    const lastBottom = rows.length * 30;
+    const prepareTabDrag = () => (request: TabTreeDropRequest): TabDropTarget | undefined =>
+      request.relation === "sibling"
+        ? { ...request.target, tree: { relation: "sibling", depth: 0 } }
+        : undefined;
+    const { onDrop, controller } = create(vi.fn(), undefined, prepareTabDrag);
+
+    drag(tabs.get(3)!, "dragstart");
+    drag(list, "dragover", lastBottom + 5, undefined, 4);
+    expect(list.dataset.dropPlacement).toBe("after");
+
+    drag(list, "dragleave", lastBottom + 6, newTab, 4);
+    const overControl = drag(newTab, "dragover", lastBottom + 8, undefined, 4);
+    expect(overControl.defaultPrevented).toBe(true);
+    expect(list.dataset).toMatchObject({ dropPlacement: "after", dropDepth: "0" });
+
+    drag(newTab, "drop", lastBottom + 8, undefined, 4);
+    expect(onDrop).toHaveBeenCalledWith({
+      kind: "tab",
+      sourceId: 3,
+      target: { kind: "end", tree: { relation: "sibling", depth: 0 } },
     });
     controller.destroy();
   });
@@ -205,6 +308,8 @@ describe("tab drag controller", () => {
     drag(tabs.get(3)!, "dragstart");
     drag(groups.get(9)!.querySelector(".tab-group-main")!, "dragover", 11);
     expect(groups.get(9)!.dataset.dropTarget).toBe("true");
+    expect(groups.get(9)!.dataset.dropRelation).toBeUndefined();
+    expect(groups.get(9)!.dataset.dropPlacement).toBeUndefined();
     drag(groups.get(9)!, "drop", 11);
     expect(onDrop).toHaveBeenCalledWith({ kind: "tab", sourceId: 3, target: { kind: "group", groupId: 9 } });
     controller.destroy();
@@ -361,6 +466,45 @@ describe("tab drag controller", () => {
     controller.destroy();
   });
 
+  it("draws an after line on the resolved visible subtree anchor", () => {
+    const resolver = (request: TabTreeDropRequest): TabDropTarget | undefined =>
+      request.relation === "sibling" && request.target.kind === "tab"
+        ? {
+            kind: "tab", tabId: 5, placement: request.target.placement,
+            tree: { relation: "sibling", referenceId: request.target.tabId, depth: 1, parentId: 4 },
+          }
+        : undefined;
+    const { controller } = create(vi.fn(), undefined, () => resolver);
+
+    drag(tabs.get(3)!, "dragstart");
+    drag(tabs.get(6)!, "dragover", 39);
+
+    expect(tabs.get(6)!.dataset.dropPlacement).toBeUndefined();
+    expect(tabs.get(5)!.dataset).toMatchObject({
+      dropPlacement: "after", dropRelation: "sibling", dropDepth: "1",
+    });
+    controller.destroy();
+  });
+
+  it("falls back to the hovered row when the resolved subtree anchor is collapsed", () => {
+    const resolver = (request: TabTreeDropRequest): TabDropTarget | undefined =>
+      request.relation === "sibling" && request.target.kind === "tab"
+        ? {
+            kind: "tab", tabId: 999, placement: request.target.placement,
+            tree: { relation: "sibling", referenceId: request.target.tabId, depth: 0 },
+          }
+        : undefined;
+    const { controller } = create(vi.fn(), undefined, () => resolver);
+
+    drag(tabs.get(3)!, "dragstart");
+    drag(tabs.get(6)!, "dragover", 39);
+
+    expect(tabs.get(6)!.dataset).toMatchObject({
+      dropPlacement: "after", dropRelation: "sibling", dropDepth: "0",
+    });
+    controller.destroy();
+  });
+
   it("keeps five-hundred-row gap targeting logarithmic after one drag-start scan", () => {
     const boundReads = vi.fn();
     const largeRows = Array.from({ length: 500 }, (_, index) => {
@@ -406,10 +550,13 @@ describe("tab drag controller", () => {
       return row;
     });
     list.replaceChildren(...largeRows);
-    const prepareTabDrag = () => (target: TabDropTarget): TabDropTarget =>
-      target.kind === "group"
-        ? target
-        : { ...target, tree: { depth: 1, parentId: 499 } };
+    const prepareTabDrag = () => (request: TabTreeDropRequest): TabDropTarget | undefined =>
+      request.relation === "sibling"
+        ? {
+            ...request.target,
+            tree: { relation: "sibling", referenceId: 500, depth: 1, parentId: 499 },
+          }
+        : undefined;
     const { controller } = create(vi.fn(), undefined, prepareTabDrag);
 
     drag(largeRows[0]!, "dragstart");

@@ -29,6 +29,7 @@ import { createTabMiddleClickController } from "./tab-middle-click";
 import {
   createTabBlockReorderPlan,
   createTabReorderPlan,
+  type TabDropTarget,
 } from "./tab-reorder-model";
 import { createTabGroupReorderPlan } from "./tab-group-reorder-model";
 import type { TabDragIntent } from "./tab-drag-controller";
@@ -36,16 +37,29 @@ import { createTabRenderer } from "./tab-renderer";
 import { TabStore } from "./tab-store";
 import { createTabTreeSessionStore } from "./tab-tree-session-store";
 import {
+  classifySmartGroupTab,
+  createOneClickGroupPlan,
+  createQuickGroupPlan,
+  type SmartGroupOperation,
+  type SmartGroupPlan,
+} from "./smart-group-model";
+import {
+  executeSmartGroupPlan,
+  SmartGroupExecutionError,
+} from "./smart-group-actions";
+import { createSmartGroupSessionStore } from "./smart-group-session-store";
+import { TAB_GROUP_ID_NONE } from "./tab-group-model";
+import {
   getTabSubtreeIds,
   getTabTreeAncestorIds,
   getTabTreeParentId,
 } from "./tab-tree-model";
-import { createTabTreeDropResolver } from "./tab-tree-drop-model";
 import {
-  createSameSiteGroupPlan,
+  createTabTreeDropResolver,
+  type TabTreeDropRequest,
+} from "./tab-tree-drop-model";
+import {
   getOtherSameSiteTabIds,
-  getSameSiteMenuAvailability,
-  selectQuickGroupColor,
 } from "./same-site-tab-model";
 
 export type SidebarDependencies = {
@@ -59,6 +73,58 @@ export type SidebarDependencies = {
   sessions: SessionsApi;
   document: Document;
 };
+
+function resolveFlatTabDrop(request: TabTreeDropRequest): TabDropTarget | undefined {
+  return request.relation === "sibling" ? request.target : undefined;
+}
+
+/** 从拖拽开始时的解析结果恢复用户原始意图，供 drop 时用最新标签树重新解析。 */
+function requestFromResolvedTarget(target: TabDropTarget): TabTreeDropRequest | undefined {
+  if (target.kind === "group" || !target.tree) return undefined;
+  if (target.tree.relation === "child") {
+    return { relation: "child", parentId: target.tree.referenceId };
+  }
+  if (target.kind === "end") {
+    return { relation: "sibling", target: { kind: "end" } };
+  }
+  if (target.tree.referenceId === undefined) return undefined;
+  return {
+    relation: "sibling",
+    target: {
+      kind: "tab",
+      tabId: target.tree.referenceId,
+      placement: target.placement,
+    },
+  };
+}
+
+/** 精确比较最新解析结果，避免树结构变化后使用陈旧的排序锚点。 */
+function sameResolvedTabTarget(left: TabDropTarget, right: TabDropTarget): boolean {
+  if (left.kind !== right.kind || left.kind === "group" || right.kind === "group") {
+    return false;
+  }
+  if (left.kind === "tab" && right.kind === "tab") {
+    if (left.tabId !== right.tabId || left.placement !== right.placement) return false;
+  }
+  return left.tree?.relation === right.tree?.relation
+    && left.tree?.referenceId === right.tree?.referenceId
+    && left.tree?.depth === right.tree?.depth
+    && left.tree?.parentId === right.tree?.parentId;
+}
+
+function planHasBusyTabs(
+  plan: { operations: readonly SmartGroupOperation[] } | undefined,
+  busyTabIds: ReadonlySet<number>,
+): boolean {
+  return plan?.operations.some((operation) =>
+    operation.tabIds.some((tabId) => busyTabIds.has(tabId))) === true;
+}
+
+function toSmartGroupSnapshot(
+  groups: ReturnType<TabGroupStore["list"]>,
+): chrome.tabGroups.TabGroup[] {
+  return groups.map((group) => ({ ...group, shared: false }));
+}
 
 type SidebarElements = {
   shortcutStrip: HTMLElement;
@@ -78,7 +144,7 @@ type SidebarElements = {
   dialogTitle: HTMLElement;
   shortcutEnabled: HTMLInputElement;
   tabTitleFontSize: HTMLInputElement;
-  newTabBehavior: NodeListOf<HTMLInputElement>;
+  contentTreeEnabled: HTMLInputElement;
   shortcutEditor: HTMLElement;
   shortcutError: HTMLElement;
   shortcutAdd: HTMLButtonElement;
@@ -115,6 +181,10 @@ async function startSidebarInternal(
   const groupActions = createTabGroupActions(deps.tabs, deps.tabGroups);
   const shortcutStore = createShortcutStore(deps.storage);
   const treeSessionStore = createTabTreeSessionStore(deps.sessionStorage);
+  const smartGroupSessionStore = createSmartGroupSessionStore(deps.sessionStorage ?? {
+    get: async () => ({}),
+    set: async () => undefined,
+  });
   const faviconCacheStore = createShortcutFaviconCacheStore(deps.storage);
   const shortcutActions = createShortcutActions(deps.tabs);
   const tabRenderer = createTabRenderer({ list: elements.list, empty: elements.empty });
@@ -144,6 +214,10 @@ async function startSidebarInternal(
   const detachedTabIds = new Set<number>();
   const attachedTabParentIds = new Map<number, number>();
   let treeSessionRevision = 0;
+  // 仅父子关系变化推进版本；展开状态变化不应废弃正在进行的关系事务。
+  let treeRelationRevision = 0;
+  // 模式切换只废弃旧拖放的树关系提交，不影响 child 模式内的并发 session 合并。
+  let treeModeGeneration = 0;
   const replacementTabIds = new Map<number, number>();
   let operationGeneration = 0;
   let reorderBusy = false;
@@ -155,10 +229,27 @@ async function startSidebarInternal(
   let appearanceSettingsBusy = false;
   let restoreRecentlyClosedBusy = false;
   let groupsReady = false;
-  let quickGroupingReady = false;
+  let groupingSnapshotsReady = false;
+  let smartGroupRoleReady = false;
+  let smartGroupingBusy = false;
+  let otherGroupId: number | undefined;
+  let otherGroupConfirmation: {
+    groupId: number;
+    tabIds: readonly number[];
+    windowId: number;
+  } | undefined;
+  let smartGroupingGeneration = 0;
+  let roleRevision = 0;
+  let pendingOtherGroup: {
+    groupId: number;
+    token: number;
+    clear?: Promise<void>;
+  } | undefined;
   const groupTabBusy = new Set<number>();
   const groupToggleBusy = new Set<number>();
   const groupCommandBusy = new Set<number>();
+  const smartGroupingTabIds = new Set<number>();
+  const smartGroupingGroupIds = new Set<number>();
   const pendingGroupMoves = new Map<number, number>();
   const groupMovesCompletedByEvent = new Map<number, number>();
   const statusSlots = {
@@ -234,7 +325,7 @@ async function startSidebarInternal(
   };
 
   const isTreeEnabled = (): boolean =>
-    treeSessionReady && shortcutSettings.newTabBehavior === "child";
+    treeSessionReady && shortcutSettings.contentTreeEnabled;
 
   const renderTabList = (): void => {
     const tabs = tabStore.list();
@@ -316,6 +407,7 @@ async function startSidebarInternal(
     for (const [childId, parentId] of stored.attachedTabParentIds) {
       attachedTabParentIds.set(childId, parentId);
     }
+    treeRelationRevision += 1;
     renderTabList();
     setStatus(
       "operation",
@@ -351,7 +443,7 @@ async function startSidebarInternal(
       form: elements.form,
       enabled: elements.shortcutEnabled,
       fontSize: elements.tabTitleFontSize,
-      newTabBehavior: elements.newTabBehavior,
+      contentTreeEnabled: elements.contentTreeEnabled,
       editor: elements.shortcutEditor,
       error: elements.shortcutError,
       add: elements.shortcutAdd,
@@ -392,10 +484,17 @@ async function startSidebarInternal(
       },
       async onSave(settings) {
         const saved = await shortcutStore.save(settings);
-        if (saved.newTabBehavior === "root") {
+        if (saved.contentTreeEnabled !== shortcutSettings.contentTreeEnabled) {
+          treeModeGeneration += 1;
+          treeSessionRevision += 1;
+        }
+        if (!saved.contentTreeEnabled) {
+          const hadTreeRelations = detachedTabIds.size > 0
+            || attachedTabParentIds.size > 0;
           collapsedTabIds.clear();
           detachedTabIds.clear();
           attachedTabParentIds.clear();
+          if (hadTreeRelations) treeRelationRevision += 1;
           if (currentWindowId !== undefined) {
             void treeSessionStore.clear(currentWindowId).catch(() => undefined);
           }
@@ -442,6 +541,30 @@ async function startSidebarInternal(
     historySearch.setFaviconsByOrigin(favicons);
   };
 
+  /**
+   * 连接角色保存与 Chrome 事件：普通事件需完整成员证据，完整快照只需确认组仍存在。
+   * 这样既不依赖事件先于保存，也不会用本地推测冒充可规划的权威 Store 状态。
+   */
+  const reconcileOtherGroupConfirmation = (authoritative: boolean): void => {
+    const confirmation = otherGroupConfirmation;
+    if (!confirmation || currentWindowId !== confirmation.windowId) return;
+    const group = groupStore.get(confirmation.groupId);
+    if (
+      group?.windowId === confirmation.windowId
+      && (authoritative || confirmation.tabIds.every((tabId) =>
+        tabStore.get(tabId)?.groupId === confirmation.groupId))
+    ) {
+      otherGroupConfirmation = undefined;
+      return;
+    }
+    if (!authoritative || group?.windowId === confirmation.windowId) return;
+
+    otherGroupConfirmation = undefined;
+    otherGroupId = undefined;
+    roleRevision += 1;
+    void smartGroupSessionStore.clearOtherGroup(confirmation.windowId).catch(() => undefined);
+  };
+
   const resyncTabsAndGroups = (reportInitialGroupFailure = false): Promise<void> => {
     if (resyncPromise) {
       if (resyncPhase === "replaying") {
@@ -457,7 +580,7 @@ async function startSidebarInternal(
       try {
         do {
           resyncFollowUpRequested = false;
-          quickGroupingReady = false;
+          groupingSnapshotsReady = false;
           resyncPhase = "querying";
           bufferingEvents = true;
           const tabsSnapshot = Promise.resolve().then(() =>
@@ -487,7 +610,11 @@ async function startSidebarInternal(
           resyncPhase = "replaying";
           const replayed = await finishBufferedEvents();
           if (!active || currentWindowId !== windowId) break;
-          quickGroupingReady = groupsReady;
+          groupingSnapshotsReady = tabsResult.status === "fulfilled" && groupsReady;
+          if (tabsResult.status === "fulfilled" && groupsResult.status === "fulfilled") {
+            reconcileOtherGroupConfirmation(true);
+          }
+          validateStoredOtherGroup();
           if (snapshotApplied || replayed) {
             syncShortcutFavicons();
             renderTabList();
@@ -511,13 +638,174 @@ async function startSidebarInternal(
   };
 
   const runGroupOperation = (tabId: number, start: () => Promise<void>): void => {
-    if (groupTabBusy.has(tabId)) return;
+    if (smartGroupingBusy || groupTabBusy.has(tabId)) return;
     groupTabBusy.add(tabId);
     runTabOperation(
       start(),
       () => groupTabBusy.delete(tabId),
       () => { void resyncTabsAndGroups(); },
     );
+  };
+
+  const groupHasSmartGroupingConflict = (groupId: number): boolean =>
+    smartGroupingGroupIds.has(groupId)
+    || tabStore.list().some((tab) =>
+      tab.groupId === groupId && smartGroupingTabIds.has(tab.id));
+
+  const planHasOrdinaryGroupConflict = (plan: SmartGroupPlan): boolean =>
+    planHasBusyTabs(plan, groupTabBusy)
+    || plan.operations.some((operation) => {
+      if (
+        operation.kind === "reuse"
+        && (groupCommandBusy.has(operation.groupId) || groupToggleBusy.has(operation.groupId))
+      ) return true;
+      return operation.tabIds.some((operationTabId) => {
+        const tab = tabStore.get(operationTabId);
+        return tab !== undefined && tab.groupId >= 0 && (
+          groupCommandBusy.has(tab.groupId) || groupToggleBusy.has(tab.groupId)
+        );
+      });
+    });
+
+  const getValidOtherGroupId = (): number | undefined => {
+    if (otherGroupId === undefined) return undefined;
+    if (otherGroupConfirmation?.groupId === otherGroupId) return undefined;
+    const group = groupStore.get(otherGroupId);
+    if (group?.windowId === currentWindowId) return otherGroupId;
+
+    const staleWindowId = currentWindowId;
+    const staleRevision = ++roleRevision;
+    otherGroupId = undefined;
+    if (staleWindowId !== undefined) {
+      void smartGroupSessionStore.clearOtherGroup(staleWindowId).catch(() => undefined).then(() => {
+        if (!active || currentWindowId !== staleWindowId || roleRevision !== staleRevision) return;
+      });
+    }
+    return undefined;
+  };
+
+  const isSmartGroupingReady = (): boolean =>
+    groupingSnapshotsReady && smartGroupRoleReady && otherGroupConfirmation === undefined;
+
+  const validateStoredOtherGroup = (): void => {
+    if (isSmartGroupingReady()) getValidOtherGroupId();
+  };
+
+  /**
+   * 从最新 Store 重新规划，并在调用 Chrome 前同步占用计划涉及的 tab/group 资源。
+   * executor 每步通过 O(1) Store 读取重验语义，完成后统一释放资源锁。
+   */
+  const runSmartGrouping = (kind: "quick" | "all", tabId: number): void => {
+    if (!isSmartGroupingReady() || smartGroupingBusy) return;
+    const tabs = tabStore.list();
+    if (!tabs.some((tab) => tab.id === tabId)) return;
+    const groups = toSmartGroupSnapshot(groupStore.list());
+    const validOtherGroupId = getValidOtherGroupId();
+    const plan = kind === "quick"
+      ? createQuickGroupPlan(tabs, groups, tabId)
+      : createOneClickGroupPlan(tabs, groups, validOtherGroupId);
+    if (!plan || planHasOrdinaryGroupConflict(plan)) return;
+
+    smartGroupingBusy = true;
+    for (const operation of plan.operations) {
+      for (const operationTabId of operation.tabIds) {
+        smartGroupingTabIds.add(operationTabId);
+      }
+      if (operation.kind === "reuse") smartGroupingGroupIds.add(operation.groupId);
+    }
+    const generation = ++smartGroupingGeneration;
+    const expectedCategories = new Map<number, string>();
+    const tabsById = new Map(tabs.map((tab) => [tab.id, tab]));
+    for (const operation of plan.operations) {
+      for (const operationTabId of operation.tabIds) {
+        const operationTab = tabsById.get(operationTabId);
+        const category = operationTab && classifySmartGroupTab(operationTab);
+        if (category) expectedCategories.set(operationTabId, category.key);
+      }
+    }
+    void executeSmartGroupPlan(plan, {
+      tabs: deps.tabs,
+      tabGroups: deps.tabGroups,
+      validate(operation) {
+        if (!active || generation !== smartGroupingGeneration) return false;
+        const target = kind === "quick"
+          ? tabStore.get(tabId)
+          : undefined;
+        if (kind === "quick" && (!target || target.windowId !== plan.windowId)) return false;
+        if (operation.kind === "reuse") {
+          const group = groupStore.get(operation.groupId);
+          if (group?.windowId !== plan.windowId) return false;
+        }
+        return operation.tabIds.every((operationTabId) => {
+          const tab = tabStore.get(operationTabId);
+          if (!tab || tab.windowId !== plan.windowId || tab.pinned) return false;
+          const category = classifySmartGroupTab(tab);
+          if (category?.key !== expectedCategories.get(operationTabId)) return false;
+          return kind === "all"
+            ? tab.groupId === TAB_GROUP_ID_NONE
+            : operation.kind !== "reuse" || tab.groupId !== operation.groupId;
+        });
+      },
+      async onOtherGroupCreated(groupId) {
+        const windowId = currentWindowId;
+        const token = ++roleRevision;
+        const operation = plan.operations.find((candidate) =>
+          candidate.kind === "create" && candidate.role === "other");
+        if (!active || windowId !== plan.windowId || generation !== smartGroupingGeneration) {
+          throw new Error("智能分组会话已失效");
+        }
+        if (!operation || operation.kind !== "create") {
+          throw new Error("Other 分组计划已失效");
+        }
+        pendingOtherGroup = { groupId, token };
+        try {
+          await smartGroupSessionStore.saveOtherGroup(windowId, groupId);
+          if (
+            !active
+            || currentWindowId !== windowId
+            || generation !== smartGroupingGeneration
+            || roleRevision !== token
+          ) {
+            await (
+              pendingOtherGroup?.clear
+              ?? smartGroupSessionStore.clearOtherGroup(windowId)
+            );
+            throw new Error("Other 分组角色已失效");
+          }
+          otherGroupId = groupId;
+          otherGroupConfirmation = {
+            groupId,
+            windowId,
+            tabIds: operation.tabIds,
+          };
+          reconcileOtherGroupConfirmation(false);
+          roleRevision += 1;
+        } finally {
+          if (pendingOtherGroup?.token === token) pendingOtherGroup = undefined;
+        }
+      },
+    }).then(
+      () => {
+        if (active && generation === smartGroupingGeneration) setStatus("operation", "");
+      },
+      (error: unknown) => {
+        if (!active || generation !== smartGroupingGeneration) return;
+        const partial = error instanceof SmartGroupExecutionError && error.partial;
+        setStatus(
+          "operation",
+          kind === "quick"
+            ? "同网站快速分组失败"
+            : partial ? "一键分组部分失败" : "一键分组失败",
+        );
+        void resyncTabsAndGroups();
+      },
+    ).finally(() => {
+      if (generation === smartGroupingGeneration) {
+        smartGroupingTabIds.clear();
+        smartGroupingGroupIds.clear();
+        if (active) smartGroupingBusy = false;
+      }
+    });
   };
 
   const groupDialog = createTabGroupDialog(
@@ -599,7 +887,7 @@ async function startSidebarInternal(
 
   const updateDragEnabled = (): void => {
     const dragInteractionsReady = shortcutSettingsReady && (
-      shortcutSettings.newTabBehavior !== "child" || treeSessionReady
+      !shortcutSettings.contentTreeEnabled || treeSessionReady
     );
     tabRenderer.setDragEnabled(dragInteractionsReady);
     if (dragInteractionsReady) tabRenderer.setTabDragEnabled(!reorderBusy);
@@ -618,21 +906,31 @@ async function startSidebarInternal(
         const tabs = tabStore.list();
         const tab = tabs.find((candidate) => candidate.id === id);
         if (!tab) return undefined;
-        const sameSite = getSameSiteMenuAvailability(
-          tabs,
-          id,
-          (tabId) => groupTabBusy.has(tabId),
-        );
+        const groups = toSmartGroupSnapshot(groupStore.list());
+        const ready = isSmartGroupingReady();
+        const busy = smartGroupingBusy;
+        const quickPlan = createQuickGroupPlan(tabs, groups, id);
+        const allPlan = createOneClickGroupPlan(tabs, groups, getValidOtherGroupId());
+        const subtreeIds = isTreeEnabled()
+          ? getTabSubtreeIds(tabs, id, detachedTabIds, attachedTabParentIds)
+          : [];
         return {
           tab,
-          canDuplicate: shortcutSettings.newTabBehavior !== "child" || treeSessionReady,
+          canDuplicate: !shortcutSettings.contentTreeEnabled || treeSessionReady,
           canCloseBelow: getClosableTabsBelow(tabs, id).length > 0,
           canCloseAbove: getClosableTabsAbove(tabs, id).length > 0,
           canOpenAllShortcuts: shortcutSettingsReady
             && shortcutSettings.enabled
             && getShortcutUrlsToOpen(shortcutSettings.items, tabs).length > 0,
-          ...sameSite,
-          canGroupSameSite: quickGroupingReady && sameSite.canGroupSameSite,
+          canQuickGroupSameSite: ready && !busy
+            && quickPlan !== undefined
+            && !planHasOrdinaryGroupConflict(quickPlan),
+          canGroupAll: ready && !busy
+            && allPlan !== undefined
+            && !planHasOrdinaryGroupConflict(allPlan),
+          canCloseOtherSameSite: getOtherSameSiteTabIds(tabs, id).length > 0,
+          canDissolveTree: subtreeIds.length > 1,
+          canDeleteSubtree: subtreeIds.length > 1,
         };
       },
       getGroups: () => groupStore.list(),
@@ -646,6 +944,37 @@ async function startSidebarInternal(
         if (command.action === "close-below") {
           const tabIds = getClosableTabsBelow(tabStore.list(), command.tabId);
           runTabOperation(tabActions.closeMany(tabIds));
+          return;
+        }
+        if (command.action === "dissolve-tree") {
+          if (!isTreeEnabled()) return;
+          const subtreeIds = getTabSubtreeIds(
+            tabStore.list(),
+            command.tabId,
+            detachedTabIds,
+            attachedTabParentIds,
+          );
+          if (subtreeIds.length <= 1) return;
+          for (const tabId of subtreeIds) {
+            collapsedTabIds.delete(tabId);
+            attachedTabParentIds.delete(tabId);
+            detachedTabIds.add(tabId);
+          }
+          treeRelationRevision += 1;
+          renderTabList();
+          persistTreeSession();
+          return;
+        }
+        if (command.action === "delete-subtree") {
+          if (!isTreeEnabled()) return;
+          const subtreeIds = getTabSubtreeIds(
+            tabStore.list(),
+            command.tabId,
+            detachedTabIds,
+            attachedTabParentIds,
+          );
+          if (subtreeIds.length <= 1) return;
+          runTabOperation(tabActions.closeSubtree(subtreeIds));
           return;
         }
         if (command.action === "close-above") {
@@ -665,20 +994,11 @@ async function startSidebarInternal(
           return;
         }
         if (command.action === "group-same-site") {
-          if (!quickGroupingReady) return;
-          const plan = createSameSiteGroupPlan(tabStore.list(), command.tabId);
-          if (!plan || plan.tabIds.some((tabId) => groupTabBusy.has(tabId))) return;
-          for (const tabId of plan.tabIds) groupTabBusy.add(tabId);
-          runTabOperation(
-            groupActions.createSameSite({
-              ...plan,
-              color: selectQuickGroupColor(groupStore.list(), plan.windowId),
-            }).then(() => undefined),
-            () => {
-              for (const tabId of plan.tabIds) groupTabBusy.delete(tabId);
-            },
-            () => { void resyncTabsAndGroups(); },
-          );
+          runSmartGrouping("quick", command.tabId);
+          return;
+        }
+        if (command.action === "group-all") {
+          runSmartGrouping("all", command.tabId);
           return;
         }
         if (command.action === "create-group") {
@@ -697,7 +1017,7 @@ async function startSidebarInternal(
           return;
         }
         if (command.action === "duplicate") {
-          if (shortcutSettings.newTabBehavior === "child" && !treeSessionReady) return;
+          if (shortcutSettings.contentTreeEnabled && !treeSessionReady) return;
           runTabOperation(tabActions.duplicate(command.tabId).then((duplicatedTabId) => {
             if (
               duplicatedTabId !== undefined &&
@@ -705,6 +1025,7 @@ async function startSidebarInternal(
             ) {
               detachedTabIds.add(duplicatedTabId);
               attachedTabParentIds.delete(duplicatedTabId);
+              treeRelationRevision += 1;
               persistTreeSession();
               renderTabList();
             }
@@ -734,7 +1055,12 @@ async function startSidebarInternal(
     start: () => Promise<void>,
     moveGroupId?: number,
   ): Promise<void> => {
-    if (!active || groupCommandBusy.has(groupId) || groupToggleBusy.has(groupId)) return;
+    if (
+      !active
+      || groupCommandBusy.has(groupId)
+      || groupToggleBusy.has(groupId)
+      || groupHasSmartGroupingConflict(groupId)
+    ) return;
     dragController?.cancelForGroup(groupId);
     groupCommandBusy.add(groupId);
     const generation = ++operationGeneration;
@@ -786,7 +1112,11 @@ async function startSidebarInternal(
     {
       async onSave({ groupId, title }) {
         if (!groupStore.get(groupId)) return;
-        if (groupCommandBusy.has(groupId) || groupToggleBusy.has(groupId)) {
+        if (
+          groupCommandBusy.has(groupId)
+          || groupToggleBusy.has(groupId)
+          || groupHasSmartGroupingConflict(groupId)
+        ) {
           throw new Error("标签组操作正在进行");
         }
         await executeGroupCommand(groupId, () => groupActions.rename(groupId, title));
@@ -799,7 +1129,9 @@ async function startSidebarInternal(
     {
       getGroup: (groupId) => groupStore.get(groupId),
       isGroupBusy: (groupId) =>
-        groupCommandBusy.has(groupId) || groupToggleBusy.has(groupId),
+        groupCommandBusy.has(groupId)
+        || groupToggleBusy.has(groupId)
+        || groupHasSmartGroupingConflict(groupId),
       onBeforeOpen: () => contextMenu.close(),
       onCommand(command) {
         const group = groupStore.get(command.groupId);
@@ -840,15 +1172,16 @@ async function startSidebarInternal(
     {
       canStartGroupDrag: (groupId) =>
         shortcutSettingsReady
-        && (shortcutSettings.newTabBehavior !== "child" || treeSessionReady)
+        && (!shortcutSettings.contentTreeEnabled || treeSessionReady)
         && Boolean(groupStore.get(groupId))
         && !groupCommandBusy.has(groupId)
-        && !groupToggleBusy.has(groupId),
+        && !groupToggleBusy.has(groupId)
+        && !groupHasSmartGroupingConflict(groupId),
       prepareTabDrag: (sourceId) => {
-        if (!isTreeEnabled()) return (target) => target;
+        if (!isTreeEnabled()) return resolveFlatTabDrop;
         const tabs = tabStore.list();
         const source = tabs.find((tab) => tab.id === sourceId);
-        if (!source || source.pinned || source.groupId >= 0) return (target) => target;
+        if (!source || source.pinned || source.groupId >= 0) return resolveFlatTabDrop;
         return createTabTreeDropResolver(
           tabs,
           sourceId,
@@ -863,34 +1196,29 @@ async function startSidebarInternal(
         if (!source) return false;
         if (target.kind === "group") return Boolean(groupStore.get(target.groupId));
         if (!isTreeEnabled() || source.pinned || source.groupId >= 0) {
+          if (target.tree !== undefined) return false;
           return target.kind === "end"
             || latestTabs.some((tab) => tab.id === target.tabId);
         }
-        const baseTarget = target.kind === "end"
-          ? { kind: "end" as const }
-          : { kind: "tab" as const, tabId: target.tabId, placement: target.placement };
+        const request = requestFromResolvedTarget(target);
+        if (!request) return false;
         const latestTarget = createTabTreeDropResolver(
           latestTabs,
           sourceId,
           collapsedTabIds,
           detachedTabIds,
           attachedTabParentIds,
-        )(baseTarget, target.tree?.depth ?? 0);
-        if (!latestTarget || latestTarget.kind !== target.kind) return false;
-        if (latestTarget.kind === "end" && target.kind === "end") {
-          return latestTarget.tree?.depth === target.tree?.depth
-            && latestTarget.tree?.parentId === target.tree?.parentId;
-        }
-        return latestTarget.kind === "tab" && target.kind === "tab"
-          && latestTarget.tabId === target.tabId
-          && latestTarget.placement === target.placement
-          && latestTarget.tree?.depth === target.tree?.depth
-          && latestTarget.tree?.parentId === target.tree?.parentId;
+        )(request);
+        return latestTarget !== undefined && sameResolvedTabTarget(latestTarget, target);
       },
       onDrop(intent: TabDragIntent) {
         if (intent.kind === "group") {
           const groupId = intent.sourceGroupId;
-          if (groupCommandBusy.has(groupId) || groupToggleBusy.has(groupId)) return;
+          if (
+            groupCommandBusy.has(groupId)
+            || groupToggleBusy.has(groupId)
+            || groupHasSmartGroupingConflict(groupId)
+          ) return;
           const plan = createTabGroupReorderPlan(
             tabStore.list(),
             groupStore.list(),
@@ -921,8 +1249,9 @@ async function startSidebarInternal(
         const treePlacement = intent.target.kind !== "group"
           ? intent.target.tree
           : undefined;
+        const movesToNativeGroup = intent.target.kind === "group";
         const hasExplicitTreePlacement = isTreeEnabled()
-          && (treePlacement !== undefined || intent.target.kind === "group");
+          && (treePlacement !== undefined || movesToNativeGroup);
         const attachmentParentId = treePlacement?.parentId;
         const blockPlan = sourceIds.length > 1
           ? createTabBlockReorderPlan(tabs, sourceIds, intent.target)
@@ -936,21 +1265,35 @@ async function startSidebarInternal(
         const shouldAttach = hasExplicitTreePlacement
           && attachmentParentId !== undefined
           && attachmentParentId !== currentParentId;
-        const shouldExpandParent = attachmentParentId !== undefined
+        const shouldExpandParent = treePlacement?.relation === "child"
+          && attachmentParentId !== undefined
           && collapsedTabIds.has(attachmentParentId);
+        const preparedTreeModeGeneration = treeModeGeneration;
+        const preparedTreeRelationRevision = treeRelationRevision;
         const applyTreeMutation = async (): Promise<void> => {
+          if (
+            !isTreeEnabled()
+            || treeModeGeneration !== preparedTreeModeGeneration
+            || treeRelationRevision !== preparedTreeRelationRevision
+          ) return;
           const latestTabs = tabStore.list();
           const latestSource = latestTabs.find((tab) => tab.id === intent.sourceId);
           const latestParent = attachmentParentId === undefined
             ? undefined
             : latestTabs.find((tab) => tab.id === attachmentParentId);
-          const invalidAttachment = shouldAttach && (
+          if (
             !latestSource
-            || !latestParent
-            || latestSource.windowId !== latestParent.windowId
             || latestSource.pinned
+            || (!movesToNativeGroup && latestSource.groupId >= 0)
+          ) {
+            await resyncTabsAndGroups();
+            return;
+          }
+          const invalidAttachment = shouldAttach && (
+            !latestParent
+            || latestSource.windowId !== latestParent.windowId
             || latestParent.pinned
-            || latestSource.groupId !== latestParent.groupId
+            || latestParent.groupId >= 0
             || getTabSubtreeIds(
               latestTabs,
               intent.sourceId,
@@ -958,16 +1301,18 @@ async function startSidebarInternal(
               attachedTabParentIds,
             ).includes(attachmentParentId!)
           );
-          if (!latestSource || invalidAttachment) {
+          if (invalidAttachment) {
             await resyncTabsAndGroups();
             return;
           }
           if (shouldAttach && attachmentParentId !== undefined) {
             attachedTabParentIds.set(intent.sourceId, attachmentParentId);
             detachedTabIds.delete(intent.sourceId);
+            treeRelationRevision += 1;
           } else if (shouldDetach) {
             attachedTabParentIds.delete(intent.sourceId);
             detachedTabIds.add(intent.sourceId);
+            treeRelationRevision += 1;
           }
           if (shouldExpandParent && attachmentParentId !== undefined) {
             collapsedTabIds.delete(attachmentParentId);
@@ -1024,7 +1369,7 @@ async function startSidebarInternal(
   const onNewTabClick = (): void => {
     if (elements.newTabButton.disabled) return;
     elements.newTabButton.disabled = true;
-    const openerTabId = shortcutSettings.newTabBehavior === "child"
+    const openerTabId = shortcutSettings.contentTreeEnabled
       ? tabStore.list().find((tab) => tab.active)?.id
       : undefined;
     runTabOperation(tabActions.create(openerTabId), () => {
@@ -1071,6 +1416,8 @@ async function startSidebarInternal(
       return;
     }
     active = false;
+    smartGroupingGeneration += 1;
+    roleRevision += 1;
     pendingGroupMoves.clear();
     groupMovesCompletedByEvent.clear();
     unsubscribeTabs();
@@ -1123,7 +1470,8 @@ async function startSidebarInternal(
       if (
         !group ||
         groupToggleBusy.has(group.id) ||
-        groupCommandBusy.has(group.id)
+        groupCommandBusy.has(group.id) ||
+        groupHasSmartGroupingConflict(group.id)
       ) return;
       groupToggleBusy.add(group.id);
       dragController?.cancelForGroup(group.id);
@@ -1222,11 +1570,14 @@ async function startSidebarInternal(
       () => {
         tabStore.remove(tabId);
         collapsedTabIds.delete(tabId);
-        detachedTabIds.delete(tabId);
-        attachedTabParentIds.delete(tabId);
+        let relationChanged = detachedTabIds.delete(tabId);
+        relationChanged = attachedTabParentIds.delete(tabId) || relationChanged;
         for (const [childId, parentId] of attachedTabParentIds) {
-          if (parentId === tabId) attachedTabParentIds.delete(childId);
+          if (parentId === tabId) {
+            relationChanged = attachedTabParentIds.delete(childId) || relationChanged;
+          }
         }
+        if (relationChanged) treeRelationRevision += 1;
         persistTreeSession();
       },
       renderTabList,
@@ -1240,15 +1591,21 @@ async function startSidebarInternal(
     if (tab.id === undefined) return;
     replacementTabIds.set(removedTabId, tab.id);
     if (collapsedTabIds.delete(removedTabId)) collapsedTabIds.add(tab.id);
-    if (detachedTabIds.delete(removedTabId)) detachedTabIds.add(tab.id);
+    let relationChanged = detachedTabIds.delete(removedTabId);
+    if (relationChanged) detachedTabIds.add(tab.id);
     const replacementParentId = attachedTabParentIds.get(removedTabId);
     if (replacementParentId !== undefined) {
       attachedTabParentIds.delete(removedTabId);
       attachedTabParentIds.set(tab.id, replacementParentId);
+      relationChanged = true;
     }
     for (const [childId, parentId] of attachedTabParentIds) {
-      if (parentId === removedTabId) attachedTabParentIds.set(childId, tab.id);
+      if (parentId === removedTabId) {
+        attachedTabParentIds.set(childId, tab.id);
+        relationChanged = true;
+      }
     }
+    if (relationChanged) treeRelationRevision += 1;
     persistTreeSession();
   };
 
@@ -1257,6 +1614,7 @@ async function startSidebarInternal(
       applyEvent(
         () => {
           tabStore.add(tab);
+          reconcileOtherGroupConfirmation(false);
           if (isTreeEnabled() && tab.active && tab.id !== undefined) {
             let expanded = false;
             for (const ancestorId of getTabTreeAncestorIds(
@@ -1311,6 +1669,7 @@ async function startSidebarInternal(
             ? undefined
             : tabs.find((item) => item.id === tab.id);
           model = tabStore.replace(tab);
+          reconcileOtherGroupConfirmation(false);
           if (previous && model && previous.pinned !== model.pinned) {
             contextMenu.closeForTab(model.id);
           }
@@ -1374,6 +1733,7 @@ async function startSidebarInternal(
       applyEvent(
         () => {
           if (currentWindowId !== undefined) groupStore.put(group, currentWindowId);
+          reconcileOtherGroupConfirmation(false);
         },
         renderTabList,
       );
@@ -1385,6 +1745,7 @@ async function startSidebarInternal(
         () => {
           previous = groupStore.get(group.id);
           if (currentWindowId !== undefined) model = groupStore.put(group, currentWindowId);
+          reconcileOtherGroupConfirmation(false);
         },
         () => {
           if (!model) return;
@@ -1423,6 +1784,21 @@ async function startSidebarInternal(
       groupContextMenu?.closeForGroup(groupId);
       groupRenameDialog.closeForGroup(groupId);
       dragController?.cancelForGroup(groupId);
+      if (
+        groupId === otherGroupId
+        || groupId === pendingOtherGroup?.groupId
+        || groupId === otherGroupConfirmation?.groupId
+      ) {
+        const windowId = currentWindowId;
+        otherGroupId = undefined;
+        if (otherGroupConfirmation?.groupId === groupId) otherGroupConfirmation = undefined;
+        roleRevision += 1;
+        if (windowId !== undefined) {
+          const clear = smartGroupSessionStore.clearOtherGroup(windowId);
+          if (groupId === pendingOtherGroup?.groupId) pendingOtherGroup.clear = clear;
+          void clear.catch(() => undefined);
+        }
+      }
       applyEvent(
         () => {
           groupStore.remove(groupId);
@@ -1591,6 +1967,13 @@ async function startSidebarInternal(
     if (!active) return cleanup;
 
     currentWindowId = windowId;
+    const roleLoadRevision = roleRevision;
+    void smartGroupSessionStore.load(windowId).then((state) => {
+      if (!active || currentWindowId !== windowId || roleRevision !== roleLoadRevision) return;
+      otherGroupId = state.otherGroupId;
+      smartGroupRoleReady = true;
+      validateStoredOtherGroup();
+    });
     void Promise.all([
       loadShortcuts,
       treeSessionStore.load(windowId).catch(() => ({
@@ -1603,7 +1986,7 @@ async function startSidebarInternal(
       collapsedTabIds.clear();
       detachedTabIds.clear();
       attachedTabParentIds.clear();
-      if (shortcutSettings.newTabBehavior === "child") {
+      if (shortcutSettings.contentTreeEnabled) {
         copyMigratedIds(treeState.collapsedTabIds, collapsedTabIds, replacementTabIds);
         copyMigratedIds(treeState.detachedTabIds, detachedTabIds, replacementTabIds);
         copyMigratedParentIds(
@@ -1704,9 +2087,7 @@ function getSidebarElements(document: Document): SidebarElements {
     dialogTitle: requireElement(document, "shortcut-dialog-title", HTMLElement),
     shortcutEnabled: requireElement(document, "shortcut-enabled", HTMLInputElement),
     tabTitleFontSize: requireElement(document, "tab-title-font-size", HTMLInputElement),
-    newTabBehavior: document.querySelectorAll<HTMLInputElement>(
-      "input[type='radio'][name='new-tab-behavior']",
-    ),
+    contentTreeEnabled: requireElement(document, "content-tree-enabled", HTMLInputElement),
     shortcutEditor: requireElement(document, "shortcut-editor-list", HTMLElement),
     shortcutError: requireElement(document, "shortcut-error", HTMLElement),
     shortcutAdd: requireElement(document, "shortcut-add", HTMLButtonElement),

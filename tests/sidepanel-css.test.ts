@@ -1,8 +1,30 @@
 import { readFileSync } from "node:fs";
-import postcss from "postcss";
+import postcss, { type Container, type Rule } from "postcss";
 import { describe, expect, it } from "vitest";
 
 const css = readFileSync("src/sidepanel/sidebar.css", "utf8");
+const stylesheet = postcss.parse(css);
+
+function findRule(container: Container, selector: string): Rule | undefined {
+  return (container.nodes ?? []).find(
+    (node): node is Rule => node.type === "rule" && node.selectors.includes(selector),
+  );
+}
+
+function findMedia(params: string): Container | undefined {
+  const media = stylesheet.nodes.find(
+    (node) => node.type === "atrule" && node.name === "media" && node.params === params,
+  );
+  return media?.type === "atrule" ? media : undefined;
+}
+
+function declarations(rule: Rule | undefined): Map<string, string> {
+  const values = new Map<string, string>();
+  rule?.walkDecls((declaration) => {
+    values.set(declaration.prop, declaration.value);
+  });
+  return values;
+}
 
 function relativeLuminance(hex: string): number {
   const channels = hex.match(/[0-9a-f]{2}/gi)?.map((channel) => parseInt(channel, 16) / 255);
@@ -249,6 +271,12 @@ describe("side panel responsive CSS", () => {
       /\.locate-active-tab-button::before\s*{[^}]*width:\s*20px[^}]*height:\s*20px[^}]*mask:\s*url\("\.\.\/assets\/icons\/locate\.svg"\)/s,
     );
     expect(css).toMatch(/button:focus-visible[^}]*outline:/s);
+  });
+
+  it("pushes the locate control to the inline end of the shortcut strip", () => {
+    expect(css).toMatch(
+      /\.locate-active-tab-button\s*\{[^}]*margin-inline-start:\s*auto/s,
+    );
   });
 
   it("uses Microsoft YaHei first for tab titles while retaining the size variable", () => {
@@ -588,6 +616,66 @@ describe("side panel responsive CSS", () => {
     expect(css).toMatch(/inset-inline-start:\s*var\(--drop-depth-indent, 4px\)/s);
     expect(css).toMatch(/inset-inline-end:\s*4px/s);
     expect(css).not.toMatch(/--drop-depth-indent[^;]*transition/);
+  });
+
+  it("highlights child drop targets without shifting tab row layout", () => {
+    const childTargetSelector = '.tab-row[data-drop-child-target="true"]';
+    const childTargetRule = findRule(stylesheet, childTargetSelector);
+    const childTargetStyles = declarations(childTargetRule);
+    expect(childTargetRule).toBeDefined();
+    expect(childTargetRule?.selectors).toContain(`${childTargetSelector}:hover`);
+    expect(childTargetStyles.get("background")).toBe(
+      "color-mix(in srgb, AccentColor 14%, Canvas)",
+    );
+    expect(childTargetStyles.get("outline")).toBe("2px solid AccentColor");
+    expect(childTargetStyles.get("outline-offset")).toBe("-2px");
+    for (const property of [
+      "transition", "border", "margin", "padding", "width", "height",
+    ]) {
+      expect(childTargetStyles.has(property)).toBe(false);
+    }
+
+    const childTargetIndex = stylesheet.nodes.indexOf(childTargetRule!);
+    for (const selector of [
+      '.tab-row[data-active="true"]',
+      '.tab-row[data-context-selected="true"]',
+      '.tab-row:hover:not([data-active="true"])',
+    ]) {
+      expect(childTargetIndex).toBeGreaterThan(
+        stylesheet.nodes.indexOf(findRule(stylesheet, selector)!),
+      );
+    }
+
+    const darkStyles = declarations(
+      findRule(findMedia("(prefers-color-scheme: dark)")!, childTargetSelector),
+    );
+    expect(darkStyles.get("background")).toBe(
+      "color-mix(in srgb, AccentColor 22%, Canvas)",
+    );
+    expect(darkStyles.has("outline")).toBe(false);
+
+    const forcedMedia = findMedia("(forced-colors: active)")!;
+    const forcedChildRule = findRule(forcedMedia, childTargetSelector);
+    const forcedStyles = declarations(forcedChildRule);
+    expect(forcedStyles.get("background")).toBe("Highlight");
+    expect(forcedStyles.get("color")).toBe("HighlightText");
+    expect(forcedStyles.get("outline")).toBe("2px solid Highlight");
+    expect(forcedStyles.get("outline-offset")).toBe("-2px");
+    const forcedNodes = forcedMedia.nodes ?? [];
+    expect(forcedNodes.indexOf(forcedChildRule!)).toBeGreaterThan(
+      forcedNodes.indexOf(
+        findRule(forcedMedia, '.tab-row[data-context-selected="true"]')!,
+      ),
+    );
+
+    expect(findRule(stylesheet, '.tab-row[data-drop-placement="before"]::before')).toBeDefined();
+    expect(findRule(stylesheet, '.tab-row[data-drop-placement="after"]::after')).toBeDefined();
+    const siblingLineStyles = declarations(
+      findRule(stylesheet, '.tab-row[data-drop-placement="before"]::before'),
+    );
+    expect(siblingLineStyles.get("inset-inline-start")).toBe(
+      "var(--drop-depth-indent, 4px)",
+    );
   });
 
   it("uses adaptive menu surfaces and inert context separators", () => {

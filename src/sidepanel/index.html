@@ -100,19 +100,12 @@
           </div>
         </section>
 
-        <section class="settings-section" aria-labelledby="new-tab-behavior-heading">
-          <h3 id="new-tab-behavior-heading">新 Tab 行为</h3>
-          <fieldset class="new-tab-behavior-options">
-            <legend class="visually-hidden">新 Tab 打开方式</legend>
-            <label>
-              <input type="radio" name="new-tab-behavior" value="root" checked />
-              <span>无父节点</span>
-            </label>
-            <label>
-              <input type="radio" name="new-tab-behavior" value="child" />
-              <span>作为当前 Tab 子节点</span>
-            </label>
-          </fieldset>
+        <section class="settings-section" aria-labelledby="content-tree-heading">
+          <h3 id="content-tree-heading">内容树</h3>
+          <label class="toggle-label" for="content-tree-enabled">
+            <input id="content-tree-enabled" type="checkbox" />
+            <span>启用内容树</span>
+          </label>
         </section>
 
         <section class="settings-section" aria-labelledby="shortcuts-heading">

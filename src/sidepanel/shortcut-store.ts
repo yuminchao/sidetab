@@ -60,7 +60,7 @@ function copySettings(settings: ShortcutSettings): ShortcutSettings {
   return {
     enabled: settings.enabled,
     tabTitleFontSize: settings.tabTitleFontSize,
-    newTabBehavior: settings.newTabBehavior,
+    contentTreeEnabled: settings.contentTreeEnabled,
     items: settings.items.map((item) => ({ ...item })),
   };
 }

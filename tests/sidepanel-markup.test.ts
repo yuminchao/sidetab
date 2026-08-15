@@ -7,6 +7,19 @@ const document = new DOMParser().parseFromString(
 );
 
 describe("side panel settings markup", () => {
+  it("provides one disabled-by-default content tree toggle", () => {
+    const toggle = document.querySelector<HTMLInputElement>("#content-tree-enabled");
+    const label = document.querySelector<HTMLLabelElement>(
+      "label[for='content-tree-enabled']",
+    );
+
+    expect(toggle?.type).toBe("checkbox");
+    expect(toggle?.checked).toBe(false);
+    expect(label?.textContent).toContain("内容树");
+    expect(document.querySelectorAll('input[name="new-tab-behavior"]')).toHaveLength(0);
+    expect(document.body.textContent).not.toContain("新 Tab 行为");
+  });
+
   it("renders the accessible new-tab control with a centered text glyph", () => {
     const button = document.querySelector<HTMLButtonElement>("#new-tab-button");
     const glyph = button?.querySelector<HTMLElement>(".new-tab-glyph");

@@ -24,7 +24,7 @@ function settings(overrides: Partial<ShortcutSettings> = {}): ShortcutSettings {
   return {
     enabled: true,
     tabTitleFontSize: 14,
-    newTabBehavior: "root",
+    contentTreeEnabled: false,
     items: [shortcut()],
     ...overrides,
   };
@@ -43,15 +43,9 @@ function createFixture(): ShortcutRendererElements & {
   enabled.type = "checkbox";
   const fontSize = document.createElement("input");
   fontSize.type = "number";
-  const rootBehavior = document.createElement("input");
-  rootBehavior.type = "radio";
-  rootBehavior.name = "new-tab-behavior";
-  rootBehavior.value = "root";
-  rootBehavior.checked = true;
-  const childBehavior = document.createElement("input");
-  childBehavior.type = "radio";
-  childBehavior.name = "new-tab-behavior";
-  childBehavior.value = "child";
+  const contentTreeEnabled = document.createElement("input");
+  contentTreeEnabled.id = "content-tree-enabled";
+  contentTreeEnabled.type = "checkbox";
   const editor = document.createElement("div");
   const error = document.createElement("p");
   const add = document.createElement("button");
@@ -66,8 +60,7 @@ function createFixture(): ShortcutRendererElements & {
   form.append(
     fontSize,
     enabled,
-    rootBehavior,
-    childBehavior,
+    contentTreeEnabled,
     editor,
     error,
     add,
@@ -90,7 +83,7 @@ function createFixture(): ShortcutRendererElements & {
     form,
     fontSize,
     enabled,
-    newTabBehavior: form.querySelectorAll<HTMLInputElement>("[name='new-tab-behavior']"),
+    contentTreeEnabled: form.querySelector<HTMLInputElement>("#content-tree-enabled")!,
     editor,
     error,
     add,
@@ -517,24 +510,27 @@ describe("shortcut renderer", () => {
 
   it("opens settings from the gear with an isolated current-settings draft", () => {
     const renderer = createShortcutRenderer(elements, { onOpen, onSave });
-    renderer.render(settings());
+    renderer.render(settings({ contentTreeEnabled: true }));
 
     click(elements.settingsButton);
     const name = elements.editor.querySelector<HTMLInputElement>(".shortcut-name");
     expect(elements.dialog.showModal).toHaveBeenCalledOnce();
     expect(elements.dialog.open).toBe(true);
     expect(elements.enabled.checked).toBe(true);
+    expect(elements.contentTreeEnabled.checked).toBe(true);
     expect(name?.value).toBe("Example");
 
     if (name) {
       name.value = "Unsaved";
       name.dispatchEvent(new Event("input", { bubbles: true }));
     }
+    elements.contentTreeEnabled.checked = false;
     click(elements.cancel);
     click(elements.settingsButton);
     expect(elements.editor.querySelector<HTMLInputElement>(".shortcut-name")?.value).toBe(
       "Example",
     );
+    expect(elements.contentTreeEnabled.checked).toBe(true);
     expect(onSave).not.toHaveBeenCalled();
   });
 
@@ -583,7 +579,7 @@ describe("shortcut renderer", () => {
     expect(onSave).toHaveBeenCalledWith({
       enabled: true,
       tabTitleFontSize: 14,
-      newTabBehavior: "root",
+      contentTreeEnabled: false,
       items: [shortcut({ name: "Saved name" })],
     });
     expect(elements.strip.querySelector(".shortcut-button")?.getAttribute("title")).toBe(
@@ -803,6 +799,7 @@ describe("shortcut renderer", () => {
     click(elements.reset);
 
     expect(elements.enabled.checked).toBe(true);
+    expect(elements.contentTreeEnabled.checked).toBe(false);
     expect(Array.from(elements.editor.querySelectorAll<HTMLInputElement>(".shortcut-name"), (input) => input.value)).toEqual([
       "OpenAI",
       "Google",

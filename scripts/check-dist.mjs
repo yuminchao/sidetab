@@ -17,6 +17,7 @@ const expectedFileSet = new Set(EXPECTED_FILES);
 const expectedManifestKeys = [
   "action",
   "background",
+  "commands",
   "content_security_policy",
   "description",
   "icons",
@@ -351,6 +352,12 @@ export async function checkDist(distDirectory) {
   assert(!Object.hasOwn(manifest, "host_permissions"), "host_permissions must not be present");
   assert(!Object.hasOwn(manifest, "content_scripts"), "content_scripts must not be present");
   assert(manifest.minimum_chrome_version === "114", "minimum_chrome_version must be 114");
+  assert(
+    JSON.stringify(manifest.commands) === JSON.stringify({
+      _execute_action: { suggested_key: { default: "Alt+V" } },
+    }),
+    "extension action shortcut must be exactly Alt+V",
+  );
   validateExtensionCsp(manifest.content_security_policy?.extension_pages);
 
   const manifestPaths = [

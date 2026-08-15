@@ -14,7 +14,7 @@ export type ShortcutRendererElements = {
   form: HTMLFormElement;
   enabled: HTMLInputElement;
   fontSize: HTMLInputElement;
-  newTabBehavior: NodeListOf<HTMLInputElement>;
+  contentTreeEnabled: HTMLInputElement;
   editor: HTMLElement;
   error: HTMLElement;
   add: HTMLButtonElement;
@@ -129,7 +129,7 @@ export function createShortcutRenderer(
     };
     elements.enabled.checked = session.draft.enabled;
     elements.fontSize.value = String(session.draft.tabTitleFontSize);
-    setNewTabBehavior(elements.newTabBehavior, session.draft.newTabBehavior);
+    elements.contentTreeEnabled.checked = session.draft.contentTreeEnabled;
     setError("");
     renderEditor();
     if (!elements.dialog.open) {
@@ -144,7 +144,7 @@ export function createShortcutRenderer(
     }
 
     editorSession.draft.enabled = elements.enabled.checked;
-    editorSession.draft.newTabBehavior = readNewTabBehavior(elements.newTabBehavior);
+    editorSession.draft.contentTreeEnabled = elements.contentTreeEnabled.checked;
     Array.from(elements.editor.children).forEach((child, index) => {
       const item = editorSession.draft.items[index];
       if (!item || !(child instanceof HTMLElement)) {
@@ -328,7 +328,7 @@ export function createShortcutRenderer(
     session.draft = createDefaultShortcutSettings();
     elements.enabled.checked = session.draft.enabled;
     elements.fontSize.value = String(session.draft.tabTitleFontSize);
-    setNewTabBehavior(elements.newTabBehavior, session.draft.newTabBehavior);
+    elements.contentTreeEnabled.checked = session.draft.contentTreeEnabled;
     previewFontSize(session.draft.tabTitleFontSize);
     setError("");
     renderEditor();
@@ -677,20 +677,9 @@ function copySettings(settings: ShortcutSettings): ShortcutSettings {
   return {
     enabled: settings.enabled,
     tabTitleFontSize: settings.tabTitleFontSize,
-    newTabBehavior: settings.newTabBehavior,
+    contentTreeEnabled: settings.contentTreeEnabled,
     items: settings.items.map((shortcut) => ({ ...shortcut })),
   };
-}
-
-function readNewTabBehavior(inputs: NodeListOf<HTMLInputElement>): "root" | "child" {
-  return Array.from(inputs).find((input) => input.checked)?.value === "child" ? "child" : "root";
-}
-
-function setNewTabBehavior(
-  inputs: NodeListOf<HTMLInputElement>,
-  behavior: "root" | "child",
-): void {
-  for (const input of Array.from(inputs)) input.checked = input.value === behavior;
 }
 
 function createShortcutFaviconSignature(

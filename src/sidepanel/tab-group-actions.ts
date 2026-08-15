@@ -47,9 +47,27 @@ export class PartialTabGroupAddError extends Error {
   }
 }
 
-function assertValidTabGroupId(groupId: number): void {
+export function assertValidTabGroupId(groupId: number): void {
   if (!isValidTabGroupId(groupId)) {
     throw new Error("标签组 ID 无效");
+  }
+}
+
+/**
+ * 更新已由 Chrome 创建的标签组元数据，并保留“分组已经创建”的部分成功边界。
+ */
+export async function updateCreatedTabGroup(
+  groups: Pick<typeof chrome.tabGroups, "update">,
+  groupId: number,
+  title: string,
+  color: TabGroupColor,
+): Promise<void> {
+  assertValidTabGroupId(groupId);
+
+  try {
+    await groups.update(groupId, { title, color });
+  } catch (cause) {
+    throw new PartialTabGroupCreationError(groupId, { cause });
   }
 }
 
@@ -57,19 +75,11 @@ export function createTabGroupActions(
   tabs: Pick<typeof chrome.tabs, "create" | "group" | "ungroup">,
   groups: Pick<typeof chrome.tabGroups, "move" | "update">,
 ): TabGroupActions {
-  const updateCreated = async (
+  const updateCreated = (
     groupId: number,
     title: string,
     color: TabGroupColor,
-  ): Promise<void> => {
-    assertValidTabGroupId(groupId);
-
-    try {
-      await groups.update(groupId, { title, color });
-    } catch (cause) {
-      throw new PartialTabGroupCreationError(groupId, { cause });
-    }
-  };
+  ): Promise<void> => updateCreatedTabGroup(groups, groupId, title, color);
 
   return {
     async move(plan): Promise<void> {

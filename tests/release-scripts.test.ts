@@ -108,6 +108,11 @@ async function createReleaseFixture(): Promise<{ root: string; dist: string; rel
         "32": "assets/icons/icon-32.png",
       },
     },
+    commands: {
+      _execute_action: {
+        suggested_key: { default: "Alt+V" },
+      },
+    },
     icons: {
       "16": "assets/icons/icon-16.png",
       "32": "assets/icons/icon-32.png",
@@ -308,6 +313,17 @@ describe("dist validation", () => {
     for (const shortcut of ["openai.png", "google.png", "github.png"]) {
       await expect(readFile(resolve("dist/assets/shortcuts", shortcut))).rejects.toThrow();
     }
+  });
+
+  it("rejects an unreviewed extension action shortcut", async () => {
+    const fixture = await createReleaseFixture();
+    const manifestPath = join(fixture.dist, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.commands._execute_action.suggested_key.default = "Ctrl+Shift+V";
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    const { checkDist } = await loadCheckDist();
+
+    await expect(checkDist(fixture.dist)).rejects.toThrow(/shortcut.*Alt\+V/i);
   });
 
   it.each([

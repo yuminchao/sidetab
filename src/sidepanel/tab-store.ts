@@ -20,6 +20,11 @@ export class TabStore {
     return this.sortedTabs().map(copyTab);
   }
 
+  get(id: number): TabViewModel | undefined {
+    const tab = this.tabs.get(id);
+    return tab ? copyTab(tab) : undefined;
+  }
+
   filter(query: string): TabViewModel[] {
     const normalized = query.trim().toLocaleLowerCase();
     if (!normalized) {
