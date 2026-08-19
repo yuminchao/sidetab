@@ -152,6 +152,7 @@ FloatingBallSettings
 消息使用可判别联合类型，至少包含：
 
 - `floating-ball/search`
+- `floating-ball/open-search-result`
 - `floating-ball/duplicate-tab`
 - `floating-ball/toggle-pin`
 - `floating-ball/close-tab`
@@ -159,7 +160,7 @@ FloatingBallSettings
 - `floating-ball/smart-group-window`
 - `floating-ball/ensure-injected`
 
-后台必须验证消息类型、关键词类型和长度，并验证发送方是扩展页面或具有合法 `http/https` URL 的标签。页面命令不得携带可用于选择其他标签的 Tab ID；后台始终使用 `sender.tab.id` 与 `sender.tab.windowId`。一键分组只能以该窗口为范围。
+后台必须验证消息类型、关键词和搜索结果 URL，并验证发送方是扩展页面或具有合法 `http/https` URL 的标签。打开搜索结果只接受 `http/https` 地址并通过 `chrome.tabs.create()` 创建活动标签。页面命令不得携带可用于选择其他标签的 Tab ID；后台始终使用 `sender.tab.id` 与 `sender.tab.windowId`。一键分组只能以该窗口为范围。
 
 搜索关键词设置合理长度上限；错误响应只返回稳定错误码与可展示消息，不向页面泄露异常堆栈。所有监听器在界面卸载时移除。
 
