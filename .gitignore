@@ -3,3 +3,7 @@ node_modules/
 dist/
 release/
 coverage/
+/.idea/
+/.codegraph/
+/.scratch/
+/.superpowers/

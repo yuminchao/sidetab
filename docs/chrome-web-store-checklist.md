@@ -1,5 +1,12 @@
 # Chrome Web Store 发布检查清单
 
+## 0.12.7 发布验收
+
+- [ ] 版本号为 `0.12.7`，且 `scripting` 与 HTTP/HTTPS 站点权限仅用于本机网页悬浮球内容脚本。
+- [ ] 悬浮球默认关闭；开启和关闭会即时作用于已经打开的普通网页。
+- [ ] 左键展开后搜索框自动聚焦；右键菜单的复制、固定、关闭、打开侧边栏和一键分组均可用。
+- [ ] Chrome 116 及以上加载成功；不读取网页正文、不上传数据、不加载远程代码。
+
 ## 0.12.4 发布验收
 
 - [ ] 上传文件名为 `sidetab-lite-0.12.4.zip`，版本号与 `manifest.json`、`package.json`、`package-lock.json` 一致。
@@ -105,7 +112,7 @@
 
 - [ ] 本次待上传文件为 `release/sidetab-lite-0.12.4.zip`。
 - [ ] `npm run package` 完整通过。
-- [ ] `dist` 和 ZIP 精确包含 15 个审核文件，图标资源为 4 个 PNG 与 5 个 SVG（定位、固定、网络兜底、搜索、设置），不包含 `assets/icons/add-tab.svg` 及 `assets/shortcuts/openai.png`、`google.png`、`github.png`。
+- [ ] `dist` 和 ZIP 精确包含 16 个审核文件，图标资源为 4 个 PNG 与 5 个 SVG（定位、固定、网络兜底、搜索、设置），不包含 `assets/icons/add-tab.svg` 及 `assets/shortcuts/openai.png`、`google.png`、`github.png`。
 - [ ] ZIP 根目录直接包含 `manifest.json`，不包含 `dist/` 顶层目录。
 - [ ] ZIP 不包含源码、source map、测试、项目文档或 `node_modules`。
 - [ ] 在全新目录解压 ZIP 后重新执行一次“加载已解压”检查。

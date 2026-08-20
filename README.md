@@ -12,9 +12,9 @@ SideTab Lite 是一个 Chrome 侧边栏标签页管理扩展。它支持切换�
 
 也可以按 `Alt+V` 打开扩展侧边栏；若快捷键被其他扩展占用，可在 `chrome://extensions/shortcuts` 中重新分配。
 
-`release/sidetab-lite-0.12.4.zip` 用于上传 Chrome Web Store 或传递构建产物。Chrome 通常不能直接双击 ZIP 安装扩展；本地测试请加载已解压的 `dist` 目录。
+`release/sidetab-lite-0.12.7.zip` 用于上传 Chrome Web Store 或传递构建产物。Chrome 通常不能直接双击 ZIP 安装扩展；本地测试请加载已解压的 `dist` 目录。
 
-0.12.4 发布重点：设置中的“内容树”默认关闭并兼容旧配置迁移；“同网站快速分组”会优先复用实际包含同类成员的分组，新“一键分组”可批量整理普通网站、本地文件和 Chrome 内部页面。
+0.12.6 发布重点：一键分组会复用同名网站或“其他”分组，并合并多个同名分组；标签更新批次和只读快照进一步收紧为有界、不可篡改的状态。
 
 ## 开发与打包
 
@@ -26,7 +26,7 @@ npm test -- --run
 npm run package
 ```
 
-`npm run package` 会依次执行类型检查、测试、构建和发布检查，再按固定文件顺序与时间戳生成并自验 ZIP。重复打包会覆盖目标 ZIP，但不会删除 `release/` 中的其他文件。`npm run generate:icons` 可重新生成仓库中的图标资源；发布产物精确包含 15 个审核文件，其中图标资源为四个扩展 PNG 图标和五个 SVG（定位、固定、网络兜底、搜索、设置），不包含新增标签页 SVG，也不包含兼容保留的快捷网站 PNG。
+`npm run package` 会依次执行类型检查、测试、构建和发布检查，再按固定文件顺序与时间戳生成并自验 ZIP。重复打包会覆盖目标 ZIP，但不会删除 `release/` 中的其他文件。`npm run generate:icons` 可重新生成仓库中的图标资源；发布产物精确包含 16 个审核文件，其中图标资源为四个扩展 PNG 图标和五个 SVG（定位、固定、网络兜底、搜索、设置），不包含新增标签页 SVG，也不包含兼容保留的快捷网站 PNG。
 
 ## 使用说明
 
@@ -51,7 +51,7 @@ npm run package
 
 ## 隐私与权限
 
-扩展只申请 `sidePanel`、`tabs`、`tabGroups`、`storage`、`history`、`sessions` 和 `bookmarks` 权限，不申请主机权限，也不注入 content script。`tabGroups` 仅用于读取和管理当前窗口的 Chrome 原生标签组；`history` 仅用于用户操作底部搜索框时，在本地查询并展示 Chrome 历史记录；`sessions` 仅用于读取并恢复最近关闭的单个标签；`bookmarks` 仅用于非空搜索时读取匹配的本地收藏夹结果。扩展只缓存一个 `sessionId`，不会持久化会话记录。历史与收藏夹查询结果也不持久化或上传。扩展不收集、不出售，也不向开发者服务传输用户数据。
+扩展申请 `sidePanel`、`tabs`、`tabGroups`、`storage`、`history`、`sessions`、`bookmarks` 和 `scripting` 权限，并申请 HTTP/HTTPS 普通网页的站点权限。站点权限和内容脚本仅用于在用户开启“网页悬浮球”后显示本地界面；内容脚本不读取网页正文、不加载远程代码、不上传页面或浏览数据。`tabGroups` 仅用于读取和管理当前窗口的 Chrome 原生标签组；`history` 仅用于用户操作搜索框时，在本地查询并展示 Chrome 历史记录；`sessions` 仅用于读取并恢复最近关闭的单个标签；`bookmarks` 仅用于非空搜索时读取匹配的本地收藏夹结果。扩展只缓存一个 `sessionId`，不会持久化会话记录。历史与收藏夹查询结果也不持久化或上传。扩展不收集、不出售，也不向开发者服务传输用户数据。
 
 `bookmarks` 是收藏夹搜索所需的必需权限。已有安装升级到包含该权限的版本时，Chrome 可能要求用户接受新增权限；在用户确认前，可能需要在扩展管理页重新启用扩展。
 

@@ -29,6 +29,7 @@ export type TabTreeDecoration = {
 };
 
 export type TabListOptions = {
+  tabsAreOrdered?: boolean;
   treeEnabled?: boolean;
   collapsedTabIds?: ReadonlySet<number>;
   detachedTabIds?: ReadonlySet<number>;
@@ -48,7 +49,7 @@ export function buildTabListItems(
 
   const items: TabListItem[] = [];
   const emittedGroupIds = new Set<number>();
-  const orderedTabs = [...tabs].sort(compareTabs);
+  const orderedTabs = options.tabsAreOrdered ? tabs : [...tabs].sort(compareTabs);
   const memberCounts = new Map<number, number>();
   for (const tab of orderedTabs) {
     if (tab.pinned) continue;
@@ -103,7 +104,7 @@ function buildTreeTabListItems(
   options: TabListOptions,
 ): TabListItem[] {
   const groupsById = new Map(groups.map((group) => [group.id, group]));
-  const orderedTabs = [...tabs].sort(compareTabs);
+  const orderedTabs = options.tabsAreOrdered ? tabs : [...tabs].sort(compareTabs);
   const items: TabListItem[] = orderedTabs
     .filter((tab) => tab.pinned)
     .map((tab) => ({
@@ -120,6 +121,7 @@ function buildTreeTabListItems(
     orderedTabs.filter((tab) => !tab.pinned),
     options.detachedTabIds,
     options.attachedTabParentIds,
+    true,
   );
   const groupedRoots = new Map<number, TabTreeNode[]>();
   const units: Array<
@@ -140,8 +142,6 @@ function buildTreeTabListItems(
       units.push({ kind: "group", groupId: group.id, index: root.tab.index });
     }
   }
-  units.sort((left, right) => left.index - right.index);
-
   for (const unit of units) {
     if (unit.kind === "tree") {
       appendTreeEntries(items, [unit.root], options.collapsedTabIds ?? new Set());

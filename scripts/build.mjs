@@ -16,6 +16,7 @@ async function buildExtension(projectRoot) {
 
   await rm(dist, { recursive: true, force: true });
   await mkdir(resolve(dist, "background"), { recursive: true });
+  await mkdir(resolve(dist, "content"), { recursive: true });
   await mkdir(resolve(dist, "sidepanel"), { recursive: true });
   await copyRequiredIcons(root, dist);
 
@@ -26,7 +27,19 @@ async function buildExtension(projectRoot) {
     },
     bundle: true,
     format: "esm",
-    target: "chrome114",
+    target: "chrome116",
+    minify: true,
+    outdir: dist,
+    sourcemap: false,
+  });
+
+  await build({
+    entryPoints: {
+      "content/floating-ball": resolve(root, "src/floating-ball/content-script.ts"),
+    },
+    bundle: true,
+    format: "iife",
+    target: "chrome116",
     minify: true,
     outdir: dist,
     sourcemap: false,

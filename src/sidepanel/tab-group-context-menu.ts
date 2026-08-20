@@ -9,7 +9,8 @@ export type TabGroupContextCommand =
   | { action: "new-tab"; groupId: number }
   | { action: "rename"; groupId: number }
   | { action: "set-color"; groupId: number; color: TabGroupColor }
-  | { action: "dissolve"; groupId: number };
+  | { action: "dissolve"; groupId: number }
+  | { action: "close"; groupId: number };
 
 const COLOR_LABELS: Readonly<Record<TabGroupColor, string>> = {
   grey: "灰色",
@@ -28,6 +29,7 @@ export function createTabGroupContextMenu(
   callbacks: {
     getGroup(id: number): TabGroupViewModel | undefined;
     isGroupBusy(id: number): boolean;
+    canCloseGroup(id: number): boolean;
     onBeforeOpen(): void;
     onCommand(command: TabGroupContextCommand): void;
   },
@@ -51,7 +53,8 @@ export function createTabGroupContextMenu(
   separator.className = "tab-context-separator";
   separator.setAttribute("role", "separator");
   const dissolve = createItem("dissolve", "解散分组");
-  menu.append(newTab, rename, setColor, separator, dissolve);
+  const closeGroup = createItem("close", "关闭分组");
+  menu.append(newTab, rename, setColor, separator, dissolve, closeGroup);
   elements.document.body.append(menu, submenu);
   const scrollContainer = elements.list.parentElement ?? elements.list;
 
@@ -146,6 +149,7 @@ export function createTabGroupContextMenu(
     contextSelectedRow = row;
     const busy = callbacks.isGroupBusy(group.id);
     for (const button of [newTab, rename, setColor, dissolve]) button.disabled = busy;
+    closeGroup.disabled = busy || !callbacks.canCloseGroup(group.id);
 
     menu.hidden = false;
     menu.style.left = "0px";
@@ -191,7 +195,12 @@ export function createTabGroupContextMenu(
       return;
     }
     const action = button.dataset.groupMenuAction;
-    if (action !== "new-tab" && action !== "rename" && action !== "dissolve") return;
+    if (
+      action !== "new-tab"
+      && action !== "rename"
+      && action !== "dissolve"
+      && action !== "close"
+    ) return;
     const command: TabGroupContextCommand = { action, groupId: openGroupId };
     close();
     callbacks.onCommand(command);

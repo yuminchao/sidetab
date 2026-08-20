@@ -40,7 +40,7 @@ describe("tab tree session store", () => {
     expect(loaded.attachedTabParentIds.size).toBe(0);
   });
 
-  it("serializes writes so an older state cannot finish after a newer state", async () => {
+  it("coalesces queued writes so only the latest state follows an in-flight write", async () => {
     let finishFirst!: () => void;
     const set = vi.fn()
       .mockImplementationOnce(() => new Promise<void>((resolve) => { finishFirst = resolve; }))
@@ -57,18 +57,24 @@ describe("tab tree session store", () => {
       detachedTabIds: new Set(),
       attachedTabParentIds: new Map([[3, 2]]),
     });
+    const third = store.save(10, {
+      collapsedTabIds: new Set([4]),
+      detachedTabIds: new Set([5]),
+      attachedTabParentIds: new Map([[6, 4]]),
+    });
     await Promise.resolve();
     await Promise.resolve();
     expect(set).toHaveBeenCalledTimes(1);
 
     finishFirst();
-    await Promise.all([first, second]);
+    await Promise.all([first, second, third]);
     expect(set).toHaveBeenNthCalledWith(2, {
       "tabTreeSessionState:10": {
-        collapsedTabIds: [2],
-        detachedTabIds: [],
-        attachedTabParentIds: [[3, 2]],
+        collapsedTabIds: [4],
+        detachedTabIds: [5],
+        attachedTabParentIds: [[6, 4]],
       },
     });
+    expect(set).toHaveBeenCalledTimes(2);
   });
 });

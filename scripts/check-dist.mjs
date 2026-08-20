@@ -18,9 +18,11 @@ const expectedManifestKeys = [
   "action",
   "background",
   "commands",
+  "content_scripts",
   "content_security_policy",
   "description",
   "icons",
+  "host_permissions",
   "manifest_version",
   "minimum_chrome_version",
   "name",
@@ -346,12 +348,23 @@ export async function checkDist(distDirectory) {
         "history",
         "sessions",
         "bookmarks",
+        "scripting",
       ]),
-    "permissions must be exactly sidePanel, tabs, tabGroups, storage, history, sessions, bookmarks",
+    "permissions must be exactly sidePanel, tabs, tabGroups, storage, history, sessions, bookmarks, scripting",
   );
-  assert(!Object.hasOwn(manifest, "host_permissions"), "host_permissions must not be present");
-  assert(!Object.hasOwn(manifest, "content_scripts"), "content_scripts must not be present");
-  assert(manifest.minimum_chrome_version === "114", "minimum_chrome_version must be 114");
+  assert(
+    JSON.stringify(manifest.host_permissions) === JSON.stringify(["http://*/*", "https://*/*"]),
+    "host_permissions must be exactly HTTP and HTTPS all-sites access",
+  );
+  assert(
+    JSON.stringify(manifest.content_scripts) === JSON.stringify([{
+      matches: ["http://*/*", "https://*/*"],
+      js: ["content/floating-ball.js"],
+      run_at: "document_idle",
+    }]),
+    "content_scripts must be exactly the floating ball entry",
+  );
+  assert(manifest.minimum_chrome_version === "116", "minimum_chrome_version must be 116");
   assert(
     JSON.stringify(manifest.commands) === JSON.stringify({
       _execute_action: { suggested_key: { default: "Alt+V" } },
@@ -363,6 +376,7 @@ export async function checkDist(distDirectory) {
   const manifestPaths = [
     manifest.background?.service_worker,
     manifest.side_panel?.default_path,
+    ...(manifest.content_scripts ?? []).flatMap((script) => script.js ?? []),
     ...Object.values(manifest.icons ?? {}),
     ...Object.values(manifest.action?.default_icon ?? {}),
   ];

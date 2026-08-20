@@ -3,13 +3,22 @@ import { getTabDomain, toTabViewModel, type TabViewModel } from "./tab-model";
 
 export class TabStore {
   private readonly tabs = new Map<number, TabViewModel>();
+  private sortedCache: readonly TabViewModel[] | undefined;
+  private activeTabId: number | undefined;
+
+  private invalidateCache(): void {
+    this.sortedCache = undefined;
+  }
 
   initialize(tabs: chrome.tabs.Tab[]): void {
     this.tabs.clear();
+    this.activeTabId = undefined;
+    this.invalidateCache();
     for (const tab of tabs) {
       try {
         const model = toTabViewModel(tab);
-        this.tabs.set(model.id, model);
+        this.setTab(model.id, model);
+        if (model.active) this.activeTabId = model.id;
       } catch {
         // A malformed Chrome tab should not prevent the remaining tabs loading.
       }
@@ -18,6 +27,11 @@ export class TabStore {
 
   list(): TabViewModel[] {
     return this.sortedTabs().map(copyTab);
+  }
+
+  /** 零拷贝只读快照：调用方不得修改返回的标签对象。 */
+  snapshot(): readonly Readonly<TabViewModel>[] {
+    return this.sortedTabs();
   }
 
   get(id: number): TabViewModel | undefined {
@@ -78,7 +92,8 @@ export class TabStore {
       }
     }
 
-    this.tabs.set(id, updated);
+    this.setTab(id, updated);
+    this.invalidateCache();
     if (updated.active) {
       this.activate(id);
     }
@@ -120,8 +135,12 @@ export class TabStore {
     }
     this.tabs.clear();
     for (const [id, tab] of next) {
-      this.tabs.set(id, tab);
+      this.setTab(id, tab);
     }
+    this.activeTabId = model.active
+      ? model.id
+      : Array.from(next.values()).find((tab) => tab.active)?.id;
+    this.invalidateCache();
     return copyTab(this.tabs.get(model.id)!);
   }
 
@@ -132,22 +151,31 @@ export class TabStore {
     }
 
     this.tabs.delete(id);
+    if (this.activeTabId === id) this.activeTabId = undefined;
+    this.invalidateCache();
     for (const [tabId, current] of this.tabs) {
       if (current.index > tab.index) {
-        this.tabs.set(tabId, { ...current, index: current.index - 1 });
+        this.setTab(tabId, { ...current, index: current.index - 1 });
       }
     }
     return true;
   }
 
   activate(id: number): void {
-    if (!this.tabs.has(id)) {
+    const nextActive = this.tabs.get(id);
+    if (!nextActive || this.activeTabId === id) {
       return;
     }
 
-    for (const [tabId, tab] of this.tabs) {
-      this.tabs.set(tabId, { ...tab, active: tabId === id });
+    this.invalidateCache();
+    if (this.activeTabId !== undefined) {
+      const previousActive = this.tabs.get(this.activeTabId);
+      if (previousActive) {
+        this.setTab(this.activeTabId, { ...previousActive, active: false });
+      }
     }
+    if (!nextActive.active) this.setTab(id, { ...nextActive, active: true });
+    this.activeTabId = id;
   }
 
   move(id: number, index: number): void {
@@ -168,8 +196,9 @@ export class TabStore {
     const destination = Math.max(0, Math.min(index, tabs.length));
     tabs.splice(destination, 0, moved);
 
+    this.invalidateCache();
     for (const [newIndex, tab] of tabs.entries()) {
-      this.tabs.set(tab.id, { ...tab, index: newIndex });
+      this.setTab(tab.id, { ...tab, index: newIndex });
     }
   }
 
@@ -178,7 +207,8 @@ export class TabStore {
       const model = toTabViewModel(tab);
       const existing = this.tabs.get(model.id);
       if (existing && existing.index === model.index) {
-        this.tabs.set(model.id, model);
+        this.setTab(model.id, model);
+        this.invalidateCache();
       } else {
         if (existing) {
           this.remove(model.id);
@@ -194,8 +224,15 @@ export class TabStore {
     }
   }
 
-  private sortedTabs(): TabViewModel[] {
-    return [...this.tabs.values()].sort(compareTabs);
+  private setTab(id: number, tab: TabViewModel): void {
+    this.tabs.set(id, Object.freeze(tab) as TabViewModel);
+  }
+
+  private sortedTabs(): readonly TabViewModel[] {
+    if (this.sortedCache === undefined) {
+      this.sortedCache = Object.freeze([...this.tabs.values()].sort(compareTabs));
+    }
+    return this.sortedCache;
   }
 
   private tabsInChromeOrder(): TabViewModel[] {
@@ -203,12 +240,13 @@ export class TabStore {
   }
 
   private insert(tab: TabViewModel): void {
+    this.invalidateCache();
     for (const [id, current] of this.tabs) {
       if (current.index >= tab.index) {
-        this.tabs.set(id, { ...current, index: current.index + 1 });
+        this.setTab(id, { ...current, index: current.index + 1 });
       }
     }
-    this.tabs.set(tab.id, tab);
+    this.setTab(tab.id, tab);
   }
 }
 

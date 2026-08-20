@@ -46,7 +46,7 @@ describe("tab group context menu", () => {
     const onCommand = vi.fn();
     const controller = createTabGroupContextMenu(
       { document, list, viewport: window },
-      { getGroup: () => group, isGroupBusy: () => false, onBeforeOpen, onCommand },
+      { getGroup: () => group, isGroupBusy: () => false, canCloseGroup: () => true, onBeforeOpen, onCommand },
     );
     const menu = document.querySelector<HTMLElement>(".tab-group-context-menu")!;
     vi.spyOn(menu, "getBoundingClientRect").mockReturnValue({
@@ -69,16 +69,18 @@ describe("tab group context menu", () => {
       "set-color",
       "tab-context-separator",
       "dissolve",
+      "close",
     ]);
     expect(Array.from(menu.querySelectorAll<HTMLButtonElement>(":scope > button"), (button) => button.textContent)).toEqual([
       "在分组中新建标签页",
       "重命名分组",
       "修改颜色",
       "解散分组",
+      "关闭分组",
     ]);
     expect(document.activeElement).toBe(menu.querySelector("[data-group-menu-action='new-tab']"));
 
-    for (const action of ["new-tab", "rename", "dissolve"] as const) {
+    for (const action of ["new-tab", "rename", "dissolve", "close"] as const) {
       context(row);
       menu.querySelector<HTMLButtonElement>(`[data-group-menu-action='${action}']`)!.click();
       expect(onCommand).toHaveBeenLastCalledWith({ action, groupId: 7 });
@@ -92,7 +94,7 @@ describe("tab group context menu", () => {
     const onCommand = vi.fn();
     const controller = createTabGroupContextMenu(
       { document, list, viewport: window },
-      { getGroup: () => group, isGroupBusy: () => false, onBeforeOpen: vi.fn(), onCommand },
+      { getGroup: () => group, isGroupBusy: () => false, canCloseGroup: () => true, onBeforeOpen: vi.fn(), onCommand },
     );
     context(row);
     const colorTrigger = document.querySelector<HTMLButtonElement>("[data-group-menu-action='set-color']")!;
@@ -139,7 +141,7 @@ describe("tab group context menu", () => {
     const onCommand = vi.fn();
     const controller = createTabGroupContextMenu(
       { document, list, viewport: window },
-      { getGroup: () => group, isGroupBusy: () => false, onBeforeOpen: vi.fn(), onCommand },
+      { getGroup: () => group, isGroupBusy: () => false, canCloseGroup: () => true, onBeforeOpen: vi.fn(), onCommand },
     );
     row.querySelector<HTMLElement>(".tab-group-main")!.dispatchEvent(
       new KeyboardEvent("keydown", { key: "F10", shiftKey: true, bubbles: true, cancelable: true }),
@@ -179,7 +181,7 @@ describe("tab group context menu", () => {
     const onCommand = vi.fn();
     const controller = createTabGroupContextMenu(
       { document, list, viewport: window },
-      { getGroup: () => group, isGroupBusy: () => true, onBeforeOpen: vi.fn(), onCommand },
+      { getGroup: () => group, isGroupBusy: () => true, canCloseGroup: () => true, onBeforeOpen: vi.fn(), onCommand },
     );
     context(row);
     const menu = document.querySelector<HTMLElement>(".tab-group-context-menu")!;
@@ -190,10 +192,50 @@ describe("tab group context menu", () => {
     controller.destroy();
   });
 
+  it("disables close-group when the group has no members", () => {
+    const onCommand = vi.fn();
+    const controller = createTabGroupContextMenu(
+      { document, list, viewport: window },
+      {
+        getGroup: () => group,
+        isGroupBusy: () => false,
+        canCloseGroup: () => false,
+        onBeforeOpen: vi.fn(),
+        onCommand,
+      },
+    );
+    context(row);
+    const menu = document.querySelector<HTMLElement>(".tab-group-context-menu")!;
+    const close = menu.querySelector<HTMLButtonElement>("[data-group-menu-action='close']")!;
+    expect(close.disabled).toBe(true);
+    close.click();
+    expect(onCommand).not.toHaveBeenCalled();
+    expect(menu.hidden).toBe(false);
+    controller.destroy();
+  });
+
+  it("enables close-group when the group has members", () => {
+    const controller = createTabGroupContextMenu(
+      { document, list, viewport: window },
+      {
+        getGroup: () => group,
+        isGroupBusy: () => false,
+        canCloseGroup: () => true,
+        onBeforeOpen: vi.fn(),
+        onCommand: vi.fn(),
+      },
+    );
+    context(row);
+    const menu = document.querySelector<HTMLElement>(".tab-group-context-menu")!;
+    expect(menu.querySelector<HTMLButtonElement>("[data-group-menu-action='close']")!.disabled)
+      .toBe(false);
+    controller.destroy();
+  });
+
   it("cleans temporary state on external close paths and destroy", () => {
     const controller = createTabGroupContextMenu(
       { document, list, viewport: window },
-      { getGroup: () => group, isGroupBusy: () => false, onBeforeOpen: vi.fn(), onCommand: vi.fn() },
+      { getGroup: () => group, isGroupBusy: () => false, canCloseGroup: () => true, onBeforeOpen: vi.fn(), onCommand: vi.fn() },
     );
     const menu = document.querySelector<HTMLElement>(".tab-group-context-menu")!;
     const assertClosed = () => {
@@ -236,6 +278,7 @@ describe("tab group context menu", () => {
       {
         getGroup: (id) => groups.find((candidate) => candidate.id === id),
         isGroupBusy: () => false,
+        canCloseGroup: () => true,
         onBeforeOpen,
         onCommand: vi.fn(),
       },

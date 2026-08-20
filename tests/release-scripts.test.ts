@@ -20,6 +20,7 @@ const expectedFiles = [
   "assets/icons/search.svg",
   "assets/icons/settings.svg",
   "background/service-worker.js",
+  "content/floating-ball.js",
   "manifest.json",
   "sidepanel/index.html",
   "sidepanel/sidebar.css",
@@ -84,7 +85,7 @@ async function createReleaseFixture(): Promise<{ root: string; dist: string; rel
     name: "SideTab Lite Test",
     version: "0.1.0",
     description: "Release validation fixture",
-    minimum_chrome_version: "114",
+    minimum_chrome_version: "116",
     permissions: [
       "sidePanel",
       "tabs",
@@ -93,7 +94,10 @@ async function createReleaseFixture(): Promise<{ root: string; dist: string; rel
       "history",
       "sessions",
       "bookmarks",
+      "scripting",
     ],
+    host_permissions: ["http://*/*", "https://*/*"],
+    content_scripts: [{ matches: ["http://*/*", "https://*/*"], js: ["content/floating-ball.js"], run_at: "document_idle" }],
     content_security_policy: {
       extension_pages:
         "script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data: http: https:; style-src 'self'; frame-src 'none'",
@@ -163,7 +167,7 @@ describe("release file contract", () => {
     const { EXPECTED_FILES } = await loadReleaseFiles();
 
     expect(EXPECTED_FILES).toEqual(expectedFiles);
-    expect(EXPECTED_FILES).toHaveLength(15);
+    expect(EXPECTED_FILES).toHaveLength(16);
     expect(EXPECTED_FILES).not.toContain("assets/icons/add-tab.svg");
     expect(EXPECTED_FILES).toEqual([...EXPECTED_FILES].sort());
   });
@@ -298,7 +302,7 @@ describe("dist validation", () => {
     });
   });
 
-  it("builds the real dist with all fourteen reviewed files and excludes shortcut PNGs", async () => {
+  it("builds the real dist with all sixteen reviewed files and excludes shortcut PNGs", async () => {
     execFileSync(process.execPath, ["scripts/build.mjs"], { cwd: resolve(".") });
     const { checkDist } = await loadCheckDist();
     const { assertExactReleaseFiles } = await loadReleaseFiles();
@@ -306,7 +310,7 @@ describe("dist validation", () => {
     await expect(checkDist(resolve("dist"))).resolves.toMatchObject({
       totalBytes: expect.any(Number),
     });
-    await expect(assertExactReleaseFiles(resolve("dist"))).resolves.toHaveLength(15);
+    await expect(assertExactReleaseFiles(resolve("dist"))).resolves.toHaveLength(16);
     await expect(readFile(resolve("dist/THIRD_PARTY_NOTICES.md"), "utf8")).resolves.toContain(
       "ISC License",
     );
@@ -329,7 +333,7 @@ describe("dist validation", () => {
   it.each([
     [
       "missing bookmarks",
-      ["sidePanel", "tabs", "tabGroups", "storage", "history", "sessions"],
+      ["sidePanel", "tabs", "tabGroups", "storage", "history", "sessions", "scripting"],
     ],
     [
       "an extra permission",
@@ -341,6 +345,7 @@ describe("dist validation", () => {
         "history",
         "sessions",
         "bookmarks",
+        "scripting",
         "alarms",
       ],
     ],
@@ -354,6 +359,7 @@ describe("dist validation", () => {
         "history",
         "bookmarks",
         "sessions",
+        "scripting",
       ],
     ],
   ])("rejects manifest permissions with %s", async (_case, permissions) => {

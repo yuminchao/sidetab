@@ -9,13 +9,39 @@ export type TabTreeSessionState = {
 const keyForWindow = (windowId: number): string => `tabTreeSessionState:${windowId}`;
 
 export function createTabTreeSessionStore(area: StorageArea | undefined) {
-  let writeQueue = Promise.resolve();
+  let writing = false;
+  let pendingItems: Record<string, unknown> | undefined;
+  let pendingWaiters: Array<{
+    resolve: () => void;
+    reject: (error: unknown) => void;
+  }> = [];
+
   const enqueueWrite = (items: Record<string, unknown>): Promise<void> => {
-    const operation = writeQueue
-      .catch(() => undefined)
-      .then(() => area?.set(items));
-    writeQueue = operation;
+    pendingItems = items;
+    const operation = new Promise<void>((resolve, reject) => {
+      pendingWaiters.push({ resolve, reject });
+    });
+    if (!writing) {
+      writing = true;
+      void drainWrites();
+    }
     return operation;
+  };
+
+  const drainWrites = async (): Promise<void> => {
+    while (pendingItems) {
+      const items = pendingItems;
+      const waiters = pendingWaiters;
+      pendingItems = undefined;
+      pendingWaiters = [];
+      try {
+        await area?.set(items);
+        for (const waiter of waiters) waiter.resolve();
+      } catch (error) {
+        for (const waiter of waiters) waiter.reject(error);
+      }
+    }
+    writing = false;
   };
 
   return {

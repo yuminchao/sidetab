@@ -128,6 +128,22 @@ describe("tab tree model", () => {
     expect(tabs).toEqual(before);
   });
 
+  it("handles a deeply nested opener chain without exhausting the call stack", () => {
+    const depth = 12_000;
+    const tabs = Array.from({ length: depth }, (_, index) =>
+      tab({
+        id: index + 1,
+        index,
+        ...(index > 0 ? { openerTabId: index } : {}),
+      }),
+    );
+
+    const forest = buildTabForest(tabs);
+
+    expect(forest).toHaveLength(1);
+    expect(flattenVisibleTabForest(forest, new Set())).toHaveLength(depth);
+  });
+
   it("returns a parent and all descendants in visual preorder for block moves", () => {
     const tabs = [
       tab({ id: 1, index: 0 }),

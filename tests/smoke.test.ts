@@ -16,13 +16,13 @@ function parseCsp(value: string): Record<string, string[]> {
 }
 
 describe("extension manifest", () => {
-  it("keeps the npm and extension release versions aligned at 0.12.4", () => {
+  it("keeps the npm and extension release versions aligned at 0.12.7", () => {
     const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
     const packageLock = JSON.parse(readFileSync("package-lock.json", "utf8"));
-    expect(manifest.version).toBe("0.12.4");
-    expect(packageJson.version).toBe("0.12.4");
-    expect(packageLock.version).toBe("0.12.4");
-    expect(packageLock.packages[""].version).toBe("0.12.4");
+    expect(manifest.version).toBe("0.12.7");
+    expect(packageJson.version).toBe("0.12.7");
+    expect(packageLock.version).toBe("0.12.7");
+    expect(packageLock.packages[""].version).toBe("0.12.7");
   });
 
   it("records the 0.10.4 context actions and visual refinements release", () => {
@@ -56,15 +56,16 @@ describe("extension manifest", () => {
       "history",
       "sessions",
       "bookmarks",
+      "scripting",
     ]) {
       expect(readme).toContain(`\`${permission}\``);
       expect(checklist).toContain(`\`${permission}\``);
     }
     expect(readme).toContain(
-      "精确包含 15 个审核文件，其中图标资源为四个扩展 PNG 图标和五个 SVG（定位、固定、网络兜底、搜索、设置）",
+      "精确包含 16 个审核文件，其中图标资源为四个扩展 PNG 图标和五个 SVG（定位、固定、网络兜底、搜索、设置）",
     );
     expect(checklist).toContain(
-      "精确包含 15 个审核文件，图标资源为 4 个 PNG 与 5 个 SVG（定位、固定、网络兜底、搜索、设置）",
+      "精确包含 16 个审核文件，图标资源为 4 个 PNG 与 5 个 SVG（定位、固定、网络兜底、搜索、设置）",
     );
   });
 
@@ -130,24 +131,17 @@ describe("extension manifest", () => {
     }
   });
 
-  it("records the 0.12.4 content tree and smart grouping release first", () => {
+  it("records the 0.12.7 update release first", () => {
     const updateLog = readFileSync("update.log", "utf8");
     const nextVersion = updateLog.search(/\r?\n(?=\d+\.\d+\.\d+\r?$)/m);
     const currentRelease = nextVersion === -1 ? updateLog : updateLog.slice(0, nextVersion);
 
-    expect(updateLog.split(/\r?\n/, 1)[0]).toBe("0.12.4");
+    expect(updateLog.split(/\r?\n/, 1)[0]).toBe("0.12.7");
     for (const detail of [
-      "内容树",
-      "默认关闭",
-      "同网站快速分组",
+      "网页悬浮球",
+      "自动聚焦",
       "一键分组",
-      "其他",
-      "固定标签不参加",
-      "部分失败",
-      "无新增权限",
-      "无新增查询",
-      "无新增轮询",
-      "无长期缓存",
+      "scripting",
       "无远程代码",
     ]) {
       expect(currentRelease).toContain(detail);
@@ -184,7 +178,7 @@ describe("extension manifest", () => {
 
   it("uses the required restricted MV3 permissions", () => {
     expect(manifest.manifest_version).toBe(3);
-    expect(manifest.minimum_chrome_version).toBe("114");
+    expect(manifest.minimum_chrome_version).toBe("116");
     expect(manifest.permissions).toEqual([
       "sidePanel",
       "tabs",
@@ -193,9 +187,14 @@ describe("extension manifest", () => {
       "history",
       "sessions",
       "bookmarks",
+      "scripting",
     ]);
-    expect(manifest).not.toHaveProperty("host_permissions");
-    expect(manifest).not.toHaveProperty("content_scripts");
+    expect(manifest.host_permissions).toEqual(["http://*/*", "https://*/*"]);
+    expect(manifest.content_scripts).toEqual([{
+      matches: ["http://*/*", "https://*/*"],
+      js: ["content/floating-ball.js"],
+      run_at: "document_idle",
+    }]);
     expect(manifest).not.toHaveProperty("optional_permissions");
     expect(manifest).not.toHaveProperty("optional_host_permissions");
     expect(parseCsp(manifest.content_security_policy.extension_pages)).toEqual({
@@ -224,5 +223,11 @@ describe("extension manifest", () => {
         suggested_key: { default: "Alt+V" },
       },
     });
+  });
+
+  it("builds the classic content script as an IIFE", () => {
+    const buildSource = readFileSync("scripts/build.mjs", "utf8");
+    expect(buildSource).toContain('format: "iife"');
+    expect(buildSource).toContain('"content/floating-ball"');
   });
 });

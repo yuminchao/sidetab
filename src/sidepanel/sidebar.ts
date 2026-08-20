@@ -35,6 +35,7 @@ import { createTabGroupReorderPlan } from "./tab-group-reorder-model";
 import type { TabDragIntent } from "./tab-drag-controller";
 import { createTabRenderer } from "./tab-renderer";
 import { TabStore } from "./tab-store";
+import type { TabViewModel } from "./tab-model";
 import { createTabTreeSessionStore } from "./tab-tree-session-store";
 import {
   classifySmartGroupTab,
@@ -61,6 +62,9 @@ import {
 import {
   getOtherSameSiteTabIds,
 } from "./same-site-tab-model";
+import { createTabIdReplacementMap, type ReadonlyTabIdReplacementMap } from "./tab-id-replacement";
+import { createTabUpdateScheduler } from "./tab-update-scheduler";
+import { createFloatingBallSettingsStore } from "../floating-ball/settings";
 
 export type SidebarDependencies = {
   tabs: typeof chrome.tabs;
@@ -145,6 +149,7 @@ type SidebarElements = {
   shortcutEnabled: HTMLInputElement;
   tabTitleFontSize: HTMLInputElement;
   contentTreeEnabled: HTMLInputElement;
+  floatingBallEnabled: HTMLInputElement;
   shortcutEditor: HTMLElement;
   shortcutError: HTMLElement;
   shortcutAdd: HTMLButtonElement;
@@ -174,12 +179,18 @@ async function startSidebarInternal(
   deps: SidebarDependencies,
   signal?: AbortSignal,
 ): Promise<() => void> {
+  const startupStartedAt = performance.now();
+  let windowSnapshotAt: number | undefined;
+  let firstRenderAt: number | undefined;
+  let readyAt: number | undefined;
+  let reconciliationAt: number | undefined;
   const elements = getSidebarElements(deps.document);
   const tabStore = new TabStore();
   const groupStore = new TabGroupStore();
   const tabActions = createTabActions(deps.tabs);
   const groupActions = createTabGroupActions(deps.tabs, deps.tabGroups);
   const shortcutStore = createShortcutStore(deps.storage);
+  const floatingBallStore = createFloatingBallSettingsStore(deps.storage);
   const treeSessionStore = createTabTreeSessionStore(deps.sessionStorage);
   const smartGroupSessionStore = createSmartGroupSessionStore(deps.sessionStorage ?? {
     get: async () => ({}),
@@ -218,7 +229,7 @@ async function startSidebarInternal(
   let treeRelationRevision = 0;
   // 模式切换只废弃旧拖放的树关系提交，不影响 child 模式内的并发 session 合并。
   let treeModeGeneration = 0;
-  const replacementTabIds = new Map<number, number>();
+  const replacementTabIds = createTabIdReplacementMap();
   let operationGeneration = 0;
   let reorderBusy = false;
   type ResyncPhase = "idle" | "querying" | "replaying";
@@ -252,6 +263,7 @@ async function startSidebarInternal(
   const smartGroupingGroupIds = new Set<number>();
   const pendingGroupMoves = new Map<number, number>();
   const groupMovesCompletedByEvent = new Map<number, number>();
+  let tabUpdateScheduler: ReturnType<typeof createTabUpdateScheduler> | undefined;
   const statusSlots = {
     tabs: "",
     groups: "",
@@ -269,6 +281,36 @@ async function startSidebarInternal(
         statusSlots.operation,
       ].filter(Boolean).join("；");
     }
+  };
+
+  /**
+   * 输出首次打开的累计阶段耗时，供临时性能诊断使用。
+   *
+   * Args:
+   *   stage: 已完成的启动阶段名称。
+   * Returns:
+   *   无。
+   * Raises:
+   *   无。
+   */
+  const reportStartupTiming = (stage: string): void => {
+    const now = performance.now();
+    const timing = {
+      stage,
+      windowSnapshotMs: windowSnapshotAt === undefined
+        ? undefined
+        : Math.round(windowSnapshotAt - startupStartedAt),
+      firstRenderMs: firstRenderAt === undefined
+        ? undefined
+        : Math.round(firstRenderAt - startupStartedAt),
+      readyMs: readyAt === undefined ? undefined : Math.round(readyAt - startupStartedAt),
+      reconciliationMs: reconciliationAt === undefined
+        ? undefined
+        : Math.round(reconciliationAt - startupStartedAt),
+      elapsedMs: Math.round(now - startupStartedAt),
+    };
+    deps.document.documentElement.dataset.startupTiming = JSON.stringify(timing);
+    console.info("[DEBUG-startup]", timing);
   };
 
   const runTabOperation = (
@@ -328,8 +370,9 @@ async function startSidebarInternal(
     treeSessionReady && shortcutSettings.contentTreeEnabled;
 
   const renderTabList = (): void => {
-    const tabs = tabStore.list();
+    const tabs = tabStore.snapshot();
     tabRenderer.render(buildTabListItems(tabs, groupStore.list(), {
+      tabsAreOrdered: true,
       treeEnabled: isTreeEnabled(),
       collapsedTabIds,
       detachedTabIds,
@@ -351,6 +394,10 @@ async function startSidebarInternal(
       lastScrolledActiveTabId = undefined;
     }
     elements.locateActiveTab.disabled = !tabsReady || !tabs.some((tab) => tab.active);
+    if (tabsReady && firstRenderAt === undefined) {
+      firstRenderAt = performance.now();
+      reportStartupTiming("first-render");
+    }
   };
 
   const onLocateActiveTabClick = (): void => {
@@ -444,6 +491,7 @@ async function startSidebarInternal(
       enabled: elements.shortcutEnabled,
       fontSize: elements.tabTitleFontSize,
       contentTreeEnabled: elements.contentTreeEnabled,
+      floatingBallEnabled: elements.floatingBallEnabled,
       editor: elements.shortcutEditor,
       error: elements.shortcutError,
       add: elements.shortcutAdd,
@@ -494,6 +542,7 @@ async function startSidebarInternal(
           collapsedTabIds.clear();
           detachedTabIds.clear();
           attachedTabParentIds.clear();
+          replacementTabIds.clear();
           if (hadTreeRelations) treeRelationRevision += 1;
           if (currentWindowId !== undefined) {
             void treeSessionStore.clear(currentWindowId).catch(() => undefined);
@@ -507,9 +556,22 @@ async function startSidebarInternal(
         flushFaviconCache();
         return saved;
       },
+      async onFloatingBallEnabledChange(enabled) {
+        await floatingBallStore.setEnabled(enabled);
+        shortcutRenderer.setFloatingBallEnabled(enabled);
+        if (enabled && typeof chrome !== "undefined") {
+          void chrome.runtime.sendMessage({ type: "floating-ball/ensure-injected" }).catch(() => undefined);
+        }
+      },
     },
   );
   shortcutRenderer.render({ ...createDefaultShortcutSettings(), enabled: false });
+  if (elements.floatingBallEnabled.id === "floating-ball-enabled") {
+    void floatingBallStore.load().then(
+      (settings) => shortcutRenderer.setFloatingBallEnabled(settings.enabled),
+      () => shortcutRenderer.setFloatingBallEnabled(false),
+    );
+  }
 
   const historySearch = createHistorySearchController(
     {
@@ -618,6 +680,10 @@ async function startSidebarInternal(
           if (snapshotApplied || replayed) {
             syncShortcutFavicons();
             renderTabList();
+          }
+          if (groupingSnapshotsReady && reconciliationAt === undefined) {
+            reconciliationAt = performance.now();
+            reportStartupTiming("initial-reconciliation");
           }
         } while (resyncFollowUpRequested);
       } catch {
@@ -739,6 +805,12 @@ async function startSidebarInternal(
         return operation.tabIds.every((operationTabId) => {
           const tab = tabStore.get(operationTabId);
           if (!tab || tab.windowId !== plan.windowId || tab.pinned) return false;
+          if (kind === "all" && tab.groupId !== TAB_GROUP_ID_NONE) {
+            if (operation.kind !== "reuse") return false;
+            const targetGroup = groupStore.get(operation.groupId);
+            const sourceGroup = groupStore.get(tab.groupId);
+            return targetGroup !== undefined && sourceGroup?.title === targetGroup.title;
+          }
           const category = classifySmartGroupTab(tab);
           if (category?.key !== expectedCategories.get(operationTabId)) return false;
           return kind === "all"
@@ -1074,12 +1146,18 @@ async function startSidebarInternal(
       ) setStatus("operation", "");
       const completed = groupMovesCompletedByEvent.get(groupId) ?? 0;
       completedByEvent = completed > 0;
-      if (completedByEvent) groupMovesCompletedByEvent.set(groupId, completed - 1);
+      if (completedByEvent) {
+        if (completed <= 1) groupMovesCompletedByEvent.delete(groupId);
+        else groupMovesCompletedByEvent.set(groupId, completed - 1);
+      }
     } catch (error) {
       if (active) {
         const completed = groupMovesCompletedByEvent.get(groupId) ?? 0;
         completedByEvent = completed > 0;
-        if (completedByEvent) groupMovesCompletedByEvent.set(groupId, completed - 1);
+        if (completedByEvent) {
+          if (completed <= 1) groupMovesCompletedByEvent.delete(groupId);
+          else groupMovesCompletedByEvent.set(groupId, completed - 1);
+        }
         if (generation === operationGeneration && !completedByEvent) {
           setStatus(
             "operation",
@@ -1132,6 +1210,8 @@ async function startSidebarInternal(
         groupCommandBusy.has(groupId)
         || groupToggleBusy.has(groupId)
         || groupHasSmartGroupingConflict(groupId),
+      canCloseGroup: (groupId) =>
+        tabStore.list().some((tab) => tab.groupId === groupId),
       onBeforeOpen: () => contextMenu.close(),
       onCommand(command) {
         const group = groupStore.get(command.groupId);
@@ -1155,6 +1235,16 @@ async function startSidebarInternal(
           if (group.color === command.color) return;
           void executeGroupCommand(group.id, () =>
             groupActions.setColor(group.id, command.color)).catch(() => undefined);
+          return;
+        }
+        if (command.action === "close") {
+          tabUpdateScheduler?.flushNow();
+          const tabIds = tabStore.list()
+            .filter((tab) => tab.groupId === group.id)
+            .map((tab) => tab.id);
+          if (tabIds.length === 0) return;
+          void executeGroupCommand(group.id, () => groupActions.close(tabIds))
+            .catch(() => undefined);
           return;
         }
         const tabIds = tabStore.list()
@@ -1422,6 +1512,7 @@ async function startSidebarInternal(
     groupMovesCompletedByEvent.clear();
     unsubscribeTabs();
     unsubscribeGroups();
+    tabUpdateScheduler?.destroy();
     bufferingEvents = false;
     bufferedEvents.length = 0;
     discardPendingAsyncEvents();
@@ -1565,6 +1656,7 @@ async function startSidebarInternal(
   };
 
   const removeTab = (tabId: number): void => {
+    tabUpdateScheduler?.invalidate(tabId);
     contextMenu.closeForTab(tabId);
     applyEvent(
       () => {
@@ -1586,10 +1678,12 @@ async function startSidebarInternal(
   };
 
   const replaceTab = (tab: chrome.tabs.Tab, removedTabId: number): void => {
+    tabUpdateScheduler?.invalidate(removedTabId);
+    if (tab.id !== undefined) tabUpdateScheduler?.invalidate(tab.id);
     contextMenu.closeForTab(removedTabId);
     tabStore.replaceId(removedTabId, tab);
     if (tab.id === undefined) return;
-    replacementTabIds.set(removedTabId, tab.id);
+    if (!treeSessionReady) replacementTabIds.set(removedTabId, tab.id);
     if (collapsedTabIds.delete(removedTabId)) collapsedTabIds.add(tab.id);
     let relationChanged = detachedTabIds.delete(removedTabId);
     if (relationChanged) detachedTabIds.add(tab.id);
@@ -1608,6 +1702,62 @@ async function startSidebarInternal(
     if (relationChanged) treeRelationRevision += 1;
     persistTreeSession();
   };
+
+  const applyTabUpdates = (tabs: readonly chrome.tabs.Tab[]): void => {
+    const updates: Array<{
+      previous: TabViewModel | undefined;
+      model: TabViewModel | undefined;
+    }> = [];
+    applyEvent(
+      () => {
+        for (const tab of tabs) {
+          const previous = tab.id === undefined
+            ? undefined
+            : tabStore.get(tab.id);
+          const model = tabStore.replace(tab);
+          updates.push({ previous, model });
+          if (previous && model && previous.pinned !== model.pinned) {
+            contextMenu.closeForTab(model.id);
+          }
+        }
+        reconcileOtherGroupConfirmation(false);
+      },
+      () => {
+        const patches: TabViewModel[] = [];
+        for (const { previous, model } of updates) {
+          if (!model) continue;
+          const rowExists = findTabRow(elements.list, model.id) !== undefined;
+          if (
+            !previous
+            || !rowExists
+            || previous.index !== model.index
+            || previous.groupId !== model.groupId
+            || previous.pinned !== model.pinned
+          ) {
+            renderTabList();
+            return;
+          }
+          patches.push(model);
+        }
+        for (const model of patches) tabRenderer.patchTab(model);
+      },
+      true,
+    );
+  };
+
+  const applyTabUpdate = (tab: chrome.tabs.Tab): void => applyTabUpdates([tab]);
+
+  const hasStructuralTabUpdate = (tab: chrome.tabs.Tab): boolean => {
+    if (tab.id === undefined) return false;
+    const previous = tabStore.get(tab.id);
+    return previous !== undefined
+      && (previous.pinned !== Boolean(tab.pinned) || previous.groupId !== (tab.groupId ?? -1));
+  };
+
+  tabUpdateScheduler = createTabUpdateScheduler((tabs) => {
+    if (!active) return;
+    applyTabUpdates(tabs);
+  });
 
   const tabEventHandlers = {
     created(tab: chrome.tabs.Tab) {
@@ -1660,57 +1810,38 @@ async function startSidebarInternal(
       void resyncTabsAndGroups();
     },
     updated(tab: chrome.tabs.Tab) {
-      let previous: ReturnType<TabStore["list"]>[number] | undefined;
-      let model: ReturnType<TabStore["replace"]>;
-      applyEvent(
-        () => {
-          const tabs = tabStore.list();
-          previous = tab.id === undefined
-            ? undefined
-            : tabs.find((item) => item.id === tab.id);
-          model = tabStore.replace(tab);
-          reconcileOtherGroupConfirmation(false);
-          if (previous && model && previous.pinned !== model.pinned) {
-            contextMenu.closeForTab(model.id);
-          }
-        },
-        () => {
-          if (!model) return;
-          const rowExists = findTabRow(elements.list, model.id) !== undefined;
-          if (
-            !previous ||
-            !rowExists ||
-            previous.index !== model.index ||
-            previous.groupId !== model.groupId ||
-            previous.pinned !== model.pinned
-          ) {
-            renderTabList();
-          } else {
-            tabRenderer.patchTab(model);
-          }
-        },
-        true,
-      );
+      if (tab.id === undefined) return;
+      if (bufferingEvents) {
+        // 缓冲期间保持同步入队，避免合并调度打乱 resync 重放顺序。
+        applyTabUpdate(tab);
+      } else if (hasStructuralTabUpdate(tab)) {
+        tabUpdateScheduler.invalidate(tab.id);
+        applyTabUpdate(tab);
+      } else {
+        tabUpdateScheduler.schedule(tab.id, tab);
+      }
     },
     activated(tabId: number) {
+      tabUpdateScheduler?.invalidate(tabId);
       let affected = new Set<number>();
-      let tabs: ReturnType<TabStore["list"]> = [];
+      let previousActive: TabViewModel | undefined;
+      let current: TabViewModel | undefined;
       applyEvent(
         () => {
-          const before = tabStore.list();
+          previousActive = tabStore.snapshot().find((tab) => tab.active);
           affected = new Set([
-            ...before.filter((tab) => tab.active).map((tab) => tab.id),
+            ...(previousActive ? [previousActive.id] : []),
             tabId,
           ]);
           tabStore.activate(tabId);
-          tabs = tabStore.list();
+          current = tabStore.get(tabId);
         },
         () => {
-          for (const tab of tabs) {
-            if (affected.has(tab.id)) {
-              tabRenderer.patchTab(tab);
-            }
+          if (previousActive) {
+            const previous = tabStore.get(previousActive.id);
+            if (previous) tabRenderer.patchTab(previous);
           }
+          if (current) tabRenderer.patchTab(current);
         },
         true,
       );
@@ -1718,6 +1849,7 @@ async function startSidebarInternal(
     removed: removeTab,
     detached: removeTab,
     moved(tabId: number, index: number) {
+      tabUpdateScheduler?.invalidate(tabId);
       applyEvent(
         () => {
           tabStore.move(tabId, index);
@@ -1965,6 +2097,8 @@ async function startSidebarInternal(
       ? currentWindow.tabs
       : await deps.tabs.query({ windowId });
     if (!active) return cleanup;
+    windowSnapshotAt = performance.now();
+    reportStartupTiming("window-snapshot");
 
     currentWindowId = windowId;
     const roleLoadRevision = roleRevision;
@@ -1994,9 +2128,11 @@ async function startSidebarInternal(
           attachedTabParentIds,
           replacementTabIds,
         );
+        discardMigratedReplacementIds(treeState, replacementTabIds);
       } else {
         void treeSessionStore.clear(windowId).catch(() => undefined);
       }
+      replacementTabIds.clear();
       treeSessionReady = true;
       renderTabList();
       updateDragEnabled();
@@ -2008,6 +2144,8 @@ async function startSidebarInternal(
     syncShortcutFavicons();
     renderTabList();
     deps.document.documentElement.dataset.ready = "true";
+    readyAt = performance.now();
+    reportStartupTiming("ready");
 
     bufferingEvents = true;
     unsubscribeTabs = subscribeWithBufferedAsyncEvents(windowId);
@@ -2029,7 +2167,7 @@ async function startSidebarInternal(
 function copyMigratedIds(
   source: ReadonlySet<number>,
   target: Set<number>,
-  replacements: ReadonlyMap<number, number>,
+  replacements: ReadonlyTabIdReplacementMap,
 ): void {
   for (const sourceId of source) {
     target.add(getMigratedId(sourceId, replacements));
@@ -2039,7 +2177,7 @@ function copyMigratedIds(
 function copyMigratedParentIds(
   source: ReadonlyMap<number, number>,
   target: Map<number, number>,
-  replacements: ReadonlyMap<number, number>,
+  replacements: ReadonlyTabIdReplacementMap,
 ): void {
   for (const [childId, parentId] of source) {
     target.set(
@@ -2049,9 +2187,32 @@ function copyMigratedParentIds(
   }
 }
 
+/**
+ * 迁移完成后丢弃本次消费过的替换键。
+ *
+ * 迁移窗口内的旧标签 ID 只在该次迁移中有意义：会话状态已经以新 ID 重建，
+ * 继续保留会随 `onReplaced` 事件长期累积。该函数在所有迁移完成之后统一
+ * 删除本次涉及的旧 ID，避免多个来源集合复用同一键时过早删除。
+ */
+function discardMigratedReplacementIds(
+  state: {
+    collapsedTabIds: ReadonlySet<number>;
+    detachedTabIds: ReadonlySet<number>;
+    attachedTabParentIds: ReadonlyMap<number, number>;
+  },
+  replacements: { delete(removedId: number): void },
+): void {
+  for (const id of state.collapsedTabIds) replacements.delete(id);
+  for (const id of state.detachedTabIds) replacements.delete(id);
+  for (const [childId, parentId] of state.attachedTabParentIds) {
+    replacements.delete(childId);
+    replacements.delete(parentId);
+  }
+}
+
 function getMigratedId(
   sourceId: number,
-  replacements: ReadonlyMap<number, number>,
+  replacements: ReadonlyTabIdReplacementMap,
 ): number {
   let id = sourceId;
   const visited = new Set<number>();
@@ -2088,6 +2249,9 @@ function getSidebarElements(document: Document): SidebarElements {
     shortcutEnabled: requireElement(document, "shortcut-enabled", HTMLInputElement),
     tabTitleFontSize: requireElement(document, "tab-title-font-size", HTMLInputElement),
     contentTreeEnabled: requireElement(document, "content-tree-enabled", HTMLInputElement),
+    floatingBallEnabled: document.getElementById("floating-ball-enabled") instanceof HTMLInputElement
+      ? document.getElementById("floating-ball-enabled") as HTMLInputElement
+      : document.createElement("input"),
     shortcutEditor: requireElement(document, "shortcut-editor-list", HTMLElement),
     shortcutError: requireElement(document, "shortcut-error", HTMLElement),
     shortcutAdd: requireElement(document, "shortcut-add", HTMLButtonElement),

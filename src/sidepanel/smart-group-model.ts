@@ -42,8 +42,10 @@ type CategorySnapshot = {
 };
 
 type WindowSnapshot = {
+  windowId: number;
   categories: Map<string, CategorySnapshot>;
   groupsById: Map<number, chrome.tabGroups.TabGroup>;
+  groupIdsByTitle: Map<string, number[]>;
   usedColors: Set<TabGroupColor>;
   groupCount: number;
 };
@@ -101,12 +103,17 @@ function buildWindowSnapshot(
   windowId: number,
 ): WindowSnapshot {
   const groupsById = new Map<number, chrome.tabGroups.TabGroup>();
+  const groupIdsByTitle = new Map<string, number[]>();
   const usedColors = new Set<TabGroupColor>();
   let groupCount = 0;
 
   for (const group of groups) {
     if (group.windowId !== windowId) continue;
     groupsById.set(group.id, group);
+    const title = group.title ?? "";
+    const groupIds = groupIdsByTitle.get(title);
+    if (groupIds) groupIds.push(group.id);
+    else groupIdsByTitle.set(title, [group.id]);
     usedColors.add(group.color);
     groupCount += 1;
   }
@@ -149,7 +156,14 @@ function buildWindowSnapshot(
     }
   }
 
-  return { categories, groupsById, usedColors, groupCount };
+  return {
+    windowId,
+    categories,
+    groupsById,
+    groupIdsByTitle,
+    usedColors,
+    groupCount,
+  };
 }
 
 /**
@@ -246,6 +260,55 @@ function selectBestMatch(matches: ReadonlyMap<number, GroupMatch>): GroupMatch |
 }
 
 /**
+ * 按精确标题复用分组，并把其余同名分组的成员合并到稳定目标中。
+ *
+ * Args:
+ *   snapshot: 当前窗口的分组及标题索引。
+ *   tabs: 当前标签快照。
+ *   title: 要复用的分组标题。
+ *   candidateIds: 尚未分组、应加入目标分组的标签 ID。
+ *
+ * Returns:
+ *   找到同名分组时返回复用操作；否则返回 undefined。
+ *
+ * Raises:
+ *   无。
+ */
+function createNamedGroupReuseOperation(
+  snapshot: WindowSnapshot,
+  tabs: readonly TabViewModel[],
+  title: string,
+  candidateIds: readonly number[],
+): SmartGroupOperation | undefined {
+  const matchingGroupIds = snapshot.groupIdsByTitle.get(title);
+  if (!matchingGroupIds || matchingGroupIds.length === 0) return undefined;
+
+  let targetGroupId = matchingGroupIds[0]!;
+  for (const groupId of matchingGroupIds) {
+    targetGroupId = Math.min(targetGroupId, groupId);
+  }
+
+  const matchingGroupIdSet = new Set(matchingGroupIds);
+  const candidateIdSet = new Set(candidateIds);
+  const tabIds = orderTabsByIndex(tabs)
+    .map(({ tab }) => tab)
+    .filter((tab) => (
+      tab.windowId === snapshot.windowId
+      && !tab.pinned
+      && (
+        candidateIdSet.has(tab.id)
+        || (
+          matchingGroupIdSet.has(tab.groupId)
+          && tab.groupId !== targetGroupId
+        )
+      )
+    ))
+    .map((tab) => tab.id);
+
+  return { kind: "reuse", groupId: targetGroupId, tabIds };
+}
+
+/**
  * 优先选择窗口未用色，并避免九色耗尽前与本批创建操作重复。
  */
 function selectGroupColor(
@@ -337,6 +400,21 @@ export function createOneClickGroupPlan(
 
   for (const category of snapshot.categories.values()) {
     if (category.candidateIds.length === 0) continue;
+    if (category.category.kind === "site") {
+      const namedReuse = createNamedGroupReuseOperation(
+        snapshot,
+        copiedTabs,
+        category.category.title,
+        category.candidateIds,
+      );
+      if (namedReuse) {
+        pending.push({
+          earliestIndex: category.earliestCandidateIndex,
+          operation: namedReuse,
+        });
+        continue;
+      }
+    }
     const bestMatch = selectBestMatch(category.matches);
     if (bestMatch) {
       pending.push({
@@ -368,10 +446,21 @@ export function createOneClickGroupPlan(
   }
 
   if (otherTabIds.length > 0) {
+    const namedReuse = createNamedGroupReuseOperation(
+      snapshot,
+      copiedTabs,
+      "其他",
+      otherTabIds,
+    );
     const validOtherGroup = otherGroupId === undefined
       ? undefined
       : snapshot.groupsById.get(otherGroupId);
-    pending.push(validOtherGroup
+    pending.push(namedReuse
+      ? {
+          earliestIndex: otherEarliestIndex,
+          operation: namedReuse,
+        }
+      : validOtherGroup
       ? {
           earliestIndex: otherEarliestIndex,
           operation: { kind: "reuse", groupId: validOtherGroup.id, tabIds: otherTabIds },

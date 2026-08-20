@@ -18,8 +18,9 @@ export function buildTabForest(
   tabs: readonly TabViewModel[],
   detachedTabIds: ReadonlySet<number> = new Set(),
   attachedTabParentIds: ReadonlyMap<number, number> = new Map(),
+  tabsAreOrdered = false,
 ): TabTreeNode[] {
-  const orderedTabs = [...tabs].sort(compareTabs);
+  const orderedTabs = tabsAreOrdered ? tabs : [...tabs].sort(compareTabs);
   const tabsById = new Map(orderedTabs.map((tab) => [tab.id, tab]));
   const parentById = new Map<number, number>();
 
@@ -61,8 +62,14 @@ export function flattenVisibleTabForest(
 ): VisibleTabTreeEntry[] {
   const activeAncestors = findActiveAncestors(forest);
   const entries: VisibleTabTreeEntry[] = [];
+  const stack = forest
+    .map((node) => ({ node, depth: 0, rootId: node.tab.id }))
+    .reverse();
 
-  const visit = (node: TabTreeNode, depth: number, rootId: number): void => {
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+    const { node, depth, rootId } = current;
     const hasChildren = node.children.length > 0;
     const collapsed = hasChildren && collapsedTabIds.has(node.tab.id);
     entries.push({
@@ -73,12 +80,11 @@ export function flattenVisibleTabForest(
       containsActiveDescendant: activeAncestors.has(node.tab.id),
       rootId,
     });
-    if (!collapsed) {
-      for (const child of node.children) visit(child, depth + 1, rootId);
+    if (collapsed) continue;
+    for (let index = node.children.length - 1; index >= 0; index -= 1) {
+      stack.push({ node: node.children[index]!, depth: depth + 1, rootId });
     }
-  };
-
-  for (const root of forest) visit(root, 0, root.tab.id);
+  }
   return entries;
 }
 
@@ -189,43 +195,52 @@ function removeCycleRelationships(
   parentById: Map<number, number>,
   orderedTabs: readonly TabViewModel[],
 ): void {
-  const state = new Map<number, 1 | 2>();
-  const stack: number[] = [];
-  const stackIndexes = new Map<number, number>();
+  const visited = new Set<number>();
   const cycleIds = new Set<number>();
 
-  const visit = (id: number): void => {
-    if (state.has(id)) return;
-    state.set(id, 1);
-    stackIndexes.set(id, stack.length);
-    stack.push(id);
-    const parentId = parentById.get(id);
-    if (parentId !== undefined) {
-      if (state.get(parentId) === 1) {
-        const cycleStart = stackIndexes.get(parentId) ?? stack.length;
-        for (const cycleId of stack.slice(cycleStart)) cycleIds.add(cycleId);
-      } else if (!state.has(parentId)) {
-        visit(parentId);
+  for (const tab of orderedTabs) {
+    if (visited.has(tab.id)) continue;
+    const path: number[] = [];
+    const pathIndexes = new Map<number, number>();
+    let currentId: number | undefined = tab.id;
+    while (currentId !== undefined && !visited.has(currentId)) {
+      const cycleStart = pathIndexes.get(currentId);
+      if (cycleStart !== undefined) {
+        for (let index = cycleStart; index < path.length; index += 1) {
+          cycleIds.add(path[index]!);
+        }
+        break;
       }
+      pathIndexes.set(currentId, path.length);
+      path.push(currentId);
+      currentId = parentById.get(currentId);
     }
-    stack.pop();
-    stackIndexes.delete(id);
-    state.set(id, 2);
-  };
-
-  for (const tab of orderedTabs) visit(tab.id);
+    for (const id of path) visited.add(id);
+  }
   for (const id of cycleIds) parentById.delete(id);
 }
 
 function findActiveAncestors(forest: readonly TabTreeNode[]): Set<number> {
   const ancestors = new Set<number>();
-  const visit = (node: TabTreeNode): boolean => {
-    let childContainsActive = false;
-    for (const child of node.children) childContainsActive = visit(child) || childContainsActive;
-    if (childContainsActive) ancestors.add(node.tab.id);
-    return node.tab.active || childContainsActive;
-  };
-  for (const root of forest) visit(root);
+  const parentById = new Map<number, number>();
+  const activeTabIds: number[] = [];
+  const stack = [...forest];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) continue;
+    if (node.tab.active) activeTabIds.push(node.tab.id);
+    for (const child of node.children) {
+      parentById.set(child.tab.id, node.tab.id);
+      stack.push(child);
+    }
+  }
+  for (const activeTabId of activeTabIds) {
+    let currentId = parentById.get(activeTabId);
+    while (currentId !== undefined) {
+      ancestors.add(currentId);
+      currentId = parentById.get(currentId);
+    }
+  }
   return ancestors;
 }
 

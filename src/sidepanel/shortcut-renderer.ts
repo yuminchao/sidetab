@@ -15,6 +15,7 @@ export type ShortcutRendererElements = {
   enabled: HTMLInputElement;
   fontSize: HTMLInputElement;
   contentTreeEnabled: HTMLInputElement;
+  floatingBallEnabled: HTMLInputElement;
   editor: HTMLElement;
   error: HTMLElement;
   add: HTMLButtonElement;
@@ -29,6 +30,7 @@ export type ShortcutRendererCallbacks = {
   onFaviconLoaded?(origin: string, url: string): void;
   onCachedFaviconFailed?(origin: string, url: string): void;
   onSave(settings: ShortcutSettings): Promise<ShortcutSettings>;
+  onFloatingBallEnabledChange?(enabled: boolean): Promise<void>;
 };
 
 export type ShortcutRenderer = {
@@ -36,6 +38,7 @@ export type ShortcutRenderer = {
   setFaviconsByOrigin(favicons: ReadonlyMap<string, string>): void;
   setCachedFaviconsByOrigin(favicons: ReadonlyMap<string, string>): void;
   openSettings(settings: ShortcutSettings): void;
+  setFloatingBallEnabled(enabled: boolean): void;
   setError(message: string): void;
   destroy(): void;
 };
@@ -56,6 +59,7 @@ export function createShortcutRenderer(
   let active = true;
   let faviconsByOrigin = new Map<string, string>();
   let cachedFaviconsByOrigin = new Map<string, string>();
+  let currentFloatingBallEnabled = false;
   const shortcutButtons = new Map<string, HTMLButtonElement>();
 
   const setError = (message: string) => {
@@ -130,6 +134,7 @@ export function createShortcutRenderer(
     elements.enabled.checked = session.draft.enabled;
     elements.fontSize.value = String(session.draft.tabTitleFontSize);
     elements.contentTreeEnabled.checked = session.draft.contentTreeEnabled;
+    elements.floatingBallEnabled.checked = currentFloatingBallEnabled;
     setError("");
     renderEditor();
     if (!elements.dialog.open) {
@@ -387,11 +392,16 @@ export function createShortcutRenderer(
     setError("");
     setFormBusy(true);
     try {
-      const saved = await callbacks.onSave(validation.value);
+      const floatingBallEnabled = elements.floatingBallEnabled.checked;
+      const floatingBallSave = elements.floatingBallEnabled.id === "floating-ball-enabled"
+        ? callbacks.onFloatingBallEnabledChange?.(floatingBallEnabled) ?? Promise.resolve()
+        : Promise.resolve();
+      const [saved] = await Promise.all([callbacks.onSave(validation.value), floatingBallSave]);
       if (!isCurrentSession(submittedSession)) {
         return;
       }
       current = copySettings(saved);
+      currentFloatingBallEnabled = floatingBallEnabled;
       renderStrip(current);
       previewFontSize(current.tabTitleFontSize);
       submittedSession.saving = false;
@@ -471,6 +481,11 @@ export function createShortcutRenderer(
     openSettings(settings) {
       current = copySettings(settings);
       showSettings(current);
+    },
+
+    setFloatingBallEnabled(enabled) {
+      currentFloatingBallEnabled = enabled;
+      if (!session) elements.floatingBallEnabled.checked = enabled;
     },
 
     setError,

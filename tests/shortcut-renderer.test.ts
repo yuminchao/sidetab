@@ -46,6 +46,9 @@ function createFixture(): ShortcutRendererElements & {
   const contentTreeEnabled = document.createElement("input");
   contentTreeEnabled.id = "content-tree-enabled";
   contentTreeEnabled.type = "checkbox";
+  const floatingBallEnabled = document.createElement("input");
+  floatingBallEnabled.id = "floating-ball-enabled";
+  floatingBallEnabled.type = "checkbox";
   const editor = document.createElement("div");
   const error = document.createElement("p");
   const add = document.createElement("button");
@@ -61,6 +64,7 @@ function createFixture(): ShortcutRendererElements & {
     fontSize,
     enabled,
     contentTreeEnabled,
+    floatingBallEnabled,
     editor,
     error,
     add,
@@ -84,6 +88,7 @@ function createFixture(): ShortcutRendererElements & {
     fontSize,
     enabled,
     contentTreeEnabled: form.querySelector<HTMLInputElement>("#content-tree-enabled")!,
+    floatingBallEnabled: form.querySelector<HTMLInputElement>("#floating-ball-enabled")!,
     editor,
     error,
     add,
@@ -110,6 +115,7 @@ describe("shortcut renderer", () => {
   let onFontSizePreview: ReturnType<typeof vi.fn>;
   let onFaviconLoaded: ReturnType<typeof vi.fn>;
   let onCachedFaviconFailed: ReturnType<typeof vi.fn>;
+  let onFloatingBallEnabledChange: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     elements = createFixture();
@@ -118,6 +124,41 @@ describe("shortcut renderer", () => {
     onFontSizePreview = vi.fn();
     onFaviconLoaded = vi.fn();
     onCachedFaviconFailed = vi.fn();
+    onFloatingBallEnabledChange = vi.fn().mockResolvedValue(undefined);
+  });
+
+  it("shows the persisted floating ball setting and saves its changed value", async () => {
+    const renderer = createShortcutRenderer(elements, {
+      onOpen,
+      onSave,
+      onFloatingBallEnabledChange,
+    });
+    renderer.setFloatingBallEnabled(true);
+    renderer.openSettings(settings());
+    expect(elements.floatingBallEnabled.checked).toBe(true);
+
+    elements.floatingBallEnabled.checked = false;
+    submit(elements.form);
+    await vi.waitFor(() => expect(elements.dialog.close).toHaveBeenCalledOnce());
+
+    expect(onFloatingBallEnabledChange).toHaveBeenCalledWith(false);
+  });
+
+  it("keeps the settings dialog open when the floating ball setting cannot be saved", async () => {
+    onFloatingBallEnabledChange.mockRejectedValue(new Error("无法保存悬浮球设置"));
+    const renderer = createShortcutRenderer(elements, {
+      onOpen,
+      onSave,
+      onFloatingBallEnabledChange,
+    });
+    renderer.openSettings(settings());
+    elements.floatingBallEnabled.checked = true;
+
+    submit(elements.form);
+    await vi.waitFor(() => expect(elements.error.textContent).toBe("无法保存悬浮球设置"));
+
+    expect(elements.dialog.open).toBe(true);
+    expect(elements.dialog.close).not.toHaveBeenCalled();
   });
 
   it("previews valid font sizes and restores the saved size on cancel, Escape, or close", () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TabStore } from "../src/sidepanel/tab-store";
+import type { TabViewModel } from "../src/sidepanel/tab-model";
 
 function tab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
   return {
@@ -254,6 +255,22 @@ describe("TabStore", () => {
     expect(store.list().map((item) => [item.id, item.active])).toEqual([[1, false], [2, true]]);
   });
 
+  it("keeps unrelated tab models when switching the active tab", () => {
+    const store = new TabStore();
+    store.initialize([
+      tab({ id: 1, index: 0, active: true }),
+      tab({ id: 2, index: 1, active: false }),
+      tab({ id: 3, index: 2, active: false }),
+    ]);
+    const before = store.snapshot();
+
+    store.activate(2);
+
+    expect(store.snapshot().find((item) => item.id === 3)).toBe(
+      before.find((item) => item.id === 3),
+    );
+  });
+
   it.each([
     ["front", 2, 0, [2, 1, 3]],
     ["middle", 1, 1, [2, 1, 3]],
@@ -304,5 +321,121 @@ describe("TabStore", () => {
     store.move(1, 1.5);
 
     expect(store.list().map((item) => [item.id, item.index])).toEqual([[1, 0], [2, 1]]);
+  });
+
+  it.each([
+    ["initialize", (store: TabStore) => {
+      store.initialize([tab({ id: 3, index: 2 }), tab({ id: 2, index: 1 }), tab({ id: 1, index: 0 })]);
+    }, [1, 2, 3]],
+    ["add", (store: TabStore) => {
+      store.add(tab({ id: 4, index: 3 }));
+    }, [1, 2, 3, 4]],
+    ["update", (store: TabStore) => {
+      store.update(2, { title: "Renamed" });
+    }, [1, 2, 3]],
+    ["remove", (store: TabStore) => {
+      store.remove(2);
+    }, [1, 3]],
+    ["move", (store: TabStore) => {
+      store.move(2, 0);
+    }, [2, 1, 3]],
+    ["activate", (store: TabStore) => {
+      store.activate(2);
+    }, [1, 2, 3]],
+    ["replaceId", (store: TabStore) => {
+      store.replaceId(2, tab({ id: 9, index: 1, title: "Replacement" }));
+    }, [1, 9, 3]],
+  ])("reflects %s in the sorted list after the mutation", (_name, mutate, expectedIds) => {
+    const store = new TabStore();
+    store.initialize([
+      tab({ id: 1, index: 0, title: "One" }),
+      tab({ id: 2, index: 1, title: "Two" }),
+      tab({ id: 3, index: 2, title: "Three" }),
+    ]);
+
+    mutate(store);
+
+    expect(store.list().map((item) => item.id)).toEqual(expectedIds);
+    expect(store.snapshot().map((item) => item.id)).toEqual(expectedIds);
+  });
+
+  it("reflects content changes in the snapshot after update", () => {
+    const store = new TabStore();
+    store.initialize([tab({ id: 1, index: 0, title: "One" })]);
+
+    store.update(1, { title: "Renamed" });
+
+    expect(store.snapshot()[0]?.title).toBe("Renamed");
+    expect(store.get(1)?.title).toBe("Renamed");
+  });
+
+  it("returns the shared sorted snapshot for read-only consumers", () => {
+    const store = new TabStore();
+    store.initialize([
+      tab({ id: 1, index: 0, title: "One" }),
+      tab({ id: 2, index: 1, title: "Two" }),
+    ]);
+
+    const first = store.snapshot();
+    expect(first.map((item) => item.id)).toEqual([1, 2]);
+    // 零拷贝：无变更时返回同一数组引用
+    expect(store.snapshot()).toBe(first);
+    // 变更后缓存失效，返回新数组
+    store.remove(1);
+    expect(store.snapshot()).not.toBe(first);
+    expect(store.snapshot().map((item) => item.id)).toEqual([2]);
+  });
+
+  it("does not let snapshot consumers mutate stored tab models", () => {
+    const store = new TabStore();
+    store.initialize([tab({ id: 1, index: 0, title: "Original" })]);
+
+    const snapshot = store.snapshot();
+    expect(() => {
+      (snapshot[0] as TabViewModel).title = "Mutated";
+    }).toThrow();
+
+    expect(store.get(1)?.title).toBe("Original");
+  });
+
+  it("does not let snapshot consumers mutate the cached array", () => {
+    const store = new TabStore();
+    store.initialize([
+      tab({ id: 1, index: 0 }),
+      tab({ id: 2, index: 1 }),
+    ]);
+
+    const snapshot = store.snapshot();
+    expect(() => {
+      (snapshot as TabViewModel[]).reverse();
+    }).toThrow();
+
+    expect(store.snapshot().map((item) => item.id)).toEqual([1, 2]);
+  });
+
+  it("keeps snapshot ordering identical to list ordering", () => {
+    const store = new TabStore();
+    store.initialize([
+      tab({ id: 1, index: 0 }),
+      tab({ id: 2, index: 1, pinned: true }),
+      tab({ id: 3, index: 2 }),
+      tab({ id: 4, index: 3, pinned: true }),
+    ]);
+
+    expect(store.snapshot().map((item) => item.id)).toEqual(
+      store.list().map((item) => item.id),
+    );
+  });
+
+  it("refreshes the snapshot after each mutation", () => {
+    const store = new TabStore();
+    store.initialize([tab({ id: 1, index: 0 }), tab({ id: 2, index: 1 })]);
+    expect(store.snapshot().map((item) => item.id)).toEqual([1, 2]);
+
+    store.remove(1);
+    expect(store.snapshot().map((item) => item.id)).toEqual([2]);
+
+    store.add(tab({ id: 3, index: 2 }));
+    expect(store.snapshot().map((item) => item.id)).toEqual([2, 3]);
   });
 });

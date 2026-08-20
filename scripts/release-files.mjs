@@ -6,6 +6,7 @@ export const EXPECTED_FILES = Object.freeze(
     "THIRD_PARTY_NOTICES.md",
     "manifest.json",
     "background/service-worker.js",
+    "content/floating-ball.js",
     "sidepanel/index.html",
     "sidepanel/sidebar.css",
     "sidepanel/sidebar.js",

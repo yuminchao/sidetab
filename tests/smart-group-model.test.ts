@@ -140,6 +140,28 @@ describe("createQuickGroupPlan", () => {
 });
 
 describe("createOneClickGroupPlan", () => {
+  it("reuses named groups and merges every duplicate group into a stable target", () => {
+    const tabs = [
+      tab({ id: 1, index: 0, url: "https://example.com/new" }),
+      tab({ id: 2, index: 1, url: "https://example.com/kept", groupId: 20 }),
+      tab({ id: 3, index: 2, url: "https://unrelated.example/merged", groupId: 21 }),
+      tab({ id: 4, index: 3, url: "https://single-a.example/" }),
+      tab({ id: 5, index: 4, url: "https://single-b.example/" }),
+      tab({ id: 6, index: 5, url: "https://also-unrelated.example/merged", groupId: 31 }),
+    ];
+    const groups = [
+      group({ id: 21, title: "example.com", color: "red" }),
+      group({ id: 20, title: "example.com", color: "blue" }),
+      group({ id: 31, title: "其他", color: "yellow" }),
+      group({ id: 30, title: "其他", color: "green" }),
+    ];
+
+    expect(createOneClickGroupPlan(tabs, groups)?.operations).toEqual([
+      { kind: "reuse", groupId: 20, tabIds: [1, 3] },
+      { kind: "reuse", groupId: 30, tabIds: [4, 5, 6] },
+    ]);
+  });
+
   it("reuses matching groups, groups repeated sites, and pools ordinary site singletons into Other", () => {
     const tabs = [
       tab({ id: 1, index: 0, url: "https://reuse.example/a", groupId: 7 }),
@@ -178,7 +200,7 @@ describe("createOneClickGroupPlan", () => {
     });
   });
 
-  it("only reuses a valid Other role in the current window and ignores group titles", () => {
+  it("reuses the exact Other title in the current window before its saved role", () => {
     const tabs = [
       tab({ id: 1, index: 0, url: "https://one.example/" }),
       tab({ id: 2, index: 1, url: "https://two.example/" }),
@@ -189,12 +211,14 @@ describe("createOneClickGroupPlan", () => {
     ];
 
     expect(createOneClickGroupPlan(tabs, groups)?.operations).toEqual([
-      { kind: "create", title: "其他", color: "blue", tabIds: [1, 2], role: "other" },
+      { kind: "reuse", groupId: 20, tabIds: [1, 2] },
     ]);
     expect(createOneClickGroupPlan(tabs, groups, 20)?.operations).toEqual([
       { kind: "reuse", groupId: 20, tabIds: [1, 2] },
     ]);
-    expect(createOneClickGroupPlan(tabs, groups, 21)?.operations[0]).toMatchObject({ kind: "create" });
+    expect(createOneClickGroupPlan(tabs, groups, 21)?.operations).toEqual([
+      { kind: "reuse", groupId: 20, tabIds: [1, 2] },
+    ]);
   });
 
   it("does not move pinned, grouped, unsupported, or other-window tabs", () => {
