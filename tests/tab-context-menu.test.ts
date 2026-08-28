@@ -473,6 +473,40 @@ describe("tab context menu", () => {
     menu.destroy();
   });
 
+  it("clears an open menu while a newer bookmark lookup is pending", async () => {
+    const second = deferred<boolean>();
+    const canAddBookmark = vi.fn()
+      .mockResolvedValueOnce(true)
+      .mockReturnValueOnce(second.promise);
+    const onCommand = vi.fn();
+    const menu = createTabContextMenu(
+      { document, list, viewport: window },
+      { getContext: menuContext, getGroups: () => [], canAddBookmark, onCommand },
+    );
+    const popup = document.querySelector<HTMLElement>(
+      ".tab-context-menu:not(.tab-context-submenu)",
+    )!;
+
+    context(row(1));
+    await vi.waitFor(() => expect(row(1).dataset.contextSelected).toBe("true"));
+    const oldAddBookmark = popup.querySelector<HTMLButtonElement>(
+      "[data-menu-action='add-bookmark']",
+    )!;
+
+    context(row(2));
+
+    expect(popup.hidden).toBe(true);
+    expect(row(1).dataset.contextSelected).toBeUndefined();
+    expect(row(2).dataset.contextSelected).toBeUndefined();
+    oldAddBookmark.click();
+    expect(onCommand).not.toHaveBeenCalled();
+
+    second.resolve(true);
+    await vi.waitFor(() => expect(row(2).dataset.contextSelected).toBe("true"));
+    expect(popup.hidden).toBe(false);
+    menu.destroy();
+  });
+
   it("does not open when the row or tab URL changes during the bookmark query", async () => {
     const availability = deferred<boolean>();
     let currentUrl = tabs[0]!.url;

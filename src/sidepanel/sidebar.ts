@@ -239,6 +239,7 @@ async function startSidebarInternal(
   let resyncFollowUpRequested = false;
   let resyncPromise: Promise<void> | undefined;
   let addShortcutBusy = false;
+  const bookmarkBusyTabIds = new Set<number>();
   let appearanceSettingsBusy = false;
   let restoreRecentlyClosedBusy = false;
   let groupsReady = false;
@@ -1012,13 +1013,23 @@ async function startSidebarInternal(
       },
       getGroups: () => groupStore.list(),
       getRecentlyClosedSessionId: () => recentlyClosed.getSessionId(),
-      canAddBookmark: (tab) => bookmarkActions.canAdd(tab),
+      canAddBookmark: (tab) => bookmarkBusyTabIds.has(tab.id)
+        ? Promise.resolve(false)
+        : bookmarkActions.canAdd(tab),
       onBeforeOpen: () => groupContextMenu?.close(),
       onCommand(command) {
         if (command.action === "add-bookmark") {
           const latestTab = tabStore.get(command.tabId);
-          if (!latestTab || latestTab.id !== command.tabId) return;
-          runTabOperation(bookmarkActions.add(latestTab));
+          if (
+            !latestTab
+            || latestTab.id !== command.tabId
+            || bookmarkBusyTabIds.has(command.tabId)
+          ) return;
+          bookmarkBusyTabIds.add(command.tabId);
+          runTabOperation(
+            bookmarkActions.add(latestTab),
+            () => bookmarkBusyTabIds.delete(command.tabId),
+          );
           return;
         }
         if (command.action === "add-shortcut") {
@@ -1728,7 +1739,11 @@ async function startSidebarInternal(
             : tabStore.get(tab.id);
           const model = tabStore.replace(tab);
           updates.push({ previous, model });
-          if (previous && model && previous.pinned !== model.pinned) {
+          if (
+            previous
+            && model
+            && (previous.pinned !== model.pinned || previous.url !== model.url)
+          ) {
             contextMenu.closeForTab(model.id);
           }
         }

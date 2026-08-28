@@ -325,7 +325,8 @@ export function createTabContextMenu(
     x: number,
     y: number,
   ): void {
-    const generation = ++openGeneration;
+    close();
+    const generation = openGeneration;
     const { row, context } = match;
     const { id: tabId, url } = context.tab;
     pendingTabId = tabId;

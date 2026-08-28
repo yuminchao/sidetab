@@ -53,6 +53,7 @@ export function createFakeChrome(options: {
 } = {}) {
   let tabState = (options.tabs ?? []).map((tab) => ({ ...tab }));
   let groupState = (options.groups ?? []).map((group) => ({ ...group }));
+  let bookmarkState = (options.bookmarkItems ?? []).map((item) => ({ ...item }));
   let recentlyClosedState = (options.recentlyClosedSessions ?? []).map((session) => ({
     ...session,
   }));
@@ -243,15 +244,30 @@ export function createFakeChrome(options: {
   const storageSet = vi.fn<(items: Record<string, unknown>) => Promise<void>>(
     async () => undefined,
   );
-  const bookmarkSearch = vi.fn(async () => options.bookmarkItems ?? []);
+  const bookmarkSearch = vi.fn(async (
+    query: string | { query?: string; url?: string; title?: string },
+  ): Promise<chrome.bookmarks.BookmarkTreeNode[]> =>
+    typeof query === "string"
+      ? bookmarkState.map((item) => ({ ...item }))
+      : bookmarkState
+        .filter((item) => query.url === undefined || item.url === query.url)
+        .map((item) => ({ ...item })));
+  let nextBookmarkId = 1;
   const bookmarkCreate = vi.fn(async (
     details: chrome.bookmarks.CreateDetails,
-  ): Promise<chrome.bookmarks.BookmarkTreeNode> => ({
-    id: "created-bookmark",
-    title: details.title ?? "",
-    url: details.url,
-    syncing: false,
-  }));
+  ): Promise<chrome.bookmarks.BookmarkTreeNode> => {
+    while (bookmarkState.some((item) => item.id === `created-bookmark-${nextBookmarkId}`)) {
+      nextBookmarkId += 1;
+    }
+    const created = {
+      id: `created-bookmark-${nextBookmarkId++}`,
+      title: details.title ?? "",
+      url: details.url,
+      syncing: false,
+    };
+    bookmarkState.push(created);
+    return { ...created };
+  });
   const historySearch = vi.fn(async () => options.historyItems ?? []);
   const sessionsGetRecentlyClosed = vi.fn(async () => recentlyClosedState);
   const sessionsRestore = vi.fn(async (sessionId: string) => {
