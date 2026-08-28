@@ -5,6 +5,7 @@ import { createShortcutStore, type StorageArea } from "./shortcut-store";
 import { createShortcutFaviconCacheStore } from "./shortcut-favicon-cache";
 import { createOriginFaviconMap, getHttpOrigin } from "./favicon-model";
 import type { BookmarkSearchApi } from "./bookmark-search";
+import { createBookmarkActions } from "./bookmark-actions";
 import {
   createRecentlyClosedTabController,
   type SessionsApi,
@@ -72,7 +73,7 @@ export type SidebarDependencies = {
   windows: Pick<typeof chrome.windows, "getCurrent">;
   storage: StorageArea;
   sessionStorage?: StorageArea;
-  bookmarks: BookmarkSearchApi;
+  bookmarks: BookmarkSearchApi & Pick<typeof chrome.bookmarks, "create">;
   history: HistorySearchApi;
   sessions: SessionsApi;
   document: Document;
@@ -188,6 +189,7 @@ async function startSidebarInternal(
   const tabStore = new TabStore();
   const groupStore = new TabGroupStore();
   const tabActions = createTabActions(deps.tabs);
+  const bookmarkActions = createBookmarkActions(deps.bookmarks);
   const groupActions = createTabGroupActions(deps.tabs, deps.tabGroups);
   const shortcutStore = createShortcutStore(deps.storage);
   const floatingBallStore = createFloatingBallSettingsStore(deps.storage);
@@ -1010,8 +1012,15 @@ async function startSidebarInternal(
       },
       getGroups: () => groupStore.list(),
       getRecentlyClosedSessionId: () => recentlyClosed.getSessionId(),
+      canAddBookmark: (tab) => bookmarkActions.canAdd(tab),
       onBeforeOpen: () => groupContextMenu?.close(),
       onCommand(command) {
+        if (command.action === "add-bookmark") {
+          const latestTab = tabStore.get(command.tabId);
+          if (!latestTab || latestTab.id !== command.tabId) return;
+          runTabOperation(bookmarkActions.add(latestTab));
+          return;
+        }
         if (command.action === "add-shortcut") {
           void addTabShortcut(command.tabId);
           return;

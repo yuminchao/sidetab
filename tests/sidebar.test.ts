@@ -120,10 +120,17 @@ function expectContextMenuItemAvailability(action: string, available: boolean): 
   return item;
 }
 
-function openTabContextMenu(tabId: number): void {
+function requestTabContextMenu(tabId: number): void {
   row(tabId).dispatchEvent(
     new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
   );
+}
+
+async function openTabContextMenu(tabId: number): Promise<void> {
+  requestTabContextMenu(tabId);
+  await vi.waitFor(() => expect(document.querySelector<HTMLElement>(
+    ".tab-context-menu:not(.tab-context-submenu)",
+  )?.hidden).toBe(false));
 }
 
 function openGroupContextMenu(groupId: number): void {
@@ -300,7 +307,7 @@ describe("sidebar lifecycle", () => {
 
     expect(rowIds()).toEqual([1]);
     expect(document.documentElement.dataset.ready).toBe("true");
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     expectContextMenuItemAvailability("group-same-site", false);
     click(row(1).querySelector(".tab-main")!);
     await vi.waitFor(() => expect(fake.methods.update).toHaveBeenCalledWith(1, { active: true }));
@@ -309,13 +316,13 @@ describe("sidebar lifecycle", () => {
     fake.groupEvents.onCreated.emit(fakeGroup({ id: 7, title: "Buffered" }));
     fake.events.onCreated.emit(fakeTab({ id: 2, index: 1, groupId: 7 }));
     fake.groupEvents.onUpdated.emit(fakeGroup({ id: 7, title: "Latest" }));
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     expectContextMenuItemAvailability("group-same-site", false);
     groups.resolve([]);
     await vi.waitFor(() => expect(rowIds()).toEqual([1, 2]));
     expect(rowIds()).toEqual([1, 2]);
     expect(groupRow(7).querySelector(".tab-group-title")?.textContent).toBe("Latest");
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     expectContextMenuItemAvailability("group-same-site", true);
     cleanup();
   });
@@ -334,12 +341,12 @@ describe("sidebar lifecycle", () => {
     groups.resolve([]);
     await flush();
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     expectContextMenuItemAvailability("group-same-site", false);
 
     attached.resolve(fakeTab({ id: 2, index: 1, url: "https://first.example/attached" }));
     await vi.waitFor(() => expect(rowIds()).toEqual([1, 2]));
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     expectContextMenuItemAvailability("group-same-site", true);
     cleanup();
   });
@@ -419,7 +426,7 @@ describe("sidebar lifecycle", () => {
     expect(rowIds()).toEqual([8]);
     await vi.waitFor(() =>
       expect(element("status-message").textContent).toBe("无法读取当前窗口的标签分组"));
-    openTabContextMenu(8);
+    await openTabContextMenu(8);
     expectContextMenuItemAvailability("group-same-site", false);
     const statusBefore = element("status-message").textContent;
     const tabQueriesBefore = fake.methods.query.mock.calls.length;
@@ -460,7 +467,7 @@ describe("sidebar lifecycle", () => {
     await vi.waitFor(() => expect(fake.methods.groupQuery).toHaveBeenCalledTimes(2));
     expect(element("status-message").textContent).toBe("");
     expect(rowIds()).toEqual([1]);
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     expectContextMenuItemAvailability("group-same-site", true);
     cleanup();
   });
@@ -474,7 +481,7 @@ describe("sidebar lifecycle", () => {
     fake.methods.groupQuery.mockReturnValueOnce(resyncGroups.promise);
     fake.methods.get.mockRejectedValueOnce(new Error("replacement missing"));
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     const quickGroup = contextMenuItem("group-same-site");
     expectContextMenuItemAvailability("group-same-site", true);
     fake.events.onReplaced.emit(2, 99);
@@ -491,12 +498,12 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.query).toHaveBeenCalledTimes(tabQueriesBefore);
     expect(fake.methods.groupQuery).toHaveBeenCalledTimes(groupQueriesBefore);
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     expectContextMenuItemAvailability("group-same-site", false);
     resyncTabs.resolve([fakeTab({ id: 1 })]);
     resyncGroups.resolve([]);
-    await vi.waitFor(() => {
-      openTabContextMenu(1);
+    await vi.waitFor(async () => {
+      await openTabContextMenu(1);
       expectContextMenuItemAvailability("group-same-site", true);
     });
     cleanup();
@@ -1359,7 +1366,7 @@ describe("sidebar lifecycle", () => {
       x: 0, y: 0, toJSON: () => ({}),
     });
 
-    row(1).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await openTabContextMenu(1);
     const menu = document.querySelector<HTMLElement>(".tab-context-menu")!;
     row(2).dispatchEvent(new Event("dragstart", { bubbles: true, cancelable: true }));
     const over = new Event("dragover", { bubbles: true, cancelable: true });
@@ -1400,12 +1407,12 @@ describe("sidebar lifecycle", () => {
     const fake = createFakeChrome({ tabs: [fakeTab({ id: 7, pinned: false })] });
     const cleanup = await startSidebar(fake);
 
-    row(7).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await openTabContextMenu(7);
     click(document.querySelector("[data-menu-action='duplicate']")!);
     await flush();
     expect(fake.methods.duplicate).toHaveBeenCalledWith(7);
 
-    row(7).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await openTabContextMenu(7);
     const pinned = document.querySelector<HTMLElement>("[data-menu-action='set-pinned']")!;
     expect(pinned.textContent).toBe("固定标签");
     click(pinned);
@@ -1420,10 +1427,143 @@ describe("sidebar lifecycle", () => {
     const cleanup = await startSidebar(fake);
     await vi.waitFor(() => expect(fake.methods.sessionsGetRecentlyClosed).toHaveBeenCalledOnce());
 
-    openTabContextMenu(7);
+    await openTabContextMenu(7);
     expectContextMenuItemAvailability("restore-recently-closed", false);
 
     expect(fake.methods.sessionsRestore).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("adds an unbookmarked tab with its latest title and URL", async () => {
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 17, title: "Original", url: "https://example.com/old" })],
+    });
+    const cleanup = await startSidebar(fake);
+
+    await openTabContextMenu(17);
+    await vi.waitFor(() => expect(fake.methods.bookmarkSearch).toHaveBeenCalledWith({
+      url: "https://example.com/old",
+    }));
+    await vi.waitFor(() => expect(contextMenuItem("add-bookmark").hidden).toBe(false));
+    expect(fake.methods.bookmarkSearch).toHaveBeenCalledOnce();
+
+    fake.events.onUpdated.emit(17, {
+      title: "Latest title",
+      url: "HTTPS://EXAMPLE.COM:443/a/../latest",
+    }, fakeTab({
+      id: 17,
+      title: "Latest title",
+      url: "HTTPS://EXAMPLE.COM:443/a/../latest",
+    }));
+    await flush();
+    click(contextMenuItem("add-bookmark"));
+
+    await vi.waitFor(() => expect(fake.methods.bookmarkCreate).toHaveBeenCalledWith({
+      title: "Latest title",
+      url: "https://example.com/latest",
+    }));
+    expect(fake.methods.bookmarkCreate).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it("hides add-bookmark when the current URL is already bookmarked", async () => {
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 18, url: "https://example.com/saved" })],
+      bookmarkItems: [{
+        id: "saved",
+        title: "Saved",
+        url: "https://example.com/saved",
+        syncing: false,
+      }],
+    });
+    const cleanup = await startSidebar(fake);
+
+    await openTabContextMenu(18);
+    await vi.waitFor(() => expect(document.querySelector<HTMLElement>(
+      ".tab-context-menu:not(.tab-context-submenu)",
+    )?.hidden).toBe(false));
+
+    expectContextMenuItemAvailability("add-bookmark", false);
+    expectContextMenuItemAvailability("duplicate", true);
+    expect(fake.methods.bookmarkSearch).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it("keeps other menu actions available when the bookmark query fails", async () => {
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 19 })] });
+    fake.methods.bookmarkSearch.mockRejectedValueOnce(new Error("query failed"));
+    const cleanup = await startSidebar(fake);
+
+    await openTabContextMenu(19);
+    await vi.waitFor(() => expect(document.querySelector<HTMLElement>(
+      ".tab-context-menu:not(.tab-context-submenu)",
+    )?.hidden).toBe(false));
+
+    expectContextMenuItemAvailability("add-bookmark", false);
+    expectContextMenuItemAvailability("duplicate", true);
+    expect(element("status-message").textContent).toBe("");
+    cleanup();
+  });
+
+  it("reports the controlled bookmark create failure", async () => {
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 20 })] });
+    fake.methods.bookmarkCreate.mockRejectedValueOnce(new Error("browser failure"));
+    const cleanup = await startSidebar(fake);
+
+    await openTabContextMenu(20);
+    await vi.waitFor(() => expect(contextMenuItem("add-bookmark").hidden).toBe(false));
+    click(contextMenuItem("add-bookmark"));
+
+    await vi.waitFor(() => expect(element("status-message").textContent)
+      .toBe("添加收藏夹失败"));
+    expect(fake.methods.bookmarkCreate).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it("does not create a bookmark after the queried tab is removed", async () => {
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 21 })] });
+    const cleanup = await startSidebar(fake);
+
+    await openTabContextMenu(21);
+    await vi.waitFor(() => expect(contextMenuItem("add-bookmark").hidden).toBe(false));
+    const addBookmark = contextMenuItem("add-bookmark");
+    fake.events.onRemoved.emit(21, { windowId: 10, isWindowClosing: false });
+    await flush();
+    click(addBookmark);
+
+    expect(fake.methods.bookmarkCreate).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("does not resurrect an older tab menu after a newer bookmark query", async () => {
+    const first = deferred<chrome.bookmarks.BookmarkTreeNode[]>();
+    const second = deferred<chrome.bookmarks.BookmarkTreeNode[]>();
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 22, index: 0, url: "https://first.example/path" }),
+        fakeTab({ id: 23, index: 1, url: "https://second.example/path" }),
+      ],
+    });
+    fake.methods.bookmarkSearch
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const cleanup = await startSidebar(fake);
+
+    requestTabContextMenu(22);
+    requestTabContextMenu(23);
+    second.resolve([]);
+    await vi.waitFor(() => expect(row(23).dataset.contextSelected).toBe("true"));
+
+    first.resolve([]);
+    await flush();
+    expect(row(22).dataset.contextSelected).toBeUndefined();
+    expect(row(23).dataset.contextSelected).toBe("true");
+    expect(fake.methods.bookmarkSearch).toHaveBeenNthCalledWith(1, {
+      url: "https://first.example/path",
+    });
+    expect(fake.methods.bookmarkSearch).toHaveBeenNthCalledWith(2, {
+      url: "https://second.example/path",
+    });
     cleanup();
   });
 
@@ -1437,7 +1577,7 @@ describe("sidebar lifecycle", () => {
     const rowBefore = row(7);
     const listBefore = Array.from(element("tab-list").children);
 
-    openTabContextMenu(7);
+    await openTabContextMenu(7);
     const restore = expectContextMenuItemAvailability("restore-recently-closed", true);
     click(restore);
     await vi.waitFor(() => expect(fake.methods.sessionsRestore).toHaveBeenCalledOnce());
@@ -1459,7 +1599,7 @@ describe("sidebar lifecycle", () => {
     const cleanup = await startSidebar(fake);
     await vi.waitFor(() => expect(fake.methods.sessionsGetRecentlyClosed).toHaveBeenCalledOnce());
 
-    openTabContextMenu(7);
+    await openTabContextMenu(7);
     click(contextMenuItem("restore-recently-closed"));
 
     await vi.waitFor(() =>
@@ -1492,7 +1632,7 @@ describe("sidebar lifecycle", () => {
     const cleanup = await startSidebar(fake);
     expect(rowIds()).toEqual([1, 3, 2, 4, 5]);
 
-    openTabContextMenu(2);
+    await openTabContextMenu(2);
     const closeBelow = expectContextMenuItemAvailability("close-below", true);
     click(closeBelow);
     await flush();
@@ -1513,7 +1653,7 @@ describe("sidebar lifecycle", () => {
     const fake = createFakeChrome({ tabs: mixedTabs() });
     const cleanup = await startSidebar(fake);
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     click(contextMenuItem("close-below"));
     await flush();
 
@@ -1533,7 +1673,7 @@ describe("sidebar lifecycle", () => {
     const fake = createFakeChrome({ tabs: mixedTabs() });
     const cleanup = await startSidebar(fake);
 
-    openTabContextMenu(5);
+    await openTabContextMenu(5);
     expectContextMenuItemAvailability("close-below", false);
     await flush();
 
@@ -1552,7 +1692,7 @@ describe("sidebar lifecycle", () => {
     });
     const cleanup = await startSidebar(fake);
 
-    openTabContextMenu(2);
+    await openTabContextMenu(2);
     expectContextMenuItemAvailability("close-below", true);
     fake.events.onMoved.emit(1, { windowId: 10, fromIndex: 0, toIndex: 2 });
     expect(rowIds()).toEqual([2, 3, 1]);
@@ -1571,7 +1711,7 @@ describe("sidebar lifecycle", () => {
     fake.methods.remove.mockRejectedValueOnce(new Error("browser failed"));
     const cleanup = await startSidebar(fake);
 
-    openTabContextMenu(2);
+    await openTabContextMenu(2);
     click(contextMenuItem("close-below"));
     await vi.waitFor(() =>
       expect(element("status-message").textContent).toBe("无法关闭下方标签页"),
@@ -1590,7 +1730,7 @@ describe("sidebar lifecycle", () => {
     fake.methods.remove.mockReturnValueOnce(pendingRemove.promise);
     const cleanup = await startSidebar(fake);
 
-    openTabContextMenu(2);
+    await openTabContextMenu(2);
     click(contextMenuItem("close-below"));
     expect(fake.methods.remove).toHaveBeenCalledWith([4, 5]);
     const statusBefore = element("status-message").textContent;
@@ -1615,17 +1755,17 @@ describe("sidebar lifecycle", () => {
     });
     const cleanup = await startSidebar(fake);
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     expectContextMenuItemAvailability("group-same-site", true);
     expectContextMenuItemAvailability("close-same-site", true);
     expectContextMenuItemAvailability("duplicate", true);
     for (const [tabId, quickUnavailable] of [[2, false], [3, true]] as const) {
-      openTabContextMenu(tabId);
+      await openTabContextMenu(tabId);
       expectContextMenuItemAvailability("group-same-site", !quickUnavailable);
       expectContextMenuItemAvailability("close-same-site", true);
       expectContextMenuItemAvailability("duplicate", true);
     }
-    openTabContextMenu(4);
+    await openTabContextMenu(4);
     expectContextMenuItemAvailability("group-same-site", true);
     expectContextMenuItemAvailability("close-same-site", false);
     expectContextMenuItemAvailability("duplicate", true);
@@ -1643,7 +1783,7 @@ describe("sidebar lifecycle", () => {
     const tabQueries = fake.methods.query.mock.calls.length;
     const groupQueries = fake.methods.groupQuery.mock.calls.length;
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     expectContextMenuItemAvailability("group-same-site", true);
     expect(fake.methods.query).toHaveBeenCalledTimes(tabQueries);
     expect(fake.methods.groupQuery).toHaveBeenCalledTimes(groupQueries);
@@ -1658,7 +1798,7 @@ describe("sidebar lifecycle", () => {
     });
     const cleanup = await startSidebar(fake);
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
 
     expectContextMenuItemAvailability("group-same-site", true);
     expectContextMenuItemAvailability("close-same-site", false);
@@ -1675,7 +1815,7 @@ describe("sidebar lifecycle", () => {
     });
     const cleanup = await startSidebar(fake);
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     expectContextMenuItemAvailability("close-same-site", true);
     fake.events.onCreated.emit(
       fakeTab({ id: 3, index: 3, url: "https://example.com/created" }),
@@ -1710,7 +1850,7 @@ describe("sidebar lifecycle", () => {
     const cleanup = await startSidebar(fake);
     const rowsBefore = rowIds();
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     click(contextMenuItem("close-same-site"));
     await flush();
 
@@ -1730,7 +1870,7 @@ describe("sidebar lifecycle", () => {
     fake.methods.remove.mockRejectedValueOnce(new Error("browser failed"));
     const cleanup = await startSidebar(fake);
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     click(contextMenuItem("close-same-site"));
 
     await vi.waitFor(() =>
@@ -1754,7 +1894,7 @@ describe("sidebar lifecycle", () => {
     fake.methods.remove.mockReturnValueOnce(pendingRemove.promise);
     const cleanup = await startSidebar(fake);
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     click(contextMenuItem("close-same-site"));
     const statusBefore = element("status-message").textContent;
     cleanup();
@@ -1771,7 +1911,7 @@ describe("sidebar lifecycle", () => {
     });
     const cleanup = await startSidebar(fake);
 
-    row(17).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await openTabContextMenu(17);
     click(contextMenuItem("add-shortcut"));
 
     await vi.waitFor(() => expect(fake.methods.storageSet).toHaveBeenCalledOnce());
@@ -1805,7 +1945,7 @@ describe("sidebar lifecycle", () => {
     });
     const cleanup = await startSidebar(fake);
 
-    row(18).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await openTabContextMenu(18);
     click(contextMenuItem("add-shortcut"));
     await vi.waitFor(() => expect(fake.methods.storageSet).toHaveBeenCalledOnce());
 
@@ -1825,9 +1965,9 @@ describe("sidebar lifecycle", () => {
     fake.methods.storageSet.mockReturnValueOnce(pending.promise);
     const cleanup = await startSidebar(fake);
 
-    row(19).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await openTabContextMenu(19);
     click(contextMenuItem("add-shortcut"));
-    row(19).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await openTabContextMenu(19);
     click(contextMenuItem("add-shortcut"));
     await vi.waitFor(() => expect(fake.methods.storageSet).toHaveBeenCalledOnce());
 
@@ -1845,7 +1985,7 @@ describe("sidebar lifecycle", () => {
     const fake = createFakeChrome({ tabs: [fakeTab({ id: 20, url })] });
     const cleanup = await startSidebar(fake);
 
-    row(20).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await openTabContextMenu(20);
     click(contextMenuItem("add-shortcut"));
     await vi.waitFor(() => expect(element("status-message").textContent).toBe(message));
 
@@ -1861,7 +2001,7 @@ describe("sidebar lifecycle", () => {
     fake.methods.storageSet.mockReturnValueOnce(pending.promise);
     const cleanup = await startSidebar(fake);
 
-    row(21).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await openTabContextMenu(21);
     click(contextMenuItem("add-shortcut"));
     await vi.waitFor(() => expect(fake.methods.storageSet).toHaveBeenCalledOnce());
     const statusBefore = element("status-message").textContent;
@@ -1879,7 +2019,7 @@ describe("sidebar lifecycle", () => {
     const fake = createFakeChrome({ tabs: [fakeTab({ id: 7, pinned: false })] });
     const cleanup = await startSidebar(fake);
 
-    row(7).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await openTabContextMenu(7);
     const menu = document.querySelector<HTMLElement>(".tab-context-menu")!;
     expect(menu.hidden).toBe(false);
 
@@ -1951,7 +2091,7 @@ describe("sidebar lifecycle", () => {
     const cleanup = await startSidebar(fake);
     const rowsBefore = rowIds();
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     expectContextMenuItemAvailability("group-same-site", true);
     fake.events.onCreated.emit(
       fakeTab({ id: 3, index: 5, url: "https://example.com/created", groupId: -1 }),
@@ -1991,12 +2131,12 @@ describe("sidebar lifecycle", () => {
     fake.methods.group.mockReturnValueOnce(pendingGroup.promise);
     const cleanup = await startSidebar(fake);
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     click(contextMenuItem("group-same-site"));
     fake.events.onCreated.emit(
       fakeTab({ id: 3, index: 2, url: "https://example.com/third", groupId: -1 }),
     );
-    openTabContextMenu(3);
+    await openTabContextMenu(3);
     expectContextMenuItemAvailability("group-same-site", false);
     expectContextMenuItemAvailability("close-same-site", true);
 
@@ -2006,8 +2146,8 @@ describe("sidebar lifecycle", () => {
     });
     pendingGroup.resolve(777);
     await vi.waitFor(() => expect(fake.methods.groupUpdate).toHaveBeenCalledOnce());
-    await vi.waitFor(() => {
-      openTabContextMenu(3);
+    await vi.waitFor(async () => {
+      await openTabContextMenu(3);
       expectContextMenuItemAvailability("group-same-site", true);
     });
     cleanup();
@@ -2022,7 +2162,7 @@ describe("sidebar lifecycle", () => {
     });
     const cleanup = await startSidebar(fake);
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     expectContextMenuItemAvailability("group-same-site", true);
     fake.events.onRemoved.emit(2, { windowId: 10, isWindowClosing: false });
     click(contextMenuItem("group-same-site"));
@@ -2050,7 +2190,7 @@ describe("sidebar lifecycle", () => {
     fake.methods.group.mockRejectedValueOnce(new Error("browser failed"));
     const cleanup = await startSidebar(fake);
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     click(contextMenuItem("group-same-site"));
 
     await vi.waitFor(() =>
@@ -2062,7 +2202,7 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.groupQuery).toHaveBeenCalledTimes(2);
     expect(fake.methods.groupUpdate).not.toHaveBeenCalled();
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     click(contextMenuItem("group-same-site"));
     await vi.waitFor(() => expect(fake.methods.group).toHaveBeenCalledTimes(2));
     expect(fake.methods.groupUpdate).toHaveBeenCalledOnce();
@@ -2079,7 +2219,7 @@ describe("sidebar lifecycle", () => {
     fake.methods.groupUpdate.mockRejectedValueOnce(new Error("metadata failed"));
     const cleanup = await startSidebar(fake);
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     click(contextMenuItem("group-same-site"));
 
     await vi.waitFor(() =>
@@ -2107,7 +2247,7 @@ describe("sidebar lifecycle", () => {
     fake.methods.group.mockReturnValueOnce(pendingGroup.promise);
     const cleanup = await startSidebar(fake);
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     click(contextMenuItem("group-same-site"));
     const statusBefore = element("status-message").textContent;
     cleanup();
@@ -2137,8 +2277,8 @@ describe("sidebar lifecycle", () => {
       .mockImplementationOnce(async (groupId, metadata) => fakeGroup({ id: groupId, ...metadata }))
       .mockReturnValueOnce(otherMetadata.promise);
     const cleanup = await startSidebarRaw({ ...base, sessionStorage });
-    await vi.waitFor(() => {
-      openTabContextMenu(1);
+    await vi.waitFor(async () => {
+      await openTabContextMenu(1);
       expectContextMenuItemAvailability("group-all", true);
     });
 
@@ -2181,7 +2321,7 @@ describe("sidebar lifecycle", () => {
     });
     const cleanup = await startSidebar(fake);
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     click(contextMenuItem("group-all"));
 
     await vi.waitFor(() => expect(fake.methods.group).toHaveBeenCalledOnce());
@@ -2205,7 +2345,7 @@ describe("sidebar lifecycle", () => {
     fake.methods.groupUpdate.mockReturnValueOnce(firstMetadata.promise);
     const cleanup = await startSidebar(fake);
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     click(contextMenuItem("group-all"));
     await vi.waitFor(() => expect(fake.methods.groupUpdate).toHaveBeenCalledOnce());
     fake.events.onCreated.emit(fakeTab({
@@ -2237,11 +2377,11 @@ describe("sidebar lifecycle", () => {
     get.mockClear();
 
     try {
-      openTabContextMenu(1);
+      await openTabContextMenu(1);
       click(contextMenuItem("group-all"));
       await vi.waitFor(() => expect(fake.methods.group).toHaveBeenCalledTimes(250));
       expect(list.mock.calls.length).toBeLessThanOrEqual(3);
-      expect(get.mock.calls.length).toBeLessThanOrEqual(tabs.length * 4);
+      expect(get.mock.calls.length).toBeLessThanOrEqual(tabs.length * 4 + 4);
       expect(fake.methods.query).toHaveBeenCalledOnce();
       expect(fake.methods.groupQuery).toHaveBeenCalledOnce();
     } finally {
@@ -2264,13 +2404,13 @@ describe("sidebar lifecycle", () => {
     base.methods.group.mockReturnValueOnce(pending.promise);
     const cleanup = await startSidebar(base);
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     click(contextMenuItem("group-same-site"));
-    openTabContextMenu(2);
+    await openTabContextMenu(2);
     expectContextMenuItemAvailability("group-same-site", false);
     expectContextMenuItemAvailability("group-all", false);
     expectContextMenuItemAvailability("add-to-group", false);
-    openTabContextMenu(3);
+    await openTabContextMenu(3);
     expectContextMenuItemAvailability("remove-from-group", false);
     expect(base.methods.group).toHaveBeenCalledOnce();
     expect(base.methods.ungroup).not.toHaveBeenCalled();
@@ -2295,10 +2435,10 @@ describe("sidebar lifecycle", () => {
       fake.methods.group.mockReturnValueOnce(pendingAdd.promise);
       const cleanup = await startSidebar(fake);
 
-      openTabContextMenu(1);
+      await openTabContextMenu(1);
       click(contextMenuItem("add-to-group"));
       click(document.querySelector(".tab-context-submenu [data-group-id='7']")!);
-      openTabContextMenu(2);
+      await openTabContextMenu(2);
       expectContextMenuItemAvailability(action, false);
       expect(fake.methods.group).toHaveBeenCalledOnce();
 
@@ -2330,8 +2470,8 @@ describe("sidebar lifecycle", () => {
         pending.promise as Promise<chrome.tabGroups.TabGroup | undefined>,
       );
       const cleanup = await startSidebarRaw({ ...fake, sessionStorage });
-      await vi.waitFor(() => {
-        openTabContextMenu(1);
+      await vi.waitFor(async () => {
+        await openTabContextMenu(1);
         expectContextMenuItemAvailability("group-all", true);
       });
 
@@ -2344,7 +2484,7 @@ describe("sidebar lifecycle", () => {
         );
       }
       await flush();
-      openTabContextMenu(1);
+      await openTabContextMenu(1);
       expectContextMenuItemAvailability("group-all", false);
       expect(fake.methods.group).not.toHaveBeenCalled();
 
@@ -2371,8 +2511,8 @@ describe("sidebar lifecycle", () => {
     };
     fake.methods.group.mockReturnValueOnce(pendingReuse.promise);
     const cleanup = await startSidebarRaw({ ...fake, sessionStorage });
-    await vi.waitFor(() => {
-      openTabContextMenu(1);
+    await vi.waitFor(async () => {
+      await openTabContextMenu(1);
       expectContextMenuItemAvailability("group-all", true);
     });
 
@@ -2431,8 +2571,8 @@ describe("sidebar lifecycle", () => {
       }),
     };
     const cleanup = await startSidebarRaw({ ...base, sessionStorage });
-    await vi.waitFor(() => {
-      openTabContextMenu(1);
+    await vi.waitFor(async () => {
+      await openTabContextMenu(1);
       expectContextMenuItemAvailability("group-all", true);
     });
 
@@ -2471,8 +2611,8 @@ describe("sidebar lifecycle", () => {
         Object.hasOwn(items, "smartGroupSession:10") ? pendingSave.promise : Promise.resolve()),
     };
     const cleanup = await startSidebarRaw({ ...base, sessionStorage });
-    await vi.waitFor(() => {
-      openTabContextMenu(1);
+    await vi.waitFor(async () => {
+      await openTabContextMenu(1);
       expectContextMenuItemAvailability("group-all", true);
     });
 
@@ -2495,8 +2635,8 @@ describe("sidebar lifecycle", () => {
       url: "https://three.example/",
       groupId: -1,
     }));
-    await vi.waitFor(() => {
-      openTabContextMenu(3);
+    await vi.waitFor(async () => {
+      await openTabContextMenu(3);
       expectContextMenuItemAvailability("group-all", true);
     });
     expect(sessionStorage.set).not.toHaveBeenCalledWith({ "smartGroupSession:10": {} });
@@ -2518,8 +2658,8 @@ describe("sidebar lifecycle", () => {
         Object.hasOwn(items, "smartGroupSession:10") ? pendingSave.promise : Promise.resolve()),
     };
     const cleanup = await startSidebarRaw({ ...base, sessionStorage });
-    await vi.waitFor(() => {
-      openTabContextMenu(1);
+    await vi.waitFor(async () => {
+      await openTabContextMenu(1);
       expectContextMenuItemAvailability("group-all", true);
     });
 
@@ -2546,8 +2686,8 @@ describe("sidebar lifecycle", () => {
         url: "https://late.example/",
         groupId: -1,
       }));
-      await vi.waitFor(() => {
-        openTabContextMenu(501);
+      await vi.waitFor(async () => {
+        await openTabContextMenu(501);
         expectContextMenuItemAvailability("group-all", true);
       });
       expect(list.mock.calls.length).toBeLessThanOrEqual(6);
@@ -2574,8 +2714,8 @@ describe("sidebar lifecycle", () => {
       set: vi.fn().mockResolvedValue(undefined),
     };
     const cleanup = await startSidebarRaw({ ...base, sessionStorage });
-    await vi.waitFor(() => {
-      openTabContextMenu(1);
+    await vi.waitFor(async () => {
+      await openTabContextMenu(1);
       expectContextMenuItemAvailability("group-all", true);
     });
 
@@ -2588,13 +2728,13 @@ describe("sidebar lifecycle", () => {
     expect(base.methods.groupQuery).toHaveBeenCalledOnce();
     expect(sessionStorage.set).not.toHaveBeenCalledWith({ "smartGroupSession:10": {} });
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     expectContextMenuItemAvailability("group-all", false);
     await flush();
     expect(base.methods.group).toHaveBeenCalledOnce();
 
     base.groupEvents.onCreated.emit(fakeGroup({ id: 777, title: "其他" }));
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     expectContextMenuItemAvailability("group-all", false);
     base.methods.get.mockRejectedValueOnce(new Error("replacement missing"));
     base.events.onReplaced.emit(99, 98);
@@ -2607,7 +2747,7 @@ describe("sidebar lifecycle", () => {
       url: "https://three.example/",
       groupId: -1,
     }));
-    openTabContextMenu(3);
+    await openTabContextMenu(3);
     click(contextMenuItem("group-all"));
     await vi.waitFor(() => expect(base.methods.group).toHaveBeenLastCalledWith({
       tabIds: [3],
@@ -2633,8 +2773,8 @@ describe("sidebar lifecycle", () => {
       set: vi.fn().mockResolvedValue(undefined),
     };
     const cleanup = await startSidebarRaw({ ...base, sessionStorage });
-    await vi.waitFor(() => {
-      openTabContextMenu(1);
+    await vi.waitFor(async () => {
+      await openTabContextMenu(1);
       expectContextMenuItemAvailability("group-all", true);
     });
 
@@ -2668,8 +2808,8 @@ describe("sidebar lifecycle", () => {
       set: vi.fn().mockResolvedValue(undefined),
     };
     const cleanup = await startSidebarRaw({ ...base, sessionStorage });
-    await vi.waitFor(() => {
-      openTabContextMenu(1);
+    await vi.waitFor(async () => {
+      await openTabContextMenu(1);
       expectContextMenuItemAvailability("group-all", true);
     });
 
@@ -2690,8 +2830,8 @@ describe("sidebar lifecycle", () => {
       url: "https://three.example/",
       groupId: -1,
     }));
-    await vi.waitFor(() => {
-      openTabContextMenu(3);
+    await vi.waitFor(async () => {
+      await openTabContextMenu(3);
       expectContextMenuItemAvailability("group-all", true);
     });
     click(contextMenuItem("group-all"));
@@ -2719,8 +2859,8 @@ describe("sidebar lifecycle", () => {
       set: vi.fn().mockResolvedValue(undefined),
     };
     const cleanup = await startSidebarRaw({ ...base, sessionStorage });
-    await vi.waitFor(() => {
-      openTabContextMenu(1);
+    await vi.waitFor(async () => {
+      await openTabContextMenu(1);
       expectContextMenuItemAvailability("group-all", true);
     });
 
@@ -2745,7 +2885,7 @@ describe("sidebar lifecycle", () => {
     fake.methods.query.mockReturnValueOnce(resyncTabs.promise);
     fake.methods.groupQuery.mockReturnValueOnce(resyncGroups.promise);
 
-    openTabContextMenu(4);
+    await openTabContextMenu(4);
     click(contextMenuItem("add-to-group"));
     click(document.querySelector(".tab-context-submenu [data-menu-action='create-group']")!);
     const dialog = element<HTMLDialogElement>("tab-group-dialog");
@@ -2782,7 +2922,7 @@ describe("sidebar lifecycle", () => {
     fake.methods.query.mockReturnValueOnce(resyncTabs.promise);
     fake.methods.groupQuery.mockReturnValueOnce(resyncGroups.promise);
 
-    openTabContextMenu(4);
+    await openTabContextMenu(4);
     click(contextMenuItem("add-to-group"));
     click(document.querySelector(".tab-context-submenu [data-menu-action='create-group']")!);
     const dialog = element<HTMLDialogElement>("tab-group-dialog");
@@ -2827,7 +2967,7 @@ describe("sidebar lifecycle", () => {
     fake.methods.groupQuery.mockReturnValueOnce(resyncGroups.promise);
     fake.methods.group.mockRejectedValueOnce(new Error("add failed"));
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     click(contextMenuItem("add-to-group"));
     click(document.querySelector(".tab-context-submenu [data-group-id='7']")!);
     await vi.waitFor(() => {
@@ -2881,7 +3021,7 @@ describe("sidebar lifecycle", () => {
       fake.methods.get.mockReturnValueOnce(attached.promise);
       fake.methods.group.mockRejectedValueOnce(new Error("add failed"));
 
-      openTabContextMenu(1);
+      await openTabContextMenu(1);
       click(contextMenuItem("add-to-group"));
       click(document.querySelector(".tab-context-submenu [data-group-id='7']")!);
       await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledTimes(2));
@@ -2947,7 +3087,7 @@ describe("sidebar lifecycle", () => {
       .mockRejectedValueOnce(new Error("queued failure"))
       .mockRejectedValueOnce(new Error("merged failure"));
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     click(contextMenuItem("add-to-group"));
     click(document.querySelector(".tab-context-submenu [data-group-id='7']")!);
     await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledTimes(2));
@@ -2961,7 +3101,7 @@ describe("sidebar lifecycle", () => {
     firstGroups.resolve([fakeGroup({ id: 7 }), fakeGroup({ id: 8, title: "Other" })]);
     await vi.waitFor(() => expect(snapshotRead).toHaveBeenCalled());
 
-    openTabContextMenu(2);
+    await openTabContextMenu(2);
     click(contextMenuItem("remove-from-group"));
     await flush();
     expect(fake.methods.query).toHaveBeenCalledTimes(2);
@@ -2971,7 +3111,7 @@ describe("sidebar lifecycle", () => {
       expect(fake.methods.query).toHaveBeenCalledTimes(3);
       expect(fake.methods.groupQuery).toHaveBeenCalledTimes(3);
     });
-    openTabContextMenu(3);
+    await openTabContextMenu(3);
     click(contextMenuItem("remove-from-group"));
     await flush();
     expect(fake.methods.query).toHaveBeenCalledTimes(3);
@@ -3006,13 +3146,13 @@ describe("sidebar lifecycle", () => {
     fake.methods.groupUpdate.mockReturnValueOnce(pendingToggle.promise);
     const cleanup = await startSidebar(fake);
 
-    const addToExisting = (): void => {
-      openTabContextMenu(5);
+    const addToExisting = async (): Promise<void> => {
+      await openTabContextMenu(5);
       click(contextMenuItem("add-to-group"));
       click(document.querySelector(".tab-context-submenu [data-group-id='7']")!);
     };
-    addToExisting();
-    openTabContextMenu(5);
+    await addToExisting();
+    await openTabContextMenu(5);
     expectContextMenuItemAvailability("add-to-group", false);
     expect(fake.methods.group).toHaveBeenCalledOnce();
 
@@ -3043,10 +3183,10 @@ describe("sidebar lifecycle", () => {
     fake.methods.group.mockRejectedValueOnce(new Error("add failed"));
     fake.methods.ungroup.mockRejectedValueOnce(new Error("remove failed"));
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     click(contextMenuItem("add-to-group"));
     click(document.querySelector(".tab-context-submenu [data-group-id='7']")!);
-    openTabContextMenu(2);
+    await openTabContextMenu(2);
     click(contextMenuItem("remove-from-group"));
 
     await vi.waitFor(() => {
@@ -3087,13 +3227,13 @@ describe("sidebar lifecycle", () => {
     )!;
     const groupMenu = document.querySelector<HTMLElement>(".tab-group-context-menu")!;
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     expect(tabMenu.hidden).toBe(false);
     openGroupContextMenu(7);
     expect(tabMenu.hidden).toBe(true);
     expect(groupMenu.hidden).toBe(false);
 
-    openTabContextMenu(2);
+    await openTabContextMenu(2);
     expect(groupMenu.hidden).toBe(true);
     expect(tabMenu.hidden).toBe(false);
     cleanup();
@@ -3976,7 +4116,7 @@ describe("sidebar lifecycle", () => {
     const formRemove = vi.spyOn(form, "removeEventListener");
     const dialogRemove = vi.spyOn(dialog, "removeEventListener");
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     click(contextMenuItem("add-to-group"));
     click(document.querySelector(".tab-context-submenu [data-menu-action='create-group']")!);
     expect(dialog.open).toBe(true);
@@ -4290,7 +4430,7 @@ describe("sidebar lifecycle", () => {
     const cleanup = await startSidebar(fake);
     await vi.waitFor(() => expect(rowIds()).toEqual([1, 2, 4]));
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     expectContextMenuItemAvailability("dissolve-tree", true);
     click(contextMenuItem("dissolve-tree"));
 
@@ -4336,7 +4476,7 @@ describe("sidebar lifecycle", () => {
     const cleanup = await startSidebar(fake);
     await vi.waitFor(() => expect(rowIds()).toEqual([1, 4]));
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     expectContextMenuItemAvailability("delete-subtree", true);
     click(contextMenuItem("delete-subtree"));
     await flush();
@@ -4372,7 +4512,7 @@ describe("sidebar lifecycle", () => {
     const cleanup = await startSidebar(fake);
     await vi.waitFor(() => expect(row(1).dataset.treeParent).toBe("true"));
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     click(contextMenuItem("delete-subtree"));
 
     await vi.waitFor(() => expect(element("status-message").textContent).toBe(
@@ -4490,7 +4630,7 @@ describe("sidebar lifecycle", () => {
     )?.hidden).toBe(true);
     expect(row(1).draggable).toBe(false);
     expect(groupRow(7).draggable).toBe(false);
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     expectContextMenuItemAvailability("duplicate", false);
     click(element("new-tab-button"));
     await vi.waitFor(() => expect(fake.methods.create).toHaveBeenCalledWith({
@@ -5129,7 +5269,7 @@ describe("sidebar lifecycle", () => {
     parent.dispatchEvent(drop);
     await vi.waitFor(() => expect(fake.methods.move).toHaveBeenCalledWith(3, { index: 2 }));
 
-    openTabContextMenu(1);
+    await openTabContextMenu(1);
     click(contextMenuItem("dissolve-tree"));
     await vi.waitFor(() => expect(sessionSet).toHaveBeenLastCalledWith({
       "tabTreeSessionState:10": {

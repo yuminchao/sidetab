@@ -244,6 +244,14 @@ export function createFakeChrome(options: {
     async () => undefined,
   );
   const bookmarkSearch = vi.fn(async () => options.bookmarkItems ?? []);
+  const bookmarkCreate = vi.fn(async (
+    details: chrome.bookmarks.CreateDetails,
+  ): Promise<chrome.bookmarks.BookmarkTreeNode> => ({
+    id: "created-bookmark",
+    title: details.title ?? "",
+    url: details.url,
+    syncing: false,
+  }));
   const historySearch = vi.fn(async () => options.historyItems ?? []);
   const sessionsGetRecentlyClosed = vi.fn(async () => recentlyClosedState);
   const sessionsRestore = vi.fn(async (sessionId: string) => {
@@ -277,7 +285,10 @@ export function createFakeChrome(options: {
       move: groupMove,
     } as unknown as typeof chrome.tabGroups,
     windows: { getCurrent } as Pick<typeof chrome.windows, "getCurrent">,
-    bookmarks: { search: bookmarkSearch } as Pick<typeof chrome.bookmarks, "search">,
+    bookmarks: { search: bookmarkSearch, create: bookmarkCreate } as Pick<
+      typeof chrome.bookmarks,
+      "search" | "create"
+    >,
     history: { search: historySearch } as Pick<typeof chrome.history, "search">,
     sessions: {
       getRecentlyClosed: sessionsGetRecentlyClosed,
@@ -305,6 +316,7 @@ export function createFakeChrome(options: {
       groupMove,
       getCurrent,
       bookmarkSearch,
+      bookmarkCreate,
       historySearch,
       sessionsGetRecentlyClosed,
       sessionsRestore,

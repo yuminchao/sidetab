@@ -4,6 +4,7 @@ import type { TabViewModel } from "./tab-model";
 export type TabContextCommand =
   | { action: "duplicate"; tabId: number }
   | { action: "set-pinned"; tabId: number; pinned: boolean }
+  | { action: "add-bookmark"; tabId: number }
   | { action: "add-shortcut"; tabId: number }
   | { action: "open-all-shortcuts"; tabId: number }
   | { action: "group-same-site"; tabId: number }
@@ -38,6 +39,7 @@ export function createTabContextMenu(
     getContext(id: number): TabContextMenuContext | undefined;
     getGroups(): readonly TabGroupViewModel[];
     getRecentlyClosedSessionId?(): string | undefined;
+    canAddBookmark?(tab: Readonly<TabViewModel>): Promise<boolean>;
     onBeforeOpen?(): void;
     onCommand(command: TabContextCommand): void;
   },
@@ -54,6 +56,7 @@ export function createTabContextMenu(
 
   const duplicate = createItem("duplicate", "复制标签页");
   const setPinned = createItem("set-pinned", "固定标签");
+  const addBookmark = createItem("add-bookmark", "添加到收藏夹");
   const addShortcut = createItem("add-shortcut", "设为快捷网站");
   const openAllShortcuts = createItem("open-all-shortcuts", "打开所有快捷网站");
   const addToGroup = createItem("add-to-group", "添加到分组");
@@ -83,6 +86,7 @@ export function createTabContextMenu(
   menu.append(
     duplicate,
     setPinned,
+    addBookmark,
     addShortcut,
     openAllShortcuts,
     groupSeparator,
@@ -105,6 +109,9 @@ export function createTabContextMenu(
   let openGroupId = -1;
   let returnFocus: HTMLElement | undefined;
   let contextSelectedRow: HTMLElement | undefined;
+  let openGeneration = 0;
+  let pendingTabId: number | undefined;
+  let destroyed = false;
 
   function createItem(action: string, label: string): HTMLButtonElement {
     const button = elements.document.createElement("button");
@@ -125,6 +132,8 @@ export function createTabContextMenu(
   }
 
   function close(restoreFocus = false): void {
+    openGeneration += 1;
+    pendingTabId = undefined;
     contextSelectedRow?.removeAttribute("data-context-selected");
     contextSelectedRow = undefined;
     if (menu.hidden && submenu.hidden) return;
@@ -211,6 +220,7 @@ export function createTabContextMenu(
     x: number,
     y: number,
     focusTarget: HTMLElement,
+    canAddBookmark: boolean,
   ): void {
     const { tab } = context;
     callbacks.onBeforeOpen?.();
@@ -227,6 +237,8 @@ export function createTabContextMenu(
     setPinned.dataset.nextPinned = String(!tab.pinned);
     duplicate.hidden = context.canDuplicate === false;
     duplicate.disabled = false;
+    addBookmark.hidden = !canAddBookmark;
+    addBookmark.disabled = false;
     addToGroup.hidden = !context.canManageGroupMembership;
     addToGroup.disabled = false;
     removeFromGroup.hidden = !context.canManageGroupMembership
@@ -284,7 +296,7 @@ export function createTabContextMenu(
     const match = contextFromRow(event.target);
     if (!match) return;
     event.preventDefault();
-    open(match.context, event.clientX, event.clientY, match.row);
+    requestOpen(match, event.clientX, event.clientY);
   };
 
   const onListKeyDown = (event: KeyboardEvent): void => {
@@ -293,8 +305,69 @@ export function createTabContextMenu(
     if (!match) return;
     event.preventDefault();
     const rect = match.row.getBoundingClientRect();
-    open(match.context, rect.left, rect.bottom, match.row);
+    requestOpen(match, rect.left, rect.bottom);
   };
+
+  /**
+   * 查询收藏可用性，并仅为仍指向同一标签快照的最新请求打开菜单。
+   *
+   * Args:
+   *   match: 触发菜单时命中的标签行与上下文。
+   *   x: 菜单横向坐标。
+   *   y: 菜单纵向坐标。
+   * Returns:
+   *   无。
+   * Raises:
+   *   无；收藏夹查询失败时降级为隐藏收藏命令。
+   */
+  function requestOpen(
+    match: { row: HTMLElement; context: TabContextMenuContext },
+    x: number,
+    y: number,
+  ): void {
+    const generation = ++openGeneration;
+    const { row, context } = match;
+    const { id: tabId, url } = context.tab;
+    pendingTabId = tabId;
+    if (!callbacks.canAddBookmark) {
+      pendingTabId = undefined;
+      open(context, x, y, row, false);
+      return;
+    }
+
+    void resolveBookmarkAvailability();
+
+    /**
+     * 调用收藏可用性检查，并在异步边界后重新校验最新标签上下文。
+     *
+     * Args:
+     *   无。
+     * Returns:
+     *   无。
+     * Raises:
+     *   无；收藏夹查询失败时降级为隐藏收藏命令。
+     */
+    async function resolveBookmarkAvailability(): Promise<void> {
+      let canAddBookmark = false;
+      try {
+        canAddBookmark = await callbacks.canAddBookmark!(context.tab);
+      } catch {
+        canAddBookmark = false;
+      }
+      if (destroyed || generation !== openGeneration) return;
+      const latest = callbacks.getContext(tabId);
+      if (
+        !latest
+        || latest.tab.id !== tabId
+        || latest.tab.url !== url
+        || !row.isConnected
+        || !elements.list.contains(row)
+        || Number(row.dataset.tabId) !== tabId
+      ) return;
+      pendingTabId = undefined;
+      open(latest, x, y, row, canAddBookmark);
+    }
+  }
 
   const onMenuClick = (event: MouseEvent): void => {
     const button = event.target instanceof Element
@@ -317,6 +390,9 @@ export function createTabContextMenu(
           tabId: openTabId,
           pinned: button.dataset.nextPinned === "true",
         };
+        break;
+      case "add-bookmark":
+        command = { action: "add-bookmark", tabId: openTabId };
         break;
       case "add-shortcut":
         command = { action: "add-shortcut", tabId: openTabId };
@@ -446,10 +522,10 @@ export function createTabContextMenu(
 
   const onDocumentPointerDown = (event: Event): void => {
     if (
-      !menu.hidden &&
       event.target instanceof Node &&
       !menu.contains(event.target) &&
-      !submenu.contains(event.target)
+      !submenu.contains(event.target) &&
+      (!menu.hidden || pendingTabId !== undefined)
     ) close();
   };
   const onEnvironmentalClose = (): void => close();
@@ -468,9 +544,10 @@ export function createTabContextMenu(
   return {
     close,
     closeForTab(tabId: number): void {
-      if (openTabId === tabId) close();
+      if (openTabId === tabId || pendingTabId === tabId) close();
     },
     destroy(): void {
+      destroyed = true;
       close();
       menu.removeEventListener("click", onMenuClick);
       menu.removeEventListener("mouseover", onMenuMouseOver);
