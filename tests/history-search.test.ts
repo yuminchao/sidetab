@@ -693,6 +693,42 @@ describe("history search controller", () => {
     controller.destroy();
   });
 
+  it.each(["success", "failure"] as const)(
+    "keeps close state when a pending web search settles with %s",
+    async (outcome) => {
+      const pendingSearch = deferred<void>();
+      const onSearchWeb = vi.fn(() => pendingSearch.promise);
+      const controller = createHistorySearchController(
+        { document, input, results },
+        {
+          bookmarks: emptyBookmarks(),
+          history: { search: vi.fn(async () => []) },
+          onOpen: vi.fn(async () => undefined),
+          onSearchWeb,
+        },
+      );
+
+      input.value = "close pending";
+      input.focus();
+      await flush();
+      pressEnter(input);
+      await flush();
+      expect(onSearchWeb).toHaveBeenCalledWith("close pending");
+
+      controller.close();
+      const before = { inputValue: input.value, results: results.innerHTML };
+      if (outcome === "success") pendingSearch.resolve();
+      else pendingSearch.reject(new Error("browser failed"));
+      await flush();
+
+      expect(input.value).toBe(before.inputValue);
+      expect(results.innerHTML).toBe(before.results);
+      expect(results.hidden).toBe(true);
+      expect(input.getAttribute("aria-expanded")).toBe("false");
+      controller.destroy();
+    },
+  );
+
   it("drops late web-search outcomes after a newer query and after destroy", async () => {
     vi.useFakeTimers();
     const staleSearch = deferred<void>();
