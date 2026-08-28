@@ -1149,7 +1149,7 @@ describe("sidebar lifecycle", () => {
       tabs: [fakeTab({ id: 1, title: "Alpha" }), fakeTab({ id: 2, index: 1, title: "Beta" })],
       bookmarkItems: [{
         id: "bookmark-1",
-        title: "Bookmark",
+        title: "Beta bookmark",
         url: "https://bookmark.example/",
         syncing: false,
       }],
@@ -1179,7 +1179,7 @@ describe("sidebar lifecycle", () => {
       maxResults: 500,
     });
     expect(fake.methods.bookmarkSearch).toHaveBeenCalledWith("beta");
-    expect(element("history-search-results").textContent).toContain("Bookmark");
+    expect(element("history-search-results").textContent).toContain("Beta bookmark");
     expect(rowIds()).toEqual([1, 2]);
     cleanup();
   });
