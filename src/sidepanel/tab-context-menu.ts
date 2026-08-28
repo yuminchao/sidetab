@@ -142,6 +142,26 @@ export function createTabContextMenu(
     ).filter((item) => !item.hidden && !item.disabled);
   }
 
+  function normalizeSeparators(): void {
+    // 仅保留夹在两个可见命令之间的分隔符。
+    const separators = Array.from(
+      menu.querySelectorAll<HTMLElement>(":scope > [role='separator']"),
+    );
+    for (const separator of separators) separator.hidden = true;
+
+    let previousItem: HTMLButtonElement | undefined;
+    let pendingSeparator: HTMLElement | undefined;
+    for (const child of Array.from(menu.children)) {
+      if (child.getAttribute("role") === "separator") {
+        pendingSeparator = child as HTMLElement;
+      } else if (child instanceof HTMLButtonElement && !child.hidden) {
+        if (previousItem && pendingSeparator) pendingSeparator.hidden = false;
+        previousItem = child;
+        pendingSeparator = undefined;
+      }
+    }
+  }
+
   function positionSubmenu(): void {
     submenu.style.left = "0px";
     submenu.style.top = "0px";
@@ -165,7 +185,8 @@ export function createTabContextMenu(
       button.setAttribute("role", "menuitemradio");
       const selected = group.id === openGroupId;
       button.setAttribute("aria-checked", String(selected));
-      button.disabled = selected;
+      button.hidden = selected;
+      button.disabled = false;
 
       const color = elements.document.createElement("span");
       color.className = "group-menu-color";
@@ -203,30 +224,43 @@ export function createTabContextMenu(
     returnFocus = focusTarget;
     setPinned.textContent = tab.pinned ? "取消固定" : "固定标签";
     setPinned.dataset.nextPinned = String(!tab.pinned);
-    duplicate.disabled = context.canDuplicate === false;
+    duplicate.hidden = context.canDuplicate === false;
+    duplicate.disabled = false;
     removeFromGroup.hidden = !isValidTabGroupId(tab.groupId);
-    groupSameSite.disabled = !context.canQuickGroupSameSite;
-    groupAll.disabled = !context.canGroupAll;
-    closeBelow.disabled = !context.canCloseBelow;
-    closeAbove.disabled = context.canCloseAbove !== true;
-    openAllShortcuts.disabled = context.canOpenAllShortcuts !== true;
-    closeSameSite.disabled = !context.canCloseOtherSameSite;
-    dissolveTree.disabled = context.canDissolveTree !== true;
-    deleteSubtree.disabled = context.canDeleteSubtree !== true;
+    groupSameSite.hidden = !context.canQuickGroupSameSite;
+    groupAll.hidden = !context.canGroupAll;
+    closeBelow.hidden = !context.canCloseBelow;
+    closeAbove.hidden = context.canCloseAbove !== true;
+    openAllShortcuts.hidden = context.canOpenAllShortcuts !== true;
+    closeSameSite.hidden = !context.canCloseOtherSameSite;
+    dissolveTree.hidden = context.canDissolveTree !== true;
+    deleteSubtree.hidden = context.canDeleteSubtree !== true;
+    for (const item of [
+      groupSameSite,
+      groupAll,
+      closeBelow,
+      closeAbove,
+      openAllShortcuts,
+      closeSameSite,
+      dissolveTree,
+      deleteSubtree,
+    ]) item.disabled = false;
     const sessionId = callbacks.getRecentlyClosedSessionId?.();
-    restoreRecentlyClosed.disabled = !sessionId;
+    restoreRecentlyClosed.hidden = !sessionId;
+    restoreRecentlyClosed.disabled = false;
     if (sessionId) {
       restoreRecentlyClosed.dataset.sessionId = sessionId;
     } else {
       delete restoreRecentlyClosed.dataset.sessionId;
     }
+    normalizeSeparators();
     menu.hidden = false;
     menu.style.left = "0px";
     menu.style.top = "0px";
     const rect = menu.getBoundingClientRect();
     menu.style.left = `${Math.max(0, Math.min(x, elements.viewport.innerWidth - rect.width))}px`;
     menu.style.top = `${Math.max(0, Math.min(y, elements.viewport.innerHeight - rect.height))}px`;
-    duplicate.focus();
+    getAvailableItems(menu)[0]?.focus();
   }
 
   const contextFromRow = (
@@ -262,7 +296,7 @@ export function createTabContextMenu(
       ? event.target.closest<HTMLButtonElement>("[data-menu-action]")
       : null;
     if (!button || openTabId === undefined || !menu.contains(button)) return;
-    if (button.disabled) return;
+    if (button.hidden || button.disabled) return;
     if (button === addToGroup) {
       openSubmenu(true);
       return;
@@ -326,7 +360,7 @@ export function createTabContextMenu(
     const button = event.target instanceof Element
       ? event.target.closest<HTMLButtonElement>("[data-menu-action]")
       : null;
-    if (!button || openTabId === undefined || !submenu.contains(button) || button.disabled) return;
+    if (!button || openTabId === undefined || !submenu.contains(button) || button.hidden || button.disabled) return;
 
     let command: TabContextCommand;
     if (button.dataset.menuAction === "create-group") {
@@ -360,7 +394,7 @@ export function createTabContextMenu(
       close(true);
       return;
     }
-    if (event.target instanceof HTMLButtonElement && event.target.disabled) return;
+    if (event.target instanceof HTMLButtonElement && (event.target.hidden || event.target.disabled)) return;
     const availableItems = getAvailableItems(menu);
     const current = availableItems.indexOf(elements.document.activeElement as HTMLButtonElement);
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -391,7 +425,7 @@ export function createTabContextMenu(
       closeSubmenu(true);
       return;
     }
-    if (event.target instanceof HTMLButtonElement && event.target.disabled) return;
+    if (event.target instanceof HTMLButtonElement && (event.target.hidden || event.target.disabled)) return;
     const availableItems = getAvailableItems(submenu);
     const current = availableItems.indexOf(elements.document.activeElement as HTMLButtonElement);
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {

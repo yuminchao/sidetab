@@ -127,7 +127,9 @@ describe("tab group context menu", () => {
       "灰色", "蓝色", "红色", "黄色", "绿色", "粉色", "紫色", "青色", "橙色",
     ]);
     expect(items[1]?.getAttribute("aria-checked")).toBe("true");
-    expect(items[1]?.disabled).toBe(true);
+    expect(items[1]?.hidden).toBe(true);
+    expect(items[1]?.disabled).toBe(false);
+    expect(items.filter((item) => !item.hidden).every((item) => !item.disabled)).toBe(true);
     expect(items.every((item) => item.querySelector(".group-menu-color"))).toBe(true);
 
     items[2]!.click();
@@ -177,22 +179,23 @@ describe("tab group context menu", () => {
     controller.destroy();
   });
 
-  it("disables all commands while the group is busy", () => {
+  it("does not open a menu while the group is busy", () => {
     const onCommand = vi.fn();
+    const onBeforeOpen = vi.fn();
     const controller = createTabGroupContextMenu(
       { document, list, viewport: window },
-      { getGroup: () => group, isGroupBusy: () => true, canCloseGroup: () => true, onBeforeOpen: vi.fn(), onCommand },
+      { getGroup: () => group, isGroupBusy: () => true, canCloseGroup: () => true, onBeforeOpen, onCommand },
     );
-    context(row);
     const menu = document.querySelector<HTMLElement>(".tab-group-context-menu")!;
-    const buttons = Array.from(menu.querySelectorAll<HTMLButtonElement>(":scope > button"));
-    expect(buttons.every((button) => button.disabled)).toBe(true);
-    buttons.forEach((button) => button.click());
+    context(row);
+    expect(onBeforeOpen).toHaveBeenCalledOnce();
+    expect(menu.hidden).toBe(true);
+    expect(row.hasAttribute("data-context-selected")).toBe(false);
     expect(onCommand).not.toHaveBeenCalled();
     controller.destroy();
   });
 
-  it("disables close-group when the group has no members", () => {
+  it("hides close-group when the group has no members", () => {
     const onCommand = vi.fn();
     const controller = createTabGroupContextMenu(
       { document, list, viewport: window },
@@ -207,10 +210,14 @@ describe("tab group context menu", () => {
     context(row);
     const menu = document.querySelector<HTMLElement>(".tab-group-context-menu")!;
     const close = menu.querySelector<HTMLButtonElement>("[data-group-menu-action='close']")!;
-    expect(close.disabled).toBe(true);
+    expect(close.hidden).toBe(true);
+    expect(close.disabled).toBe(false);
     close.click();
     expect(onCommand).not.toHaveBeenCalled();
     expect(menu.hidden).toBe(false);
+    const visibleItems = Array.from(menu.children).filter((item) => !item.hasAttribute("hidden"));
+    expect(visibleItems[0]?.getAttribute("role")).not.toBe("separator");
+    expect(visibleItems.at(-1)?.getAttribute("role")).not.toBe("separator");
     controller.destroy();
   });
 
@@ -227,6 +234,8 @@ describe("tab group context menu", () => {
     );
     context(row);
     const menu = document.querySelector<HTMLElement>(".tab-group-context-menu")!;
+    expect(menu.querySelector<HTMLButtonElement>("[data-group-menu-action='close']")!.hidden)
+      .toBe(false);
     expect(menu.querySelector<HTMLButtonElement>("[data-group-menu-action='close']")!.disabled)
       .toBe(false);
     controller.destroy();

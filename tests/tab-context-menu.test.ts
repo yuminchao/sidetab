@@ -34,6 +34,7 @@ function context(target: Element, x = 20, y = 30): MouseEvent {
 function menuContext(
   id: number,
   availability: Partial<{
+    canDuplicate: boolean;
     canCloseBelow: boolean;
     canCloseAbove: boolean;
     canOpenAllShortcuts: boolean;
@@ -122,16 +123,7 @@ describe("tab context menu", () => {
       "复制标签页",
       "固定标签",
       "设为快捷网站",
-      "打开所有快捷网站",
       "添加到分组",
-      "同网站快速分组",
-      "一键分组",
-      "解散树节点",
-      "删除树节点及子标签",
-      "关闭下方标签页",
-      "关闭上方标签页",
-      "关闭其他同类网站标签页",
-      "打开最近关闭标签页",
     ]);
     expect(document.activeElement).toBe(duplicate);
 
@@ -165,8 +157,10 @@ describe("tab context menu", () => {
     const deleteLeaf = popup.querySelector<HTMLButtonElement>(
       "[data-menu-action='delete-subtree']",
     )!;
-    expect(dissolveLeaf.disabled).toBe(true);
-    expect(deleteLeaf.disabled).toBe(true);
+    expect(dissolveLeaf.hidden).toBe(true);
+    expect(deleteLeaf.hidden).toBe(true);
+    expect(dissolveLeaf.disabled).toBe(false);
+    expect(deleteLeaf.disabled).toBe(false);
     dissolveLeaf.click();
     deleteLeaf.click();
     expect(onCommand).not.toHaveBeenCalled();
@@ -195,6 +189,68 @@ describe("tab context menu", () => {
     context(row(1));
     deleteSubtree.click();
     expect(onCommand).toHaveBeenLastCalledWith({ action: "delete-subtree", tabId: 1 });
+    menu.destroy();
+  });
+
+  it("shows only executable actions and normalizes visible separators", () => {
+    const menu = createTabContextMenu(
+      { document, list, viewport: window },
+      {
+        getContext: (id) => menuContext(id, {
+          canDuplicate: false,
+          canCloseBelow: false,
+          canCloseAbove: false,
+          canOpenAllShortcuts: false,
+          canQuickGroupSameSite: false,
+          canGroupAll: false,
+          canCloseOtherSameSite: false,
+          canDissolveTree: false,
+          canDeleteSubtree: false,
+        }),
+        getGroups: () => [],
+        getRecentlyClosedSessionId: () => undefined,
+        onCommand: vi.fn(),
+      },
+    );
+    const popup = document.querySelector<HTMLElement>(
+      ".tab-context-menu:not(.tab-context-submenu)",
+    )!;
+
+    context(row(1));
+
+    const unavailableActions = [
+      "duplicate",
+      "open-all-shortcuts",
+      "group-same-site",
+      "group-all",
+      "dissolve-tree",
+      "delete-subtree",
+      "close-below",
+      "close-above",
+      "close-same-site",
+      "restore-recently-closed",
+    ];
+    for (const action of unavailableActions) {
+      const item = popup.querySelector<HTMLButtonElement>(`[data-menu-action='${action}']`)!;
+      expect(item.hidden).toBe(true);
+      expect(item.disabled).toBe(false);
+    }
+
+    const visibleItems = Array.from(popup.children).filter((item) => !item.hasAttribute("hidden"));
+    expect(visibleItems.map((item) => item.className)).toEqual([
+      "",
+      "",
+      "tab-context-separator",
+      "",
+    ]);
+    expect(visibleItems[0]?.getAttribute("role")).not.toBe("separator");
+    expect(visibleItems.at(-1)?.getAttribute("role")).not.toBe("separator");
+    for (let index = 1; index < visibleItems.length; index += 1) {
+      expect(
+        visibleItems[index - 1]?.getAttribute("role") === "separator"
+          && visibleItems[index]?.getAttribute("role") === "separator",
+      ).toBe(false);
+    }
     menu.destroy();
   });
 
@@ -300,7 +356,7 @@ describe("tab context menu", () => {
     menu.destroy();
   });
 
-  it("disables close-below without a following tab and skips it during navigation", () => {
+  it("hides close-below without a following tab and skips it during navigation", () => {
     const onCommand = vi.fn();
     const menu = createTabContextMenu(
       { document, list, viewport: window },
@@ -314,7 +370,8 @@ describe("tab context menu", () => {
 
     context(row(1));
     const closeBelow = popup.querySelector<HTMLButtonElement>("[data-menu-action='close-below']")!;
-    expect(closeBelow.disabled).toBe(true);
+    expect(closeBelow.hidden).toBe(true);
+    expect(closeBelow.disabled).toBe(false);
     closeBelow.click();
     closeBelow.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     closeBelow.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
@@ -377,17 +434,21 @@ describe("tab context menu", () => {
       );
 
       context(row(1));
-      expect(document.querySelector<HTMLButtonElement>(
+      const groupSameSite = document.querySelector<HTMLButtonElement>(
         "[data-menu-action='group-same-site']",
-      )?.disabled).toBe(!canQuickGroupSameSite);
-      expect(document.querySelector<HTMLButtonElement>(
+      )!;
+      const groupAll = document.querySelector<HTMLButtonElement>(
         "[data-menu-action='group-all']",
-      )?.disabled).toBe(!canGroupAll);
+      )!;
+      expect(groupSameSite.hidden).toBe(!canQuickGroupSameSite);
+      expect(groupAll.hidden).toBe(!canGroupAll);
+      expect(groupSameSite.disabled).toBe(false);
+      expect(groupAll.disabled).toBe(false);
       menu.destroy();
     },
   );
 
-  it("skips disabled grouping actions and dispatches mouse, Enter, and Space commands", () => {
+  it("skips hidden grouping actions and dispatches mouse, Enter, and Space commands", () => {
     const onCommand = vi.fn();
     const menu = createTabContextMenu(
       { document, list, viewport: window },
@@ -408,9 +469,9 @@ describe("tab context menu", () => {
     const groupSameSite = popup.querySelector<HTMLButtonElement>("[data-menu-action='group-same-site']")!;
     const groupAll = popup.querySelector<HTMLButtonElement>("[data-menu-action='group-all']")!;
     const closeSameSite = popup.querySelector<HTMLButtonElement>("[data-menu-action='close-same-site']")!;
-    expect(groupSameSite.disabled).toBe(false);
-    expect(groupAll.disabled).toBe(true);
-    expect(closeSameSite.disabled).toBe(true);
+    expect(groupSameSite.hidden).toBe(false);
+    expect(groupAll.hidden).toBe(true);
+    expect(closeSameSite.hidden).toBe(true);
     closeSameSite.click();
     closeSameSite.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     closeSameSite.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
@@ -421,8 +482,8 @@ describe("tab context menu", () => {
     context(row(2));
     const keyboardGroupSameSite = popup.querySelector<HTMLButtonElement>("[data-menu-action='group-same-site']")!;
     const keyboardGroupAll = popup.querySelector<HTMLButtonElement>("[data-menu-action='group-all']")!;
-    expect(keyboardGroupSameSite.disabled).toBe(true);
-    expect(keyboardGroupAll.disabled).toBe(false);
+    expect(keyboardGroupSameSite.hidden).toBe(true);
+    expect(keyboardGroupAll.hidden).toBe(false);
     popup.querySelector<HTMLButtonElement>("[data-menu-action='remove-from-group']")!.focus();
     popup.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
     expect(document.activeElement).toBe(keyboardGroupAll);
@@ -473,7 +534,7 @@ describe("tab context menu", () => {
     )?.disabled).toBe(false);
     expect(document.querySelector<HTMLButtonElement>(
       "[data-menu-action='close-same-site']",
-    )?.disabled).toBe(true);
+    )?.hidden).toBe(true);
     menu.destroy();
   });
 
@@ -537,7 +598,7 @@ describe("tab context menu", () => {
     menu.destroy();
   });
 
-  it("disables restore-recently-closed without a session and skips it during navigation", () => {
+  it("hides restore-recently-closed without a session and skips it during navigation", () => {
     const onCommand = vi.fn();
     const menu = createTabContextMenu(
       { document, list, viewport: window },
@@ -554,7 +615,8 @@ describe("tab context menu", () => {
     const restore = popup.querySelector<HTMLButtonElement>(
       "[data-menu-action='restore-recently-closed']",
     )!;
-    expect(restore.disabled).toBe(true);
+    expect(restore.hidden).toBe(true);
+    expect(restore.disabled).toBe(false);
     restore.click();
     expect(onCommand).not.toHaveBeenCalled();
 
@@ -698,7 +760,8 @@ describe("tab context menu", () => {
     expect(groupItems[2]?.querySelector(".group-menu-title")?.textContent).toBe(longGroupTitle);
     expect(groupItems[1]?.textContent).toContain("未命名分组");
     expect(groupItems[0]?.getAttribute("aria-checked")).toBe("true");
-    expect(groupItems[0]?.disabled).toBe(true);
+    expect(groupItems[0]?.hidden).toBe(true);
+    expect(groupItems[0]?.disabled).toBe(false);
 
     groupItems[2]?.click();
     expect(onCommand).toHaveBeenCalledWith({ action: "add-to-group", tabId: 2, groupId: 5 });

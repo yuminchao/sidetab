@@ -77,6 +77,16 @@ export function createTabGroupContextMenu(
     ).filter((item) => !item.hidden && !item.disabled);
   }
 
+  function normalizeSeparator(): void {
+    // 仅在分隔符两侧均有可见命令时显示。
+    const visibleItems = Array.from(menu.children).filter(
+      (item): item is HTMLButtonElement => item instanceof HTMLButtonElement && !item.hidden,
+    );
+    separator.hidden = visibleItems.length === 0
+      || !visibleItems.some((item) => item.compareDocumentPosition(separator) & Node.DOCUMENT_POSITION_FOLLOWING)
+      || !visibleItems.some((item) => separator.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_FOLLOWING);
+  }
+
   function closeSubmenu(restoreFocus = false): void {
     submenu.hidden = true;
     submenu.replaceChildren();
@@ -121,7 +131,8 @@ export function createTabGroupContextMenu(
       button.setAttribute("role", "menuitemradio");
       const selected = color === group.color;
       button.setAttribute("aria-checked", String(selected));
-      button.disabled = selected;
+      button.hidden = selected;
+      button.disabled = false;
 
       const swatch = elements.document.createElement("span");
       swatch.className = "group-menu-color";
@@ -143,14 +154,15 @@ export function createTabGroupContextMenu(
   function open(group: TabGroupViewModel, x: number, y: number, row: HTMLElement): void {
     callbacks.onBeforeOpen();
     close();
+    if (callbacks.isGroupBusy(group.id)) return;
     openGroupId = group.id;
     returnFocus = row.querySelector<HTMLElement>(".tab-group-main") ?? row;
     row.dataset.contextSelected = "true";
     contextSelectedRow = row;
-    const busy = callbacks.isGroupBusy(group.id);
-    for (const button of [newTab, rename, setColor, dissolve]) button.disabled = busy;
-    closeGroup.disabled = busy || !callbacks.canCloseGroup(group.id);
+    for (const button of [newTab, rename, setColor, dissolve, closeGroup]) button.disabled = false;
+    closeGroup.hidden = !callbacks.canCloseGroup(group.id);
 
+    normalizeSeparator();
     menu.hidden = false;
     menu.style.left = "0px";
     menu.style.top = "0px";
@@ -189,7 +201,7 @@ export function createTabGroupContextMenu(
   };
 
   const dispatchMainCommand = (button: HTMLButtonElement): void => {
-    if (openGroupId === undefined || button.disabled) return;
+    if (openGroupId === undefined || button.hidden || button.disabled) return;
     if (button === setColor) {
       openSubmenu(true);
       return;
@@ -218,7 +230,7 @@ export function createTabGroupContextMenu(
     const button = event.target instanceof Element
       ? event.target.closest<HTMLButtonElement>("button[data-color]")
       : null;
-    if (!button || button.parentElement !== submenu || button.disabled || openGroupId === undefined) return;
+    if (!button || button.parentElement !== submenu || button.hidden || button.disabled || openGroupId === undefined) return;
     const color = button.dataset.color as TabGroupColor | undefined;
     if (!color || !TAB_GROUP_COLORS.includes(color)) return;
     const command: TabGroupContextCommand = { action: "set-color", groupId: openGroupId, color };
