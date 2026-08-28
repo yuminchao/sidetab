@@ -75,7 +75,16 @@ export type SidebarDependencies = {
   sessionStorage?: StorageArea;
   bookmarks: BookmarkSearchApi & Pick<typeof chrome.bookmarks, "create">;
   history: HistorySearchApi;
-  /** Chrome 默认搜索 API。 */
+  /**
+   * 提供 Chrome 默认搜索 API。
+   *
+   * Args:
+   *   无。
+   * Returns:
+   *   提供默认搜索的 query 方法。
+   * Raises:
+   *   query 调用失败时由调用方处理。
+   */
   search: Pick<typeof chrome.search, "query">;
   sessions: SessionsApi;
   document: Document;
@@ -597,9 +606,12 @@ async function startSidebarInternal(
       /**
        * 使用 Chrome 默认搜索在新标签页中打开查询。
        *
-       * @param text 已去除首尾空白的搜索词。
-       * @returns Chrome 完成搜索页打开时解决的 Promise。
-       * @throws Chrome 搜索 API 调用失败时抛出错误。
+       * Args:
+       *   text: 已去除首尾空白的搜索词。
+       * Returns:
+       *   Chrome 完成搜索页打开时解决的 Promise。
+       * Raises:
+       *   Chrome 搜索 API 调用失败时抛出错误。
        */
       async onSearchWeb(text) {
         await deps.search.query({ text, disposition: "NEW_TAB" });

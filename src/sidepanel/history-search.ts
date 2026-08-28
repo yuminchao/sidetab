@@ -56,9 +56,12 @@ export function createHistorySearchController(
     /**
      * 使用浏览器默认搜索打开查询词。
      *
-     * @param query 已去除首尾空白的查询词。
-     * @returns 浏览器完成打开搜索页时解决的 Promise。
-     * @throws 浏览器无法打开搜索页时抛出错误。
+     * Args:
+     *   query: 已去除首尾空白的查询词。
+     * Returns:
+     *   浏览器完成打开搜索页时解决的 Promise。
+     * Raises:
+     *   浏览器无法打开搜索页时抛出错误。
      */
     onSearchWeb(query: string): Promise<void>;
     onOpenError?(message: string): void;
@@ -260,8 +263,12 @@ export function createHistorySearchController(
   /**
    * 在本地查询已确认无结果时调用浏览器默认搜索。
    *
-   * @returns 无返回值。
-   * @throws 无；失败会显示在搜索面板中。
+   * Args:
+   *   无。
+   * Returns:
+   *   无返回值。
+   * Raises:
+   *   无；失败会显示在搜索面板中。
    */
   const searchWeb = async (): Promise<void> => {
     const query = elements.input.value.trim();

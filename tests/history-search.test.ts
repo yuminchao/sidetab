@@ -759,6 +759,8 @@ describe("history search controller", () => {
     expect(results.hidden).toBe(false);
 
     pressEnter(input);
+    expect(onSearchWeb).toHaveBeenCalledTimes(2);
+    expect(onSearchWeb).toHaveBeenLastCalledWith("new");
     controller.destroy();
     const before = { value: input.value, results: results.innerHTML };
     destroyedSearch.resolve();
