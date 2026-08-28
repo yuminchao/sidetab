@@ -75,6 +75,8 @@ export type SidebarDependencies = {
   sessionStorage?: StorageArea;
   bookmarks: BookmarkSearchApi & Pick<typeof chrome.bookmarks, "create">;
   history: HistorySearchApi;
+  /** Chrome 默认搜索 API。 */
+  search: Pick<typeof chrome.search, "query">;
   sessions: SessionsApi;
   document: Document;
 };
@@ -591,6 +593,16 @@ async function startSidebarInternal(
         } catch {
           throw new Error("无法打开历史记录");
         }
+      },
+      /**
+       * 使用 Chrome 默认搜索在新标签页中打开查询。
+       *
+       * @param text 已去除首尾空白的搜索词。
+       * @returns Chrome 完成搜索页打开时解决的 Promise。
+       * @throws Chrome 搜索 API 调用失败时抛出错误。
+       */
+      async onSearchWeb(text) {
+        await deps.search.query({ text, disposition: "NEW_TAB" });
       },
       onOpenError: (message) => setStatus("operation", message),
     },
@@ -2400,6 +2412,7 @@ if (typeof chrome !== "undefined" && typeof document !== "undefined") {
     windows: chrome.windows,
     bookmarks: chrome.bookmarks,
     history: chrome.history,
+    search: chrome.search,
     sessions: chrome.sessions,
     storage: chrome.storage.local,
     sessionStorage: chrome.storage.session,

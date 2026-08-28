@@ -160,6 +160,10 @@ async function flush(): Promise<void> {
   await Promise.resolve();
 }
 
+function pressEnter(input: HTMLInputElement): void {
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+}
+
 async function slowPrimaryClick(
   input: HTMLInputElement,
   target: HTMLElement,
@@ -204,6 +208,7 @@ describe("history search controller", () => {
         bookmarks: { search: bookmarkSearch },
         history: { search: historySearch },
         onOpen: vi.fn(async () => undefined),
+        onSearchWeb: vi.fn(async () => undefined),
       },
     );
     controller.setFaviconsByOrigin(
@@ -241,6 +246,7 @@ describe("history search controller", () => {
         bookmarks: emptyBookmarks(),
         history: { search },
         onOpen: vi.fn(async () => undefined),
+        onSearchWeb: vi.fn(async () => undefined),
       },
     );
     input.focus();
@@ -268,6 +274,7 @@ describe("history search controller", () => {
         bookmarks: emptyBookmarks(),
         history: { search },
         onOpen: vi.fn(async () => undefined),
+        onSearchWeb: vi.fn(async () => undefined),
       },
     );
 
@@ -300,6 +307,7 @@ describe("history search controller", () => {
         bookmarks: { search: bookmarkSearch },
         history: { search: historySearch },
         onOpen: vi.fn(async () => undefined),
+        onSearchWeb: vi.fn(async () => undefined),
       },
     );
 
@@ -341,6 +349,7 @@ describe("history search controller", () => {
         bookmarks: { search: bookmarkSearch },
         history: { search: historySearch },
         onOpen: vi.fn(async () => undefined),
+        onSearchWeb: vi.fn(async () => undefined),
       },
     );
 
@@ -390,6 +399,7 @@ describe("history search controller", () => {
         bookmarks: { search: bookmarkSearch },
         history: { search: historySearch },
         onOpen: vi.fn(async () => undefined),
+        onSearchWeb: vi.fn(async () => undefined),
       },
     );
 
@@ -422,6 +432,7 @@ describe("history search controller", () => {
         bookmarks: { search: bookmarkSearch },
         history: { search: historySearch },
         onOpen: vi.fn(async () => undefined),
+        onSearchWeb: vi.fn(async () => undefined),
       },
     );
 
@@ -447,6 +458,7 @@ describe("history search controller", () => {
         bookmarks: { search: bookmarkSearch },
         history: { search: historySearch },
         onOpen: vi.fn(async () => undefined),
+        onSearchWeb: vi.fn(async () => undefined),
       },
     );
 
@@ -459,6 +471,266 @@ describe("history search controller", () => {
     controller.destroy();
   });
 
+  it("searches the web for a settled empty local query", async () => {
+    const onSearchWeb = vi.fn(async () => undefined);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      {
+        bookmarks: emptyBookmarks(),
+        history: { search: vi.fn(async () => []) },
+        onOpen: vi.fn(async () => undefined),
+        onSearchWeb,
+      },
+    );
+
+    input.value = "missing";
+    input.focus();
+    await flush();
+    pressEnter(input);
+    await flush();
+
+    expect(onSearchWeb).toHaveBeenCalledWith("missing");
+    controller.destroy();
+  });
+
+  it("does not search the web before the debounce settles or for blank input", async () => {
+    vi.useFakeTimers();
+    const onSearchWeb = vi.fn(async () => undefined);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      {
+        bookmarks: emptyBookmarks(),
+        history: { search: vi.fn(async () => []) },
+        onOpen: vi.fn(async () => undefined),
+        onSearchWeb,
+      },
+    );
+
+    input.value = "pending";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    pressEnter(input);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(onSearchWeb).not.toHaveBeenCalled();
+
+    input.value = "   ";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    pressEnter(input);
+    expect(onSearchWeb).not.toHaveBeenCalled();
+    controller.destroy();
+  });
+
+  it("does not search the web while local sources are pending or when the input differs", async () => {
+    vi.useFakeTimers();
+    const bookmarks = deferred<chrome.bookmarks.BookmarkTreeNode[]>();
+    const history = deferred<chrome.history.HistoryItem[]>();
+    const onSearchWeb = vi.fn(async () => undefined);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      {
+        bookmarks: { search: vi.fn(() => bookmarks.promise) },
+        history: { search: vi.fn(() => history.promise) },
+        onOpen: vi.fn(async () => undefined),
+        onSearchWeb,
+      },
+    );
+
+    input.value = "pending";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(100);
+    pressEnter(input);
+    expect(onSearchWeb).not.toHaveBeenCalled();
+
+    bookmarks.resolve([]);
+    history.resolve([]);
+    await flush();
+    input.value = "different";
+    pressEnter(input);
+    await flush();
+    expect(onSearchWeb).not.toHaveBeenCalled();
+    controller.destroy();
+  });
+
+  it("opens local results instead of searching the web", async () => {
+    const onOpen = vi.fn(async () => undefined);
+    const onSearchWeb = vi.fn(async () => undefined);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      {
+        bookmarks: emptyBookmarks(),
+        history: { search: vi.fn(async () => [
+          historyItem("one", "https://one.example/", "One"),
+        ]) },
+        onOpen,
+        onSearchWeb,
+      },
+    );
+
+    input.value = "one";
+    input.focus();
+    await flush();
+    pressEnter(input);
+    await flush();
+
+    expect(onOpen).toHaveBeenCalledWith("https://one.example/");
+    expect(onSearchWeb).not.toHaveBeenCalled();
+    controller.destroy();
+  });
+
+  it("only searches the web after a partial local failure with empty results", async () => {
+    const onSearchWeb = vi.fn(async () => undefined);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      {
+        bookmarks: { search: vi.fn(async () => {
+          throw new Error("bookmark failed");
+        }) },
+        history: { search: vi.fn(async () => []) },
+        onOpen: vi.fn(async () => undefined),
+        onSearchWeb,
+      },
+    );
+
+    input.value = "partial";
+    input.focus();
+    await flush();
+    pressEnter(input);
+    await flush();
+    expect(onSearchWeb).toHaveBeenCalledWith("partial");
+
+    controller.destroy();
+    document.body.innerHTML = `
+      <input id="search" />
+      <div id="results" role="listbox" hidden></div>`;
+    const failedInput = document.querySelector<HTMLInputElement>("#search")!;
+    const failedResults = document.querySelector<HTMLElement>("#results")!;
+    const bothFailed = createHistorySearchController(
+      { document, input: failedInput, results: failedResults },
+      {
+        bookmarks: { search: vi.fn(async () => { throw new Error("bookmark failed"); }) },
+        history: { search: vi.fn(async () => { throw new Error("history failed"); }) },
+        onOpen: vi.fn(async () => undefined),
+        onSearchWeb,
+      },
+    );
+    failedInput.value = "failed";
+    failedInput.focus();
+    await flush();
+    pressEnter(failedInput);
+    await flush();
+
+    expect(onSearchWeb).toHaveBeenCalledOnce();
+    bothFailed.destroy();
+  });
+
+  it("uses the exact trimmed settled query and prevents duplicate web searches", async () => {
+    const pendingSearch = deferred<void>();
+    const onSearchWeb = vi.fn(() => pendingSearch.promise);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      {
+        bookmarks: emptyBookmarks(),
+        history: { search: vi.fn(async () => []) },
+        onOpen: vi.fn(async () => undefined),
+        onSearchWeb,
+      },
+    );
+
+    input.value = "  exact query  ";
+    input.focus();
+    await flush();
+    pressEnter(input);
+    pressEnter(input);
+    await flush();
+
+    expect(onSearchWeb).toHaveBeenCalledOnce();
+    expect(onSearchWeb).toHaveBeenCalledWith("exact query");
+    pendingSearch.resolve();
+    await flush();
+    controller.destroy();
+  });
+
+  it("clears and closes after a successful web search", async () => {
+    const controller = createHistorySearchController(
+      { document, input, results },
+      {
+        bookmarks: emptyBookmarks(),
+        history: { search: vi.fn(async () => []) },
+        onOpen: vi.fn(async () => undefined),
+        onSearchWeb: vi.fn(async () => undefined),
+      },
+    );
+
+    input.value = "missing";
+    input.focus();
+    await flush();
+    pressEnter(input);
+    await flush();
+
+    expect(input.value).toBe("");
+    expect(results.hidden).toBe(true);
+    controller.destroy();
+  });
+
+  it("keeps the query and renders a local error when web search fails", async () => {
+    const controller = createHistorySearchController(
+      { document, input, results },
+      {
+        bookmarks: emptyBookmarks(),
+        history: { search: vi.fn(async () => []) },
+        onOpen: vi.fn(async () => undefined),
+        onSearchWeb: vi.fn(async () => { throw new Error("browser failed"); }),
+      },
+    );
+
+    input.value = "missing";
+    input.focus();
+    await flush();
+    pressEnter(input);
+    await flush();
+
+    expect(input.value).toBe("missing");
+    expect(results.textContent).toBe("无法打开浏览器搜索");
+    controller.destroy();
+  });
+
+  it("drops late web-search outcomes after a newer query and after destroy", async () => {
+    vi.useFakeTimers();
+    const staleSearch = deferred<void>();
+    const destroyedSearch = deferred<void>();
+    const onSearchWeb = vi.fn()
+      .mockReturnValueOnce(staleSearch.promise)
+      .mockReturnValueOnce(destroyedSearch.promise);
+    const controller = createHistorySearchController(
+      { document, input, results },
+      {
+        bookmarks: emptyBookmarks(),
+        history: { search: vi.fn(async () => []) },
+        onOpen: vi.fn(async () => undefined),
+        onSearchWeb,
+      },
+    );
+
+    input.value = "old";
+    input.focus();
+    await flush();
+    pressEnter(input);
+    input.value = "new";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(100);
+    staleSearch.resolve();
+    await flush();
+    expect(input.value).toBe("new");
+    expect(results.hidden).toBe(false);
+
+    pressEnter(input);
+    controller.destroy();
+    const before = { value: input.value, results: results.innerHTML };
+    destroyedSearch.resolve();
+    await flush();
+    expect(input.value).toBe(before.value);
+    expect(results.innerHTML).toBe(before.results);
+  });
+
   it("wraps keyboard selection and opens the selected result", async () => {
     const onOpen = vi.fn(async () => undefined);
     const search = vi.fn(async () => [
@@ -467,7 +739,12 @@ describe("history search controller", () => {
     ]);
     const controller = createHistorySearchController(
       { document, input, results },
-      { bookmarks: emptyBookmarks(), history: { search }, onOpen },
+      {
+        bookmarks: emptyBookmarks(),
+        history: { search },
+        onOpen,
+        onSearchWeb: vi.fn(async () => undefined),
+      },
     );
 
     input.focus();
@@ -499,7 +776,13 @@ describe("history search controller", () => {
     ]);
     const controller = createHistorySearchController(
       { document, input, results },
-      { bookmarks: { search: bookmarkSearch }, history: { search }, onOpen, onOpenError },
+      {
+        bookmarks: { search: bookmarkSearch },
+        history: { search },
+        onOpen,
+        onSearchWeb: vi.fn(async () => undefined),
+        onOpenError,
+      },
     );
 
     input.value = "keep";
@@ -553,7 +836,12 @@ describe("history search controller", () => {
     ]);
     const controller = createHistorySearchController(
       { document, input, results },
-      { bookmarks: emptyBookmarks(), history: { search }, onOpen },
+      {
+        bookmarks: emptyBookmarks(),
+        history: { search },
+        onOpen,
+        onSearchWeb: vi.fn(async () => undefined),
+      },
     );
 
     input.value = "old";
@@ -599,6 +887,7 @@ describe("history search controller", () => {
         bookmarks: emptyBookmarks(),
         history: { search },
         onOpen: vi.fn(() => oldOpen.promise),
+        onSearchWeb: vi.fn(async () => undefined),
         onOpenError,
       },
     );
@@ -633,6 +922,7 @@ describe("history search controller", () => {
         bookmarks: emptyBookmarks(),
         history: { search },
         onOpen: vi.fn(() => pendingOpen.promise),
+        onSearchWeb: vi.fn(async () => undefined),
         onOpenError,
       },
     );
@@ -663,6 +953,7 @@ describe("history search controller", () => {
         bookmarks: emptyBookmarks(),
         history: { search },
         onOpen: vi.fn(async () => undefined),
+        onSearchWeb: vi.fn(async () => undefined),
       },
     );
 
@@ -691,7 +982,12 @@ describe("history search controller", () => {
     ]);
     const controller = createHistorySearchController(
       { document, input, results },
-      { bookmarks: emptyBookmarks(), history: { search }, onOpen },
+      {
+        bookmarks: emptyBookmarks(),
+        history: { search },
+        onOpen,
+        onSearchWeb: vi.fn(async () => undefined),
+      },
     );
 
     input.focus();
@@ -716,7 +1012,12 @@ describe("history search controller", () => {
     ]);
     const controller = createHistorySearchController(
       { document, input, results },
-      { bookmarks: emptyBookmarks(), history: { search }, onOpen },
+      {
+        bookmarks: emptyBookmarks(),
+        history: { search },
+        onOpen,
+        onSearchWeb: vi.fn(async () => undefined),
+      },
     );
 
     input.value = "history";
@@ -745,6 +1046,7 @@ describe("history search controller", () => {
         bookmarks: { search: bookmarkSearch },
         history: { search: vi.fn(async () => []) },
         onOpen,
+        onSearchWeb: vi.fn(async () => undefined),
       },
     );
 
@@ -772,6 +1074,7 @@ describe("history search controller", () => {
         bookmarks: emptyBookmarks(),
         history: { search },
         onOpen: vi.fn(async () => undefined),
+        onSearchWeb: vi.fn(async () => undefined),
       },
     );
 
@@ -806,6 +1109,7 @@ describe("history search controller", () => {
         bookmarks: emptyBookmarks(),
         history: { search },
         onOpen: vi.fn(async () => undefined),
+        onSearchWeb: vi.fn(async () => undefined),
       },
     );
 
@@ -834,6 +1138,7 @@ describe("history search controller", () => {
         bookmarks: emptyBookmarks(),
         history: { search },
         onOpen: vi.fn(async () => undefined),
+        onSearchWeb: vi.fn(async () => undefined),
       },
     );
 
@@ -870,6 +1175,7 @@ describe("history search controller", () => {
         bookmarks: { search: bookmarkSearch },
         history: { search: historySearch },
         onOpen: vi.fn(async () => undefined),
+        onSearchWeb: vi.fn(async () => undefined),
       },
     );
 

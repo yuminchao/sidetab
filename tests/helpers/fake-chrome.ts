@@ -267,6 +267,7 @@ export function createFakeChrome(options: {
     return { ...created };
   });
   const historySearch = vi.fn(async () => options.historyItems ?? []);
+  const searchQuery = vi.fn(async (_query: chrome.search.QueryInfo) => undefined);
   const sessionsGetRecentlyClosed = vi.fn(async () => recentlyClosedState);
   const sessionsRestore = vi.fn(async (sessionId: string) => {
     const index = recentlyClosedState.findIndex(
@@ -304,6 +305,7 @@ export function createFakeChrome(options: {
       "search" | "create"
     >,
     history: { search: historySearch } as Pick<typeof chrome.history, "search">,
+    search: { query: searchQuery } as Pick<typeof chrome.search, "query">,
     sessions: {
       getRecentlyClosed: sessionsGetRecentlyClosed,
       restore: sessionsRestore,
@@ -332,6 +334,7 @@ export function createFakeChrome(options: {
       bookmarkSearch,
       bookmarkCreate,
       historySearch,
+      searchQuery,
       sessionsGetRecentlyClosed,
       sessionsRestore,
       storageGet,

@@ -1225,6 +1225,63 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
+  it("opens Chrome default search in a new tab for settled empty local results", async () => {
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 1 })] });
+    const cleanup = await startSidebar(fake);
+    const search = element<HTMLInputElement>("tab-search");
+
+    search.value = "  状态管理  ";
+    search.focus();
+    await flush();
+    search.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await flush();
+
+    expect(fake.methods.searchQuery).toHaveBeenCalledWith({
+      text: "状态管理",
+      disposition: "NEW_TAB",
+    });
+    expect(search.value).toBe("");
+    expect(element("history-search-results").hidden).toBe(true);
+    cleanup();
+  });
+
+  it("does not use Chrome default search when a local result is selected", async () => {
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 1 })],
+      historyItems: [{ id: "local", title: "Local", url: "https://local.example/" }],
+    });
+    const cleanup = await startSidebar(fake);
+    const search = element<HTMLInputElement>("tab-search");
+
+    search.value = "local";
+    search.focus();
+    await flush();
+    search.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await flush();
+
+    expect(fake.methods.create).toHaveBeenCalledWith({ url: "https://local.example/", active: true });
+    expect(fake.methods.searchQuery).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("keeps search failure inside the search panel without changing operation status", async () => {
+    const fake = createFakeChrome({ tabs: [fakeTab({ id: 1 })] });
+    fake.methods.searchQuery.mockRejectedValueOnce(new Error("browser failed"));
+    const cleanup = await startSidebar(fake);
+    const search = element<HTMLInputElement>("tab-search");
+
+    search.value = "missing";
+    search.focus();
+    await flush();
+    search.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await flush();
+
+    expect(search.value).toBe("missing");
+    expect(element("history-search-results").textContent).toBe("无法打开浏览器搜索");
+    expect(element("status-message").textContent).toBe("");
+    cleanup();
+  });
+
   it("delegates activate and close actions and reports their domain errors", async () => {
     const fake = createFakeChrome({ tabs: [fakeTab({ id: 7 })] });
     const cleanup = await startSidebar(fake);
@@ -4439,6 +4496,7 @@ describe("sidebar lifecycle", () => {
       windows: typeof chrome.windows;
       bookmarks: typeof chrome.bookmarks;
       history: typeof chrome.history;
+      search: typeof chrome.search;
       sessions: typeof chrome.sessions;
       storage: typeof chrome.storage.local;
       document: Document;
