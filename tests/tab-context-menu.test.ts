@@ -40,6 +40,7 @@ function menuContext(
     canOpenAllShortcuts: boolean;
     canQuickGroupSameSite: boolean;
     canGroupAll: boolean;
+    canManageGroupMembership: boolean;
     canCloseOtherSameSite: boolean;
     canDissolveTree: boolean;
     canDeleteSubtree: boolean;
@@ -51,6 +52,7 @@ function menuContext(
     canCloseBelow: false,
     canQuickGroupSameSite: false,
     canGroupAll: false,
+    canManageGroupMembership: true,
     canCloseOtherSameSite: false,
     ...availability,
   };
@@ -237,11 +239,14 @@ describe("tab context menu", () => {
     }
 
     const visibleItems = Array.from(popup.children).filter((item) => !item.hasAttribute("hidden"));
-    expect(visibleItems.map((item) => item.className)).toEqual([
-      "",
-      "",
-      "tab-context-separator",
-      "",
+    expect(visibleItems.map((item) => ({
+      action: item instanceof HTMLButtonElement ? item.dataset.menuAction : undefined,
+      role: item.getAttribute("role"),
+    }))).toEqual([
+      { action: "set-pinned", role: "menuitem" },
+      { action: "add-shortcut", role: "menuitem" },
+      { action: undefined, role: "separator" },
+      { action: "add-to-group", role: "menuitem" },
     ]);
     expect(visibleItems[0]?.getAttribute("role")).not.toBe("separator");
     expect(visibleItems.at(-1)?.getAttribute("role")).not.toBe("separator");
@@ -250,6 +255,29 @@ describe("tab context menu", () => {
         visibleItems[index - 1]?.getAttribute("role") === "separator"
           && visibleItems[index]?.getAttribute("role") === "separator",
       ).toBe(false);
+    }
+    menu.destroy();
+  });
+
+  it("hides group membership commands when the tab cannot change groups", () => {
+    const menu = createTabContextMenu(
+      { document, list, viewport: window },
+      {
+        getContext: (id) => menuContext(id, { canManageGroupMembership: false }),
+        getGroups: () => groups,
+        onCommand: vi.fn(),
+      },
+    );
+    const popup = document.querySelector<HTMLElement>(
+      ".tab-context-menu:not(.tab-context-submenu)",
+    )!;
+
+    context(row(2));
+
+    for (const action of ["add-to-group", "remove-from-group"]) {
+      const item = popup.querySelector<HTMLButtonElement>(`[data-menu-action='${action}']`)!;
+      expect(item.hidden).toBe(true);
+      expect(item.disabled).toBe(false);
     }
     menu.destroy();
   });
@@ -514,6 +542,7 @@ describe("tab context menu", () => {
         canCloseBelow: true,
         canQuickGroupSameSite: true,
         canGroupAll: false,
+        canManageGroupMembership: true,
         canCloseOtherSameSite: false,
       };
     });

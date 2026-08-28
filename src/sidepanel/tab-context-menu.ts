@@ -26,6 +26,7 @@ export type TabContextMenuContext = {
   canOpenAllShortcuts?: boolean;
   canQuickGroupSameSite: boolean;
   canGroupAll: boolean;
+  canManageGroupMembership: boolean;
   canCloseOtherSameSite: boolean;
   canDissolveTree?: boolean;
   canDeleteSubtree?: boolean;
@@ -226,7 +227,11 @@ export function createTabContextMenu(
     setPinned.dataset.nextPinned = String(!tab.pinned);
     duplicate.hidden = context.canDuplicate === false;
     duplicate.disabled = false;
-    removeFromGroup.hidden = !isValidTabGroupId(tab.groupId);
+    addToGroup.hidden = !context.canManageGroupMembership;
+    addToGroup.disabled = false;
+    removeFromGroup.hidden = !context.canManageGroupMembership
+      || !isValidTabGroupId(tab.groupId);
+    removeFromGroup.disabled = false;
     groupSameSite.hidden = !context.canQuickGroupSameSite;
     groupAll.hidden = !context.canGroupAll;
     closeBelow.hidden = !context.canCloseBelow;

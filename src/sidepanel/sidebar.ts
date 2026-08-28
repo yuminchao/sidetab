@@ -1000,6 +1000,9 @@ async function startSidebarInternal(
           canGroupAll: ready && !busy
             && allPlan !== undefined
             && !planHasOrdinaryGroupConflict(allPlan),
+          canManageGroupMembership: currentWindowId !== undefined
+            && !smartGroupingBusy
+            && !groupTabBusy.has(id),
           canCloseOtherSameSite: getOtherSameSiteTabIds(tabs, id).length > 0,
           canDissolveTree: subtreeIds.length > 1,
           canDeleteSubtree: subtreeIds.length > 1,
