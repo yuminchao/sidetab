@@ -167,6 +167,28 @@ describe("extension manifest", () => {
     }
   });
 
+  it("documents accurate search permission warnings and the current manual QA limitation", () => {
+    const readme = readFileSync("README.md", "utf8");
+    const privacyPolicy = readFileSync("docs/privacy-policy.md", "utf8");
+    const checklist = readFileSync("docs/chrome-web-store-checklist.md", "utf8");
+
+    for (const document of [readme, privacyPolicy, checklist]) {
+      expect(document).toContain("`search` 权限本身不会触发新增权限警告");
+      expect(document).toContain("HTTP/HTTPS 主机权限");
+    }
+    expect(checklist).toContain("自动验收记录（2026-08-29）");
+    expect(checklist).toContain("44x44 host");
+    expect(checklist).toContain("没有 `.result-source` 指纹");
+    expect(checklist).toContain("未获授权安装或重新加载 0.12.8");
+    expect(checklist).toContain("Chrome Web Store 页面不可脚本化");
+    for (const staleClaim of [
+      "升级到包含新增权限的版本时，Chrome 可能要求用户接受权限变更",
+      "已有安装升级到包含这些权限的版本时，Chrome 可能要求用户接受新增权限",
+    ]) {
+      expect(`${readme}\n${privacyPolicy}\n${checklist}`).not.toContain(staleClaim);
+    }
+  });
+
   it("records the 0.12.8 update release first", () => {
     const updateLog = readFileSync("update.log", "utf8");
     const nextVersion = updateLog.search(/\r?\n(?=\d+\.\d+\.\d+\r?$)/m);
@@ -180,6 +202,8 @@ describe("extension manifest", () => {
       "来源胶囊",
       "search",
       "不读取默认搜索引擎配置",
+      "敏感信息扫描",
+      "逐字节",
     ]) {
       expect(currentRelease).toContain(detail);
     }

@@ -2,12 +2,12 @@
 
 ## 0.12.8 发布验收
 
-- [ ] 版本号为 `0.12.8`；权限精确包含 `sidePanel`、`tabs`、`tabGroups`、`storage`、`history`、`sessions`、`bookmarks`、`scripting` 和 `search`，HTTP/HTTPS 站点权限没有扩大。
-- [ ] `search` 仅在两处搜索框输入非空内容、本地查询已完成且结果为空后，用户主动按 `Enter` 时调用浏览器默认搜索引擎；不读取默认搜索引擎配置或搜索结果页面内容。
-- [ ] 标签页与标签组右键菜单按最新状态展示命令，不可用的操作直接隐藏，分隔线两侧没有命令时一并隐藏；当前颜色也不出现在颜色子菜单中。
-- [ ] “添加到收藏夹”只精确查询当前 HTTP/HTTPS 标签页的完整 URL，无完全相同收藏项时才显示；用户点击后只创建一个收藏夹节点，已收藏、非普通网页、查询失败和操作进行中均隐藏。
+- [x] 版本号为 `0.12.8`；权限精确包含 `sidePanel`、`tabs`、`tabGroups`、`storage`、`history`、`sessions`、`bookmarks`、`scripting` 和 `search`，HTTP/HTTPS 站点权限没有扩大。证据：2026-08-29 smoke 测试、dist 检查与 ZIP manifest 检查。
+- [x] `search` 仅在两处搜索框输入非空内容、本地查询已完成且结果为空后，用户主动按 `Enter` 时调用浏览器默认搜索引擎；不读取默认搜索引擎配置或搜索结果页面内容。证据：2026-08-29 侧边栏、悬浮球消息和控制器自动化测试。
+- [x] 标签页与标签组右键菜单按最新状态展示命令，不可用的操作直接隐藏，分隔线两侧没有命令时一并隐藏；当前颜色也不出现在颜色子菜单中。证据：2026-08-29 两组右键菜单自动化测试。
+- [x] “添加到收藏夹”只精确查询当前 HTTP/HTTPS 标签页的完整 URL，无完全相同收藏项时才显示；用户点击后只创建一个收藏夹节点，已收藏、非普通网页、查询失败和操作进行中均隐藏。证据：2026-08-29 收藏动作与右键菜单自动化测试。
 - [ ] 两处搜索框保持空查询与非空本地搜索边界；网页悬浮球结果以“收藏夹”和“历史记录”来源胶囊显示来源，长标题不挤压来源。
-- [ ] `bookmarks` 权限覆盖非空本地搜索、当前 URL 精确重复检查和用户触发的单次创建；`scripting` 与 HTTP/HTTPS 站点权限仅用于本机网页悬浮球内容脚本。
+- [x] `bookmarks` 权限覆盖非空本地搜索、当前 URL 精确重复检查和用户触发的单次创建；`scripting` 与 HTTP/HTTPS 站点权限仅用于本机网页悬浮球内容脚本。证据：2026-08-29 manifest、源码接线与隐私文档检查。
 - [ ] 悬浮球默认关闭；开启和关闭会即时作用于已经打开的普通网页。
 - [ ] 左键展开后搜索框自动聚焦；右键菜单的复制、固定、关闭、打开侧边栏和一键分组均可用。
 - [ ] Chrome 116 及以上加载成功；不读取网页正文、不向开发者服务上传页面或浏览数据、不加载远程代码。
@@ -101,7 +101,8 @@
 - [ ] CSP 精确为 `script-src 'self'; object-src 'self'; connect-src 'none'; img-src 'self' data: http: https:; style-src 'self'; frame-src 'none'`。
 - [ ] 商店隐私声明明确说明：扩展不收集、不出售或向开发者服务传输用户数据；历史与收藏夹记录仅在本地按用户操作查询，不持久化搜索结果；最近关闭功能只在内存中缓存一个 `sessionId`，不持久化会话记录；浏览器加载 favicon 时可能直接向对应站点发送图片请求。
 - [ ] 权限理由分别说明：侧边栏展示、当前窗口标签与原生标签组管理、本地保存设置、本地搜索 Chrome 历史记录、搜索及单次创建 Chrome 收藏夹、读取并恢复最近关闭标签、默认搜索引擎回退，以及悬浮球的本地脚本注入。
-- [ ] `bookmarks`、`search`、`scripting` 与 HTTP/HTTPS 主机权限理由和隐私政策一致；验证已有安装升级时 Chrome 可能要求接受新增权限，并在需要时提示用户到扩展管理页重新启用扩展。
+- [x] `bookmarks`、`search`、`scripting` 与 HTTP/HTTPS 主机权限理由和隐私政策一致；`search` 权限本身不会触发新增权限警告，也不会暴露默认搜索提供商配置或结果内容。证据：2026-08-29 smoke 文档契约测试。
+- [ ] 人工验证：仅当更新中新增加或扩大 HTTP/HTTPS 主机权限时，Chrome 可能显示权限警告并要求重新启用扩展；0.12.8 未改变主机权限，不把 `search` 的声明误报为该警告来源。
 
 ## 兼容与视觉
 
@@ -118,17 +119,23 @@
 
 ## 构建产物
 
-- [ ] 本次待上传文件为 `release/sidetab-lite-0.12.8.zip`。
-- [ ] `npm run package` 完整通过。
-- [ ] `dist` 和 ZIP 精确包含 16 个审核文件，图标资源为 4 个 PNG 与 5 个 SVG（定位、固定、网络兜底、搜索、设置），不包含 `assets/icons/add-tab.svg` 及 `assets/shortcuts/openai.png`、`google.png`、`github.png`。
-- [ ] ZIP 根目录直接包含 `manifest.json`，不包含 `dist/` 顶层目录。
-- [ ] ZIP 不包含源码、source map、测试、项目文档或 `node_modules`。
+- [x] 本次待上传文件为 `release/sidetab-lite-0.12.8.zip`。证据：2026-08-29 `npm run package` 输出与文件检查。
+- [x] `npm run package` 完整通过，且第一步为 `npm run check:sensitive`。证据：2026-08-29 命令输出顺序。
+- [x] `dist` 和 ZIP 精确包含 16 个审核文件，图标资源为 4 个 PNG 与 5 个 SVG（定位、固定、网络兜底、搜索、设置），不包含 `assets/icons/add-tab.svg` 及 `assets/shortcuts/openai.png`、`google.png`、`github.png`。证据：发布文件契约与 ZIP 清单检查。
+- [x] ZIP 根目录直接包含 `manifest.json`，不包含 `dist/` 顶层目录；每个 ZIP 条目与 `dist` 对应文件逐字节一致。证据：打包器自验与篡改 ZIP 回归测试。
+- [x] ZIP 不包含源码、source map、测试、项目文档或 `node_modules`；内容脚本为 IIFE、无顶层 `export`，Service Worker 保留 `chrome.search` 接线。证据：dist/ZIP AST、清单和构建指纹检查。
 - [ ] 在全新目录解压 ZIP 后重新执行一次“加载已解压”检查。
 
-## 实际结果
+## 自动验收记录（2026-08-29）
 
-- 测试 Chrome 版本：待填写
-- 测试操作系统：待填写
-- 测试日期：待填写
-- 测试人员：待填写
-- 结果与遗留问题：待填写
+- [x] `npm run check:sensitive` 扫描 manifest、package 元数据、README、更新日志、发布脚本、`src` 与两份商店/隐私文档，结果为 0 个发现项。
+- [x] `npm run check` 完成 TypeScript、全量 Vitest、构建和 `check-dist`，版本、权限、16 文件边界、IIFE 与无 source map 均由自动化断言覆盖。
+- [x] `npm run package` 生成 0.12.8 ZIP，并逐条目验证 ZIP 与 `dist` 文件字节完全一致。
+
+## 手动验收状态
+
+- 测试日期：2026-08-29。
+- 自动化环境：Windows；Chrome UI 未作为本次自动验收依据。
+- 当前连接的 Chrome 仍运行较旧的悬浮球构建：页面中可见 44x44 host，但没有 `.result-source` 指纹。
+- 未获授权安装或重新加载 0.12.8，因此菜单、默认搜索跳转与来源胶囊仍需在加载 0.12.8 后人工验收。
+- Chrome Web Store 页面不可脚本化，本次未执行商店上传、审核表单或升级提示的人工验证。

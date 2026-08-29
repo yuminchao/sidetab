@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { strFromU8, unzipSync } from "fflate";
+import { strFromU8, unzipSync, zipSync } from "fflate";
 import { afterEach, describe, expect, it } from "vitest";
 
 const expectedFiles = [
@@ -40,6 +40,7 @@ type CheckDistModule = {
 
 type PackageModule = {
   packageDist(projectRoot: string): Promise<{ archivePath: string; bytes: number }>;
+  verifyArchiveMatchesDist(distDirectory: string, archive: Uint8Array): Promise<void>;
 };
 
 type BuildModule = {
@@ -316,17 +317,17 @@ describe("dist validation", () => {
       "ISC License",
     );
     const serviceWorker = await readFile(resolve("dist/background/service-worker.js"), "utf8");
-    expect(serviceWorker).toContain("search:chrome.search");
+    expect(serviceWorker).toMatch(/\bsearch\s*:\s*chrome\.search\b/);
     const contentScript = await readFile(resolve("dist/content/floating-ball.js"), "utf8");
     for (const marker of [
       "floating-ball/search-web",
       "result-title",
       "result-source",
-      ".result-source[data-source=bookmark]",
-      ".result-source[data-source=history]",
     ]) {
       expect(contentScript).toContain(marker);
     }
+    expect(contentScript).toMatch(/\.result-source\s*\[\s*data-source\s*=\s*bookmark\s*\]/);
+    expect(contentScript).toMatch(/\.result-source\s*\[\s*data-source\s*=\s*history\s*\]/);
     expect(contentScript).not.toMatch(/^\s*export\b/m);
     for (const shortcut of ["openai.png", "google.png", "github.png"]) {
       await expect(readFile(resolve("dist/assets/shortcuts", shortcut))).rejects.toThrow();
@@ -614,6 +615,19 @@ describe("release packaging", () => {
     expect(strFromU8(packaged["THIRD_PARTY_NOTICES.md"]!)).toContain("ISC License");
   });
 
+  it("rejects a ZIP whose allowed entry bytes differ from dist", async () => {
+    const fixture = await createReleaseFixture();
+    const { packageDist, verifyArchiveMatchesDist } = await loadPackage();
+    const result = await packageDist(fixture.root);
+    const entries = unzipSync(await readFile(result.archivePath));
+    entries["sidepanel/sidebar.css"] = new TextEncoder().encode(".tampered { color: red; }");
+    const tamperedArchive = zipSync(entries);
+
+    await expect(verifyArchiveMatchesDist(fixture.dist, tamperedArchive)).rejects.toThrow(
+      /sidepanel\/sidebar\.css.*bytes|bytes.*sidepanel\/sidebar\.css/i,
+    );
+  });
+
   it("creates the same ZIP in UTC, Shanghai, and Los Angeles", async () => {
     const helper = resolve(import.meta.dirname, "helpers/package-release.mjs");
     const hashes: Record<string, string> = {};
@@ -643,6 +657,15 @@ describe("release packaging", () => {
 });
 
 describe("Node dependency contract", () => {
+  it("runs the sensitive information gate before all package checks and ZIP creation", async () => {
+    const packageJson = JSON.parse(await readFile(resolve("package.json"), "utf8"));
+
+    expect(packageJson.scripts["check:sensitive"]).toBe("node scripts/check-sensitive.mjs");
+    expect(packageJson.scripts.package).toBe(
+      "npm run check:sensitive && npm run check && node scripts/package.mjs",
+    );
+  });
+
   it("provides an observational tab renderer benchmark outside the release package", async () => {
     const packageJson = JSON.parse(await readFile(resolve("package.json"), "utf8"));
 
