@@ -2,6 +2,7 @@ import type { SearchResult } from "../sidepanel/search-result-model";
 
 export type FloatingBallRequest =
   | { type: "floating-ball/search"; query: string }
+  | { type: "floating-ball/search-web"; query: string }
   | { type: "floating-ball/open-search-result"; url: string }
   | { type: "floating-ball/duplicate-tab" }
   | { type: "floating-ball/get-tab-state" }
@@ -33,6 +34,10 @@ export function isFloatingBallRequest(value: unknown): value is FloatingBallRequ
     return Object.keys(candidate).length === 2
       && typeof candidate.query === "string"
       && candidate.query.trim().length <= 200;
+  }
+  if (type === "floating-ball/search-web") {
+    const queryLength = typeof candidate.query === "string" ? candidate.query.trim().length : 0;
+    return Object.keys(candidate).length === 2 && queryLength >= 1 && queryLength <= 200;
   }
   if (type === "floating-ball/open-search-result") {
     if (Object.keys(candidate).length !== 2 || typeof candidate.url !== "string") return false;

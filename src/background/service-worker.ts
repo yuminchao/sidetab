@@ -8,6 +8,7 @@ const floatingBallBackground = createFloatingBallBackground({
   tabGroups: chrome.tabGroups,
   bookmarks: chrome.bookmarks,
   history: chrome.history,
+  search: chrome.search,
   sidePanel: chrome.sidePanel,
   scripting: chrome.scripting,
   storage: chrome.storage.local,
