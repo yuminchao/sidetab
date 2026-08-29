@@ -41,6 +41,16 @@ type CheckDistModule = {
 type PackageModule = {
   packageDist(projectRoot: string): Promise<{ archivePath: string; bytes: number }>;
   verifyArchiveMatchesDist(distDirectory: string, archive: Uint8Array): Promise<void>;
+  persistAndVerifyArchive(
+    archivePath: string,
+    archive: Uint8Array,
+    distDirectory: string,
+    options?: {
+      write?: (path: string, data: Uint8Array) => Promise<void>;
+      read?: (path: string) => Promise<Uint8Array>;
+      remove?: (path: string) => Promise<void>;
+    },
+  ): Promise<Uint8Array>;
 };
 
 type BuildModule = {
@@ -162,6 +172,34 @@ async function createReleaseFixture(): Promise<{ root: string; dist: string; rel
 
 async function overwrite(root: string, path: string, contents: string): Promise<void> {
   await writeFile(join(root, ...path.split("/")), contents);
+}
+
+function duplicateCentralEntry(archive: Uint8Array): Uint8Array {
+  const view = new DataView(archive.buffer, archive.byteOffset, archive.byteLength);
+  let eocd = -1;
+  for (let index = archive.length - 22; index >= 0; index -= 1) {
+    if (view.getUint32(index, true) === 0x06054b50) {
+      eocd = index;
+      break;
+    }
+  }
+  if (eocd < 0) throw new Error("missing ZIP end record");
+  const centralOffset = view.getUint32(eocd + 16, true);
+  const centralSize = view.getUint32(eocd + 12, true);
+  const nameLength = view.getUint16(centralOffset + 28, true);
+  const extraLength = view.getUint16(centralOffset + 30, true);
+  const commentLength = view.getUint16(centralOffset + 32, true);
+  const recordLength = 46 + nameLength + extraLength + commentLength;
+  const record = archive.slice(centralOffset, centralOffset + recordLength);
+  const output = new Uint8Array(archive.length + record.length);
+  output.set(archive.slice(0, eocd), 0);
+  output.set(record, eocd);
+  output.set(archive.slice(eocd), eocd + record.length);
+  const outputView = new DataView(output.buffer);
+  outputView.setUint16(eocd + record.length + 10, view.getUint16(eocd + 10, true) + 1, true);
+  outputView.setUint16(eocd + record.length + 8, view.getUint16(eocd + 8, true) + 1, true);
+  outputView.setUint32(eocd + record.length + 12, centralSize + record.length, true);
+  return output;
 }
 
 describe("release file contract", () => {
@@ -625,6 +663,38 @@ describe("release packaging", () => {
 
     await expect(verifyArchiveMatchesDist(fixture.dist, tamperedArchive)).rejects.toThrow(
       /sidepanel\/sidebar\.css.*bytes|bytes.*sidepanel\/sidebar\.css/i,
+    );
+  });
+
+  it("rejects a persisted archive mutation and removes the invalid target", async () => {
+    const fixture = await createReleaseFixture();
+    const { packageDist, persistAndVerifyArchive } = await loadPackage();
+    const result = await packageDist(fixture.root);
+    const archive = await readFile(result.archivePath);
+    const mutateAfterWrite = async (path: string, data: Uint8Array) => {
+      await writeFile(path, data);
+    };
+    const tamperedEntries = unzipSync(archive);
+    tamperedEntries["sidepanel/sidebar.css"] = new TextEncoder().encode(".persisted-tamper { color: red; }");
+    const tamperedArchive = zipSync(tamperedEntries);
+
+    await expect(
+      persistAndVerifyArchive(result.archivePath, archive, fixture.dist, {
+        write: mutateAfterWrite,
+        read: async () => tamperedArchive,
+      }),
+    ).rejects.toThrow(/ZIP|archive|bytes|entries/i);
+    await expect(readFile(result.archivePath)).rejects.toThrow();
+  });
+
+  it("rejects duplicate ZIP entry names in the central directory", async () => {
+    const fixture = await createReleaseFixture();
+    const { packageDist, verifyArchiveMatchesDist } = await loadPackage();
+    const result = await packageDist(fixture.root);
+    const duplicate = duplicateCentralEntry(await readFile(result.archivePath));
+
+    await expect(verifyArchiveMatchesDist(fixture.dist, duplicate)).rejects.toThrow(
+      /duplicate/i,
     );
   });
 
