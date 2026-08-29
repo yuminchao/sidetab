@@ -349,8 +349,9 @@ export async function checkDist(distDirectory) {
         "sessions",
         "bookmarks",
         "scripting",
+        "search",
       ]),
-    "permissions must be exactly sidePanel, tabs, tabGroups, storage, history, sessions, bookmarks, scripting",
+    "permissions must be exactly sidePanel, tabs, tabGroups, storage, history, sessions, bookmarks, scripting, search",
   );
   assert(
     JSON.stringify(manifest.host_permissions) === JSON.stringify(["http://*/*", "https://*/*"]),

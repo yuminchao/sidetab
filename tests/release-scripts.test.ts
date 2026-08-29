@@ -95,6 +95,7 @@ async function createReleaseFixture(): Promise<{ root: string; dist: string; rel
       "sessions",
       "bookmarks",
       "scripting",
+      "search",
     ],
     host_permissions: ["http://*/*", "https://*/*"],
     content_scripts: [{ matches: ["http://*/*", "https://*/*"], js: ["content/floating-ball.js"], run_at: "document_idle" }],
@@ -314,6 +315,19 @@ describe("dist validation", () => {
     await expect(readFile(resolve("dist/THIRD_PARTY_NOTICES.md"), "utf8")).resolves.toContain(
       "ISC License",
     );
+    const serviceWorker = await readFile(resolve("dist/background/service-worker.js"), "utf8");
+    expect(serviceWorker).toContain("search:chrome.search");
+    const contentScript = await readFile(resolve("dist/content/floating-ball.js"), "utf8");
+    for (const marker of [
+      "floating-ball/search-web",
+      "result-title",
+      "result-source",
+      ".result-source[data-source=bookmark]",
+      ".result-source[data-source=history]",
+    ]) {
+      expect(contentScript).toContain(marker);
+    }
+    expect(contentScript).not.toMatch(/^\s*export\b/m);
     for (const shortcut of ["openai.png", "google.png", "github.png"]) {
       await expect(readFile(resolve("dist/assets/shortcuts", shortcut))).rejects.toThrow();
     }
@@ -333,7 +347,7 @@ describe("dist validation", () => {
   it.each([
     [
       "missing bookmarks",
-      ["sidePanel", "tabs", "tabGroups", "storage", "history", "sessions", "scripting"],
+      ["sidePanel", "tabs", "tabGroups", "storage", "history", "sessions", "scripting", "search"],
     ],
     [
       "an extra permission",
@@ -346,6 +360,7 @@ describe("dist validation", () => {
         "sessions",
         "bookmarks",
         "scripting",
+        "search",
         "alarms",
       ],
     ],
@@ -360,6 +375,7 @@ describe("dist validation", () => {
         "bookmarks",
         "sessions",
         "scripting",
+        "search",
       ],
     ],
   ])("rejects manifest permissions with %s", async (_case, permissions) => {
