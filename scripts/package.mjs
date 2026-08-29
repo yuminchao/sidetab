@@ -124,6 +124,16 @@ function readZipEntryNames(archive) {
   return names;
 }
 
+/**
+ * 构建并验证与 dist 内容完全一致的确定性发布 ZIP。
+ *
+ * Args:
+ *   projectRoot: 项目根目录。
+ * Returns:
+ *   归档绝对路径及归档字节数。
+ * Raises:
+ *   发布文件缺失、内容不一致或归档写入/校验失败时抛出发布错误。
+ */
 export async function packageDist(projectRoot) {
   const root = resolve(projectRoot);
   const dist = resolve(root, "dist");
