@@ -165,11 +165,23 @@ describe("pre-package sensitive information check", () => {
         "API_KEY=${API_KEY}",
         "CLIENT_SECRET=process.env.CLIENT_SECRET",
         'const access_token = "example";',
+        'const token = "search";',
       ].join("\n"),
     );
     const { scanSensitiveInformation } = await loadSensitiveCheck();
 
     await expect(scanSensitiveInformation(root)).resolves.toEqual([]);
+  });
+
+  it("detects a quoted token JSON key without flagging ordinary token variables", async () => {
+    const root = await createScanFixture();
+    await writeFile(join(root, "manifest.json"), '{"token":"real-token"}\n');
+    await writeFile(join(root, "src/config.ts"), 'const token = "search";\n');
+    const { scanSensitiveInformation } = await loadSensitiveCheck();
+
+    await expect(scanSensitiveInformation(root)).resolves.toMatchObject([
+      { category: "credential-assignment", path: "manifest.json" },
+    ]);
   });
 
   it("scans its own scanner source", async () => {
