@@ -261,6 +261,54 @@ describe("floating ball controller", () => {
     vi.useRealTimers();
   });
 
+  it.each(["success", "failure"] as const)(
+    "lets a newer settled query search before an invalidated web request reports %s",
+    async (oldOutcome) => {
+      vi.useFakeTimers();
+      const oldWeb = deferred<{ ok: boolean; error?: string; message?: string }>();
+      const newWeb = deferred<{ ok: boolean; error?: string; message?: string }>();
+      const sendMessage = vi.fn().mockImplementation((message) => {
+        if (message.type !== "floating-ball/search-web") return Promise.resolve({ ok: true, value: [] });
+        return message.query === "old" ? oldWeb.promise : newWeb.promise;
+      });
+      const view = await mountController(sendMessage);
+
+      changeInput(view.input, "old");
+      await vi.advanceTimersByTimeAsync(100);
+      enter(view.input);
+      changeInput(view.input, "new");
+      await vi.advanceTimersByTimeAsync(100);
+      enter(view.input);
+      enter(view.input);
+      await flush();
+
+      expect(sendMessage.mock.calls.filter(([message]) => message.type === "floating-ball/search-web"))
+        .toEqual([
+          [{ type: "floating-ball/search-web", query: "old" }],
+          [{ type: "floating-ball/search-web", query: "new" }],
+        ]);
+      const beforeOldSettles = {
+        input: view.input.value,
+        searchHidden: view.search.hidden,
+        results: view.results.innerHTML,
+      };
+      oldWeb.resolve(oldOutcome === "success"
+        ? { ok: true }
+        : { ok: false, error: "operation-failed", message: "悬浮球操作失败" });
+      await flush();
+
+      expect({
+        input: view.input.value,
+        searchHidden: view.search.hidden,
+        results: view.results.innerHTML,
+      }).toEqual(beforeOldSettles);
+      newWeb.resolve({ ok: false, error: "operation-failed", message: "悬浮球操作失败" });
+      await flush();
+      view.controller.destroy();
+      vi.useRealTimers();
+    },
+  );
+
   it.each(["controlled", "rejected"] as const)(
     "keeps the panel open and renders a stable error when browser search is %s",
     async (outcome) => {
@@ -359,6 +407,8 @@ describe("floating ball controller", () => {
     expect(options[0]!.querySelector(".result-source")?.textContent).toBe("收藏夹");
     expect(options[1]!.querySelector<HTMLElement>(".result-source")?.dataset.source).toBe("history");
     expect(options[1]!.querySelector(".result-source")?.textContent).toBe("历史记录");
+    expect(results.querySelector("img")).toBeNull();
+    expect(results.querySelector("[class*='favicon']")).toBeNull();
 
     const style = shadow.querySelector("style")!.textContent;
     expect(style).toContain("font-family:\"Segoe UI\",\"Microsoft YaHei\",system-ui,sans-serif");
@@ -367,8 +417,8 @@ describe("floating ball controller", () => {
     expect(style).toContain("grid-template-columns:minmax(0,1fr) auto");
     expect(style).toContain(".result-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}");
     expect(style).toContain(".result-source{height:18px;line-height:18px;padding:0 6px;border-radius:9px;font-size:11px");
-    expect(style).toContain(".result-source[data-source=bookmark]");
-    expect(style).toContain(".result-source[data-source=history]");
+    expect(style).toContain(".result-source[data-source=bookmark]{background:#e8f0fe;color:#174ea6}");
+    expect(style).toContain(".result-source[data-source=history]{background:#f1f3f4;color:#5f6368}");
     controller.destroy();
   });
 });

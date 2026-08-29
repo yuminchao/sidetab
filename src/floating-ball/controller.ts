@@ -18,14 +18,23 @@ export type FloatingBallController = {
   /**
    * 应用悬浮球设置并同步界面生命周期。
    *
-   * @param settings 当前持久化配置。
-   * @returns 界面完成挂载或卸载时解决的 Promise。
+   * Args:
+   *   settings: 当前持久化配置。
+   * Returns:
+   *   界面完成挂载或卸载时解决的 Promise。
+   * Raises:
+   *   无。
    */
   applySettings(settings: FloatingBallSettings): Promise<void>;
   /**
    * 销毁页面中的悬浮球和全部事件监听。
    *
-   * @returns 无返回值。
+   * Args:
+   *   无。
+   * Returns:
+   *   无返回值。
+   * Raises:
+   *   无。
    */
   destroy(): void;
 };
@@ -148,7 +157,7 @@ export function createFloatingBallController(
     let searchResults: Array<{ title: string; url: string; source: "bookmark" | "history" }> = [];
     let localQueryPending = false;
     let settledEmptyQuery: string | undefined;
-    let webSearchGeneration: number | undefined;
+    let webSearchRequest: Readonly<{ generation: number; query: string }> | undefined;
     let commandBusy = false;
     let dragStart: { x: number; y: number; left: number; top: number } | undefined;
     let dragged = false;
@@ -239,15 +248,17 @@ export function createFloatingBallController(
     const searchWeb = async (): Promise<void> => {
       const query = input.value.trim();
       const generation = requestGeneration;
+      const pendingRequest = webSearchRequest;
       if (
         !searchOpen
         || !query
         || localQueryPending
         || searchResults.length > 0
         || settledEmptyQuery !== query
-        || webSearchGeneration !== undefined
+        || (pendingRequest?.generation === generation && pendingRequest.query === query)
       ) return;
-      webSearchGeneration = generation;
+      const request = { generation, query };
+      webSearchRequest = request;
       try {
         const response = await deps.runtime.sendMessage({ type: "floating-ball/search-web", query });
         if (generation !== requestGeneration || !searchOpen) return;
@@ -264,7 +275,7 @@ export function createFloatingBallController(
           results.textContent = "无法打开浏览器搜索";
         }
       } finally {
-        if (webSearchGeneration === generation) webSearchGeneration = undefined;
+        if (webSearchRequest === request) webSearchRequest = undefined;
       }
     };
     const onInput = (): void => {

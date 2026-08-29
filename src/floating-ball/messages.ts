@@ -21,8 +21,12 @@ export type FloatingBallSearchResponse = FloatingBallResponse<readonly SearchRes
 /**
  * 判断未知消息是否为悬浮球支持的请求。
  *
- * @param value 待校验的运行时消息。
- * @returns 消息结构、字段类型和安全边界均有效时返回 true。
+ * Args:
+ *   value: 待校验的运行时消息。
+ * Returns:
+ *   消息结构、字段类型和安全边界均有效时返回 true。
+ * Raises:
+ *   无。
  */
 export function isFloatingBallRequest(value: unknown): value is FloatingBallRequest {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
