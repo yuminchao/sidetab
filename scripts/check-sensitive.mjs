@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from "node:fs/promises";
+import { lstat, readdir, readFile } from "node:fs/promises";
 import { posix, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -10,11 +10,13 @@ const requiredFiles = [
   "update.log",
   "docs/privacy-policy.md",
   "docs/chrome-web-store-checklist.md",
+  "THIRD_PARTY_NOTICES.md",
 ];
-const requiredDirectories = ["src", "scripts"];
-const excludedPaths = new Set(["scripts/check-sensitive.mjs"]);
+const requiredDirectories = ["src", "scripts", "assets"];
 const placeholderValues = /^(?:|placeholder|example|sample|dummy|fake|test|changeme|redacted|none|null|undefined|<[^>]+>)$/i;
-const credentialAssignment = /\b(password|passwd|secret|api[_-]?key|client[_-]?secret|access[_-]?token|private[_-]?key|token)\b\s*[:=]\s*(["'`])([^"'`\r\n]+)\2/giu;
+const quotedCredentialAssignment = /(?:["']?)(password|passwd|secret|api[_-]?key|client[_-]?secret|access[_-]?token|private[_-]?key)(?:["']?)\s*[:=]\s*(["'`])([^"'`\r\n]+)\2/giu;
+const quotedTokenKeyAssignment = /["']token["']\s*:\s*(["'`])([^"'`\r\n]+)\1/giu;
+const unquotedCredentialAssignment = /\b(?:API_KEY|CLIENT_SECRET|ACCESS_TOKEN|PRIVATE_KEY|PASSWORD|PASSWD)\b\s*=\s*([^\s"'`#]+)/g;
 const signalPatterns = [
   {
     category: "github-token",
@@ -45,6 +47,7 @@ const signalPatterns = [
   {
     category: "company-identifier",
     expression: /[\p{L}\p{N}（）()·&.\-]{2,}(?:有限公司|股份有限公司)/gu,
+    allow: (match) => /^(?:有限公司|股份有限公司)$/.test(match[0]),
   },
 ];
 
@@ -66,10 +69,19 @@ export async function scanSensitiveInformation(projectRoot) {
   }
   const findings = [];
   for (const path of [...new Set(files)].sort()) {
-    if (excludedPaths.has(path)) continue;
     const source = await readFile(resolve(root, ...path.split("/")), "utf8");
-    for (const match of source.matchAll(credentialAssignment)) {
-      if (placeholderValues.test(match[3].trim())) continue;
+    for (const match of source.matchAll(quotedCredentialAssignment)) {
+      if (isAllowedPlaceholder(match[3])) continue;
+      const location = getLocation(source, match.index);
+      findings.push({ category: "credential-assignment", path, ...location });
+    }
+    for (const match of source.matchAll(quotedTokenKeyAssignment)) {
+      if (isAllowedPlaceholder(match[2])) continue;
+      const location = getLocation(source, match.index);
+      findings.push({ category: "credential-assignment", path, ...location });
+    }
+    for (const match of source.matchAll(unquotedCredentialAssignment)) {
+      if (isAllowedPlaceholder(match[1])) continue;
       const location = getLocation(source, match.index);
       findings.push({ category: "credential-assignment", path, ...location });
     }
@@ -88,18 +100,44 @@ export async function scanSensitiveInformation(projectRoot) {
   );
 }
 
+/**
+ * 递归列出目录中的普通文件，并拒绝任何符号链接或重解析点。
+ *
+ * Args:
+ *   root: 项目根目录。
+ *   prefix: 相对于项目根目录的目录路径。
+ * Returns:
+ *   按发现顺序返回相对 POSIX 文件路径。
+ * Raises:
+ *   目录不存在、不是目录或包含链接条目时抛出扫描错误。
+ */
 async function listFiles(root, prefix) {
   const directory = resolve(root, ...prefix.split("/"));
-  const metadata = await stat(directory);
+  const metadata = await lstat(directory);
+  if (metadata.isSymbolicLink()) {
+    throw new Error(`sensitive scan refuses linked path: ${prefix}`);
+  }
   if (!metadata.isDirectory()) throw new Error(`sensitive scan target is not a directory: ${prefix}`);
   const entries = await readdir(directory, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
     const path = posix.join(prefix, entry.name);
+    const entryPath = resolve(root, ...path.split("/"));
+    const entryMetadata = await lstat(entryPath);
+    if (entry.isSymbolicLink() || entryMetadata.isSymbolicLink()) {
+      throw new Error(`sensitive scan refuses linked path: ${path}`);
+    }
     if (entry.isDirectory()) files.push(...(await listFiles(root, path)));
     else if (entry.isFile()) files.push(path);
   }
   return files;
+}
+
+function isAllowedPlaceholder(value) {
+  const normalized = value.trim().replace(/[;,]+$/, "");
+  return placeholderValues.test(normalized)
+    || /^\$\{[A-Z_][A-Z0-9_]*\}$/i.test(normalized)
+    || /^(?:process\.env|import\.meta\.env)\.[A-Z_][A-Z0-9_]*$/i.test(normalized);
 }
 
 function getLocation(source, index) {

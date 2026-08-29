@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -42,6 +42,7 @@ async function createScanFixture(): Promise<string> {
     "update.log",
     "docs/privacy-policy.md",
     "docs/chrome-web-store-checklist.md",
+    "THIRD_PARTY_NOTICES.md",
     "src/config.ts",
     "scripts/build.mjs",
   ]) {
@@ -49,6 +50,8 @@ async function createScanFixture(): Promise<string> {
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, "clean release text\n");
   }
+  await mkdir(join(root, "assets"), { recursive: true });
+  await writeFile(join(root, "assets", "icon.txt"), "clean asset\n");
   return root;
 }
 
@@ -116,7 +119,7 @@ describe("pre-package sensitive information check", () => {
     }
   });
 
-  it("allows explicit public examples and excludes non-release instruction or fixture paths", async () => {
+  it("allows explicit public examples and ignores non-release instruction or fixture paths", async () => {
     const root = await createScanFixture();
     await writeFile(
       join(root, "src/config.ts"),
@@ -127,7 +130,6 @@ describe("pre-package sensitive information check", () => {
       ].join("\n"),
     );
     for (const path of [
-      "scripts/check-sensitive.mjs",
       "docs/superpowers/plan.md",
       "tests/fixtures/config.ts",
     ]) {
@@ -138,6 +140,62 @@ describe("pre-package sensitive information check", () => {
     const { scanSensitiveInformation } = await loadSensitiveCheck();
 
     await expect(scanSensitiveInformation(root)).resolves.toEqual([]);
+  });
+
+  it("detects quoted JSON keys and unquoted uppercase environment assignments", async () => {
+    const root = await createScanFixture();
+    await writeFile(join(root, "manifest.json"), '{"client_secret":"real-secret"}\n');
+    await writeFile(join(root, "THIRD_PARTY_NOTICES.md"), "API_KEY=real-api-key\n");
+    const { scanSensitiveInformation } = await loadSensitiveCheck();
+
+    const findings = await scanSensitiveInformation(root);
+
+    expect(findings.map(({ category, path }) => ({ category, path }))).toEqual([
+      { category: "credential-assignment", path: "manifest.json" },
+      { category: "credential-assignment", path: "THIRD_PARTY_NOTICES.md" },
+    ]);
+  });
+
+  it("allows credential placeholders and environment references", async () => {
+    const root = await createScanFixture();
+    await writeFile(
+      join(root, "src/config.ts"),
+      [
+        'const password = "REDACTED";',
+        "API_KEY=${API_KEY}",
+        "CLIENT_SECRET=process.env.CLIENT_SECRET",
+        'const access_token = "example";',
+      ].join("\n"),
+    );
+    const { scanSensitiveInformation } = await loadSensitiveCheck();
+
+    await expect(scanSensitiveInformation(root)).resolves.toEqual([]);
+  });
+
+  it("scans its own scanner source", async () => {
+    const root = await createScanFixture();
+    await writeFile(join(root, "scripts", "check-sensitive.mjs"), 'const password = "real-self-secret";\n');
+    const { scanSensitiveInformation } = await loadSensitiveCheck();
+
+    await expect(scanSensitiveInformation(root)).resolves.toMatchObject([
+      { category: "credential-assignment", path: "scripts/check-sensitive.mjs" },
+    ]);
+  });
+
+  it("fails closed when a scanned directory contains a symlink", async () => {
+    const root = await createScanFixture();
+    const target = join(root, "secret.txt");
+    await writeFile(target, "github_pat_hidden_12345678\n");
+    try {
+      await symlink(target, join(root, "assets", "linked-secret.txt"));
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (process.platform === "win32" && ["EPERM", "EACCES"].includes(code ?? "")) return;
+      throw error;
+    }
+    const { scanSensitiveInformation } = await loadSensitiveCheck();
+
+    await expect(scanSensitiveInformation(root)).rejects.toThrow(/link|reparse|scan/i);
   });
 
   it("runs as a redacted CLI gate with success and failure exit codes", async () => {
