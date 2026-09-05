@@ -35,6 +35,7 @@ import { createTabGroupReorderPlan } from "./tab-group-reorder-model";
 import type { TabDragIntent } from "./tab-drag-controller";
 import { createTabRenderer } from "./tab-renderer";
 import { TabStore } from "./tab-store";
+import type { TabViewModel } from "./tab-model";
 import { createTabTreeSessionStore } from "./tab-tree-session-store";
 import {
   classifySmartGroupTab,
@@ -61,6 +62,8 @@ import {
 import {
   getOtherSameSiteTabIds,
 } from "./same-site-tab-model";
+import { createTabIdReplacementMap, type ReadonlyTabIdReplacementMap } from "./tab-id-replacement";
+import { createTabUpdateScheduler } from "./tab-update-scheduler";
 
 export type SidebarDependencies = {
   tabs: typeof chrome.tabs;
@@ -218,7 +221,7 @@ async function startSidebarInternal(
   let treeRelationRevision = 0;
   // 模式切换只废弃旧拖放的树关系提交，不影响 child 模式内的并发 session 合并。
   let treeModeGeneration = 0;
-  const replacementTabIds = new Map<number, number>();
+  const replacementTabIds = createTabIdReplacementMap();
   let operationGeneration = 0;
   let reorderBusy = false;
   type ResyncPhase = "idle" | "querying" | "replaying";
@@ -328,7 +331,7 @@ async function startSidebarInternal(
     treeSessionReady && shortcutSettings.contentTreeEnabled;
 
   const renderTabList = (): void => {
-    const tabs = tabStore.list();
+    const tabs = tabStore.snapshot();
     tabRenderer.render(buildTabListItems(tabs, groupStore.list(), {
       treeEnabled: isTreeEnabled(),
       collapsedTabIds,
@@ -494,6 +497,7 @@ async function startSidebarInternal(
           collapsedTabIds.clear();
           detachedTabIds.clear();
           attachedTabParentIds.clear();
+          replacementTabIds.clear();
           if (hadTreeRelations) treeRelationRevision += 1;
           if (currentWindowId !== undefined) {
             void treeSessionStore.clear(currentWindowId).catch(() => undefined);
@@ -1132,6 +1136,8 @@ async function startSidebarInternal(
         groupCommandBusy.has(groupId)
         || groupToggleBusy.has(groupId)
         || groupHasSmartGroupingConflict(groupId),
+      canCloseGroup: (groupId) =>
+        tabStore.list().some((tab) => tab.groupId === groupId),
       onBeforeOpen: () => contextMenu.close(),
       onCommand(command) {
         const group = groupStore.get(command.groupId);
@@ -1161,6 +1167,11 @@ async function startSidebarInternal(
           .filter((tab) => tab.groupId === group.id)
           .map((tab) => tab.id);
         if (tabIds.length === 0) return;
+        if (command.action === "close") {
+          void executeGroupCommand(group.id, () => groupActions.close(tabIds))
+            .catch(() => undefined);
+          return;
+        }
         void executeGroupCommand(group.id, () => groupActions.dissolve(tabIds))
           .catch(() => undefined);
       },
@@ -1422,6 +1433,7 @@ async function startSidebarInternal(
     groupMovesCompletedByEvent.clear();
     unsubscribeTabs();
     unsubscribeGroups();
+    tabUpdateScheduler.destroy();
     bufferingEvents = false;
     bufferedEvents.length = 0;
     discardPendingAsyncEvents();
@@ -1609,6 +1621,46 @@ async function startSidebarInternal(
     persistTreeSession();
   };
 
+  const applyTabUpdate = (tab: chrome.tabs.Tab): void => {
+    let previous: TabViewModel | undefined;
+    let model: ReturnType<TabStore["replace"]>;
+    applyEvent(
+      () => {
+        previous = tab.id === undefined
+          ? undefined
+          : tabStore.get(tab.id);
+        model = tabStore.replace(tab);
+        reconcileOtherGroupConfirmation(false);
+        if (previous && model && previous.pinned !== model.pinned) {
+          contextMenu.closeForTab(model.id);
+        }
+      },
+      () => {
+        if (!model) return;
+        const rowExists = findTabRow(elements.list, model.id) !== undefined;
+        if (
+          !previous ||
+          !rowExists ||
+          previous.index !== model.index ||
+          previous.groupId !== model.groupId ||
+          previous.pinned !== model.pinned
+        ) {
+          renderTabList();
+        } else {
+          tabRenderer.patchTab(model);
+        }
+      },
+      true,
+    );
+  };
+
+  const tabUpdateScheduler = createTabUpdateScheduler((tabs) => {
+    if (!active) return;
+    for (const tab of tabs) {
+      applyTabUpdate(tab);
+    }
+  });
+
   const tabEventHandlers = {
     created(tab: chrome.tabs.Tab) {
       applyEvent(
@@ -1660,57 +1712,34 @@ async function startSidebarInternal(
       void resyncTabsAndGroups();
     },
     updated(tab: chrome.tabs.Tab) {
-      let previous: ReturnType<TabStore["list"]>[number] | undefined;
-      let model: ReturnType<TabStore["replace"]>;
-      applyEvent(
-        () => {
-          const tabs = tabStore.list();
-          previous = tab.id === undefined
-            ? undefined
-            : tabs.find((item) => item.id === tab.id);
-          model = tabStore.replace(tab);
-          reconcileOtherGroupConfirmation(false);
-          if (previous && model && previous.pinned !== model.pinned) {
-            contextMenu.closeForTab(model.id);
-          }
-        },
-        () => {
-          if (!model) return;
-          const rowExists = findTabRow(elements.list, model.id) !== undefined;
-          if (
-            !previous ||
-            !rowExists ||
-            previous.index !== model.index ||
-            previous.groupId !== model.groupId ||
-            previous.pinned !== model.pinned
-          ) {
-            renderTabList();
-          } else {
-            tabRenderer.patchTab(model);
-          }
-        },
-        true,
-      );
+      if (tab.id === undefined) return;
+      if (bufferingEvents) {
+        // 缓冲期间保持同步入队，避免合并调度打乱 resync 重放顺序。
+        applyTabUpdate(tab);
+      } else {
+        tabUpdateScheduler.schedule(tab.id, tab);
+      }
     },
     activated(tabId: number) {
       let affected = new Set<number>();
-      let tabs: ReturnType<TabStore["list"]> = [];
+      let previousActive: TabViewModel | undefined;
+      let current: TabViewModel | undefined;
       applyEvent(
         () => {
-          const before = tabStore.list();
+          previousActive = tabStore.snapshot().find((tab) => tab.active);
           affected = new Set([
-            ...before.filter((tab) => tab.active).map((tab) => tab.id),
+            ...(previousActive ? [previousActive.id] : []),
             tabId,
           ]);
           tabStore.activate(tabId);
-          tabs = tabStore.list();
+          current = tabStore.get(tabId);
         },
         () => {
-          for (const tab of tabs) {
-            if (affected.has(tab.id)) {
-              tabRenderer.patchTab(tab);
-            }
+          if (previousActive) {
+            const previous = tabStore.get(previousActive.id);
+            if (previous) tabRenderer.patchTab(previous);
           }
+          if (current) tabRenderer.patchTab(current);
         },
         true,
       );
@@ -1994,6 +2023,7 @@ async function startSidebarInternal(
           attachedTabParentIds,
           replacementTabIds,
         );
+        discardMigratedReplacementIds(treeState, replacementTabIds);
       } else {
         void treeSessionStore.clear(windowId).catch(() => undefined);
       }
@@ -2029,7 +2059,7 @@ async function startSidebarInternal(
 function copyMigratedIds(
   source: ReadonlySet<number>,
   target: Set<number>,
-  replacements: ReadonlyMap<number, number>,
+  replacements: ReadonlyTabIdReplacementMap,
 ): void {
   for (const sourceId of source) {
     target.add(getMigratedId(sourceId, replacements));
@@ -2039,7 +2069,7 @@ function copyMigratedIds(
 function copyMigratedParentIds(
   source: ReadonlyMap<number, number>,
   target: Map<number, number>,
-  replacements: ReadonlyMap<number, number>,
+  replacements: ReadonlyTabIdReplacementMap,
 ): void {
   for (const [childId, parentId] of source) {
     target.set(
@@ -2049,9 +2079,32 @@ function copyMigratedParentIds(
   }
 }
 
+/**
+ * 迁移完成后丢弃本次消费过的替换键。
+ *
+ * 迁移窗口内的旧标签 ID 只在该次迁移中有意义：会话状态已经以新 ID 重建，
+ * 继续保留会随 `onReplaced` 事件长期累积。该函数在所有迁移完成之后统一
+ * 删除本次涉及的旧 ID，避免多个来源集合复用同一键时过早删除。
+ */
+function discardMigratedReplacementIds(
+  state: {
+    collapsedTabIds: ReadonlySet<number>;
+    detachedTabIds: ReadonlySet<number>;
+    attachedTabParentIds: ReadonlyMap<number, number>;
+  },
+  replacements: { delete(removedId: number): void },
+): void {
+  for (const id of state.collapsedTabIds) replacements.delete(id);
+  for (const id of state.detachedTabIds) replacements.delete(id);
+  for (const [childId, parentId] of state.attachedTabParentIds) {
+    replacements.delete(childId);
+    replacements.delete(parentId);
+  }
+}
+
 function getMigratedId(
   sourceId: number,
-  replacements: ReadonlyMap<number, number>,
+  replacements: ReadonlyTabIdReplacementMap,
 ): number {
   let id = sourceId;
   const visited = new Set<number>();

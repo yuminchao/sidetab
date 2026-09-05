@@ -27,6 +27,7 @@ type TabGroupActions = {
   rename(groupId: number, title: string): Promise<void>;
   setColor(groupId: number, color: TabGroupColor): Promise<void>;
   dissolve(tabIds: number[]): Promise<void>;
+  close(tabIds: number[]): Promise<void>;
 };
 
 export class PartialTabGroupCreationError extends Error {
@@ -72,7 +73,7 @@ export async function updateCreatedTabGroup(
 }
 
 export function createTabGroupActions(
-  tabs: Pick<typeof chrome.tabs, "create" | "group" | "ungroup">,
+  tabs: Pick<typeof chrome.tabs, "create" | "group" | "ungroup" | "remove">,
   groups: Pick<typeof chrome.tabGroups, "move" | "update">,
 ): TabGroupActions {
   const updateCreated = (
@@ -209,6 +210,16 @@ export function createTabGroupActions(
         await tabs.ungroup(tabIds as [number, ...number[]]);
       } catch (cause) {
         throw new Error("无法解散标签组", { cause });
+      }
+    },
+
+    async close(tabIds): Promise<void> {
+      if (tabIds.length === 0) return;
+
+      try {
+        await tabs.remove(tabIds);
+      } catch (cause) {
+        throw new Error("无法关闭标签组", { cause });
       }
     },
   };

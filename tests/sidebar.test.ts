@@ -679,6 +679,7 @@ describe("sidebar lifecycle", () => {
         favIconUrl: "data:image/png;base64,one-updated",
       }),
     );
+    await flush();
     expect(shortcutImage()?.getAttribute("src")).toBe(
       "data:image/png;base64,one-updated",
     );
@@ -1628,6 +1629,7 @@ describe("sidebar lifecycle", () => {
       fakeTab({ id: 2, index: 1, url: "https://other.example/updated" }),
     );
     fake.events.onRemoved.emit(4, { windowId: 10, isWindowClosing: false });
+    await flush();
     click(contextMenuItem("close-same-site"));
     await flush();
 
@@ -1904,6 +1906,7 @@ describe("sidebar lifecycle", () => {
     );
     fake.events.onRemoved.emit(6, { windowId: 10, isWindowClosing: false });
     fake.groupEvents.onCreated.emit(fakeGroup({ id: 9, color: "grey" }));
+    await flush();
     const latestRows = rowIds();
     click(contextMenuItem("group-same-site"));
     await flush();
@@ -3094,6 +3097,63 @@ describe("sidebar lifecycle", () => {
     cleanup();
   });
 
+  it("closes all latest member tabs of a group from its context menu", async () => {
+    const fake = createFakeChrome({
+      tabs: [
+        fakeTab({ id: 2, index: 0, groupId: 7 }),
+        fakeTab({ id: 3, index: 1, groupId: 7 }),
+      ],
+      groups: [fakeGroup({ id: 7, color: "blue", collapsed: true })],
+    });
+    const cleanup = await startSidebar(fake);
+
+    openGroupContextMenu(7);
+    fake.events.onCreated.emit(fakeTab({ id: 4, index: 2, groupId: 7 }));
+    click(groupContextMenuItem("close"));
+    await flush();
+    expect(fake.methods.remove).toHaveBeenCalledTimes(1);
+    expect(fake.methods.remove).toHaveBeenCalledWith([2, 3, 4]);
+    expect(fake.methods.ungroup).not.toHaveBeenCalled();
+    expect(fake.methods.move).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("disables close-group while the group is busy", async () => {
+    const pending = deferred<void>();
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 2, index: 0, groupId: 7 })],
+      groups: [fakeGroup({ id: 7 })],
+    });
+    const cleanup = await startSidebar(fake);
+    fake.methods.remove.mockReturnValueOnce(
+      pending.promise as unknown as Promise<undefined>,
+    );
+
+    openGroupContextMenu(7);
+    expect(groupContextMenuItem("close").disabled).toBe(false);
+    click(groupContextMenuItem("close"));
+    openGroupContextMenu(7);
+    expect(groupContextMenuItem("close").disabled).toBe(true);
+    pending.resolve();
+    await flush();
+    cleanup();
+  });
+
+  it("resyncs once and reports an error when closing a group fails", async () => {
+    const fake = createFakeChrome({
+      tabs: [fakeTab({ id: 2, index: 0, groupId: 7 })],
+      groups: [fakeGroup({ id: 7 })],
+    });
+    const cleanup = await startSidebar(fake);
+    fake.methods.remove.mockRejectedValueOnce(new Error("remove failed"));
+
+    openGroupContextMenu(7);
+    click(groupContextMenuItem("close"));
+    await vi.waitFor(() => expect(fake.methods.query).toHaveBeenCalledTimes(2));
+    expect(element("status-message").textContent).toContain("无法关闭标签组");
+    cleanup();
+  });
+
   it("revalidates color at dispatch time and waits for Chrome events before patching the row", async () => {
     const fake = createFakeChrome({
       tabs: [fakeTab({ id: 2, index: 0, groupId: 7 })],
@@ -3544,6 +3604,7 @@ describe("sidebar lifecycle", () => {
     fake.events.onCreated.emit(fakeTab({ id: 3, index: 2, title: "Three" }));
     expect(rowIds()).toEqual([1, 2, 3]);
     fake.events.onUpdated.emit(2, {}, fakeTab({ id: 2, index: 1, title: "Updated two" }));
+    await flush();
     expect(row(2).querySelector(".tab-title")?.textContent).toBe("Updated two");
     fake.events.onActivated.emit({ tabId: 2, windowId: 10 });
     expect(row(2).dataset.active).toBe("true");
@@ -3704,6 +3765,7 @@ describe("sidebar lifecycle", () => {
         favIconUrl: "data:image/png;base64,updated",
       }),
     );
+    await flush();
     const shortcutAfter = shortcutImage();
     const historyAfter = element("history-search-results").firstElementChild;
     expect(shortcutAfter).not.toBe(shortcutBefore);
@@ -3723,6 +3785,7 @@ describe("sidebar lifecycle", () => {
         favIconUrl: "data:image/png;base64,updated",
       }),
     );
+    await flush();
     expect(shortcutImage()).toBe(shortcutAfter);
     expect(element("history-search-results").firstElementChild).toBe(historyAfter);
     cleanup();
@@ -4754,6 +4817,7 @@ describe("sidebar lifecycle", () => {
         const pinnedSource = await fake.tabs.update(3, { pinned: true });
         if (!pinnedSource) throw new Error("expected updated source tab");
         fake.events.onUpdated.emit(3, { pinned: true }, pinnedSource);
+        await flush();
       } else if (sourceState === "grouped") {
         await fake.tabs.group({ groupId: 7, tabIds: 3 });
         fake.events.onUpdated.emit(3, { groupId: 7 }, fakeTab({
@@ -4761,6 +4825,7 @@ describe("sidebar lifecycle", () => {
           index: 1,
           groupId: 7,
         }));
+        await flush();
       } else {
         click(element("shortcut-settings"));
         const contentTreeEnabled = document.querySelector<HTMLInputElement>(

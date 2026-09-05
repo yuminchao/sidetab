@@ -12,6 +12,7 @@ function createApis() {
   const create = vi.fn().mockResolvedValue({ id: 999 });
   const group = vi.fn().mockResolvedValue(7);
   const ungroup = vi.fn().mockResolvedValue(undefined);
+  const remove = vi.fn().mockResolvedValue(undefined);
   const update = vi.fn().mockResolvedValue(undefined);
   const groupMove = vi.fn().mockResolvedValue(undefined);
 
@@ -19,12 +20,13 @@ function createApis() {
     create,
     group,
     ungroup,
+    remove,
     update,
     groupMove,
     actions: createTabGroupActions(
-      { create, group, ungroup } as unknown as Pick<
+      { create, group, ungroup, remove } as unknown as Pick<
         typeof chrome.tabs,
-        "create" | "group" | "ungroup"
+        "create" | "group" | "ungroup" | "remove"
       >,
       { move: groupMove, update } as unknown as Pick<
         typeof chrome.tabGroups,
@@ -508,4 +510,33 @@ describe("tab group actions", () => {
       expect(update).not.toHaveBeenCalled();
     },
   );
+
+  it("closes all member tabs with a single remove call", async () => {
+    const { actions, remove } = createApis();
+
+    await actions.close([3, 1, 2]);
+
+    expect(remove).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledWith([3, 1, 2]);
+  });
+
+  it("returns early without removing when the group has no members", async () => {
+    const { actions, remove } = createApis();
+
+    await actions.close([]);
+
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("maps a group close rejection and preserves its cause", async () => {
+    const { actions, remove } = createApis();
+    const cause = new Error("chrome failed");
+    remove.mockRejectedValueOnce(cause);
+
+    await expect(actions.close([1, 2])).rejects.toMatchObject({
+      message: "无法关闭标签组",
+      cause,
+    });
+    expect(remove).toHaveBeenCalledOnce();
+  });
 });

@@ -69,16 +69,18 @@ describe("tab group context menu", () => {
       "set-color",
       "tab-context-separator",
       "dissolve",
+      "close",
     ]);
     expect(Array.from(menu.querySelectorAll<HTMLButtonElement>(":scope > button"), (button) => button.textContent)).toEqual([
       "在分组中新建标签页",
       "重命名分组",
       "修改颜色",
       "解散分组",
+      "关闭分组",
     ]);
     expect(document.activeElement).toBe(menu.querySelector("[data-group-menu-action='new-tab']"));
 
-    for (const action of ["new-tab", "rename", "dissolve"] as const) {
+    for (const action of ["new-tab", "rename", "dissolve", "close"] as const) {
       context(row);
       menu.querySelector<HTMLButtonElement>(`[data-group-menu-action='${action}']`)!.click();
       expect(onCommand).toHaveBeenLastCalledWith({ action, groupId: 7 });
@@ -187,6 +189,46 @@ describe("tab group context menu", () => {
     expect(buttons.every((button) => button.disabled)).toBe(true);
     buttons.forEach((button) => button.click());
     expect(onCommand).not.toHaveBeenCalled();
+    controller.destroy();
+  });
+
+  it("disables close-group when the group has no members", () => {
+    const onCommand = vi.fn();
+    const controller = createTabGroupContextMenu(
+      { document, list, viewport: window },
+      {
+        getGroup: () => group,
+        isGroupBusy: () => false,
+        canCloseGroup: () => false,
+        onBeforeOpen: vi.fn(),
+        onCommand,
+      },
+    );
+    context(row);
+    const menu = document.querySelector<HTMLElement>(".tab-group-context-menu")!;
+    const close = menu.querySelector<HTMLButtonElement>("[data-group-menu-action='close']")!;
+    expect(close.disabled).toBe(true);
+    close.click();
+    expect(onCommand).not.toHaveBeenCalled();
+    expect(menu.hidden).toBe(false);
+    controller.destroy();
+  });
+
+  it("enables close-group when the group has members", () => {
+    const controller = createTabGroupContextMenu(
+      { document, list, viewport: window },
+      {
+        getGroup: () => group,
+        isGroupBusy: () => false,
+        canCloseGroup: () => true,
+        onBeforeOpen: vi.fn(),
+        onCommand: vi.fn(),
+      },
+    );
+    context(row);
+    const menu = document.querySelector<HTMLElement>(".tab-group-context-menu")!;
+    expect(menu.querySelector<HTMLButtonElement>("[data-group-menu-action='close']")!.disabled)
+      .toBe(false);
     controller.destroy();
   });
 
