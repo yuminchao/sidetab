@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { strFromU8, unzipSync } from "fflate";
+import { strFromU8, unzipSync, zipSync } from "fflate";
 import { afterEach, describe, expect, it } from "vitest";
 
 const expectedFiles = [
@@ -40,6 +40,17 @@ type CheckDistModule = {
 
 type PackageModule = {
   packageDist(projectRoot: string): Promise<{ archivePath: string; bytes: number }>;
+  verifyArchiveMatchesDist(distDirectory: string, archive: Uint8Array): Promise<void>;
+  persistAndVerifyArchive(
+    archivePath: string,
+    archive: Uint8Array,
+    distDirectory: string,
+    options?: {
+      write?: (path: string, data: Uint8Array) => Promise<void>;
+      read?: (path: string) => Promise<Uint8Array>;
+      remove?: (path: string) => Promise<void>;
+    },
+  ): Promise<Uint8Array>;
 };
 
 type BuildModule = {
@@ -95,6 +106,7 @@ async function createReleaseFixture(): Promise<{ root: string; dist: string; rel
       "sessions",
       "bookmarks",
       "scripting",
+      "search",
     ],
     host_permissions: ["http://*/*", "https://*/*"],
     content_scripts: [{ matches: ["http://*/*", "https://*/*"], js: ["content/floating-ball.js"], run_at: "document_idle" }],
@@ -160,6 +172,34 @@ async function createReleaseFixture(): Promise<{ root: string; dist: string; rel
 
 async function overwrite(root: string, path: string, contents: string): Promise<void> {
   await writeFile(join(root, ...path.split("/")), contents);
+}
+
+function duplicateCentralEntry(archive: Uint8Array): Uint8Array {
+  const view = new DataView(archive.buffer, archive.byteOffset, archive.byteLength);
+  let eocd = -1;
+  for (let index = archive.length - 22; index >= 0; index -= 1) {
+    if (view.getUint32(index, true) === 0x06054b50) {
+      eocd = index;
+      break;
+    }
+  }
+  if (eocd < 0) throw new Error("missing ZIP end record");
+  const centralOffset = view.getUint32(eocd + 16, true);
+  const centralSize = view.getUint32(eocd + 12, true);
+  const nameLength = view.getUint16(centralOffset + 28, true);
+  const extraLength = view.getUint16(centralOffset + 30, true);
+  const commentLength = view.getUint16(centralOffset + 32, true);
+  const recordLength = 46 + nameLength + extraLength + commentLength;
+  const record = archive.slice(centralOffset, centralOffset + recordLength);
+  const output = new Uint8Array(archive.length + record.length);
+  output.set(archive.slice(0, eocd), 0);
+  output.set(record, eocd);
+  output.set(archive.slice(eocd), eocd + record.length);
+  const outputView = new DataView(output.buffer);
+  outputView.setUint16(eocd + record.length + 10, view.getUint16(eocd + 10, true) + 1, true);
+  outputView.setUint16(eocd + record.length + 8, view.getUint16(eocd + 8, true) + 1, true);
+  outputView.setUint32(eocd + record.length + 12, centralSize + record.length, true);
+  return output;
 }
 
 describe("release file contract", () => {
@@ -314,6 +354,19 @@ describe("dist validation", () => {
     await expect(readFile(resolve("dist/THIRD_PARTY_NOTICES.md"), "utf8")).resolves.toContain(
       "ISC License",
     );
+    const serviceWorker = await readFile(resolve("dist/background/service-worker.js"), "utf8");
+    expect(serviceWorker).toMatch(/\bsearch\s*:\s*chrome\.search\b/);
+    const contentScript = await readFile(resolve("dist/content/floating-ball.js"), "utf8");
+    for (const marker of [
+      "floating-ball/search-web",
+      "result-title",
+      "result-source",
+    ]) {
+      expect(contentScript).toContain(marker);
+    }
+    expect(contentScript).toMatch(/\.result-source\s*\[\s*data-source\s*=\s*bookmark\s*\]/);
+    expect(contentScript).toMatch(/\.result-source\s*\[\s*data-source\s*=\s*history\s*\]/);
+    expect(contentScript).not.toMatch(/^\s*export\b/m);
     for (const shortcut of ["openai.png", "google.png", "github.png"]) {
       await expect(readFile(resolve("dist/assets/shortcuts", shortcut))).rejects.toThrow();
     }
@@ -333,7 +386,7 @@ describe("dist validation", () => {
   it.each([
     [
       "missing bookmarks",
-      ["sidePanel", "tabs", "tabGroups", "storage", "history", "sessions", "scripting"],
+      ["sidePanel", "tabs", "tabGroups", "storage", "history", "sessions", "scripting", "search"],
     ],
     [
       "an extra permission",
@@ -346,6 +399,7 @@ describe("dist validation", () => {
         "sessions",
         "bookmarks",
         "scripting",
+        "search",
         "alarms",
       ],
     ],
@@ -360,6 +414,7 @@ describe("dist validation", () => {
         "bookmarks",
         "sessions",
         "scripting",
+        "search",
       ],
     ],
   ])("rejects manifest permissions with %s", async (_case, permissions) => {
@@ -598,6 +653,51 @@ describe("release packaging", () => {
     expect(strFromU8(packaged["THIRD_PARTY_NOTICES.md"]!)).toContain("ISC License");
   });
 
+  it("rejects a ZIP whose allowed entry bytes differ from dist", async () => {
+    const fixture = await createReleaseFixture();
+    const { packageDist, verifyArchiveMatchesDist } = await loadPackage();
+    const result = await packageDist(fixture.root);
+    const entries = unzipSync(await readFile(result.archivePath));
+    entries["sidepanel/sidebar.css"] = new TextEncoder().encode(".tampered { color: red; }");
+    const tamperedArchive = zipSync(entries);
+
+    await expect(verifyArchiveMatchesDist(fixture.dist, tamperedArchive)).rejects.toThrow(
+      /sidepanel\/sidebar\.css.*bytes|bytes.*sidepanel\/sidebar\.css/i,
+    );
+  });
+
+  it("rejects a persisted archive mutation and removes the invalid target", async () => {
+    const fixture = await createReleaseFixture();
+    const { packageDist, persistAndVerifyArchive } = await loadPackage();
+    const result = await packageDist(fixture.root);
+    const archive = await readFile(result.archivePath);
+    const mutateAfterWrite = async (path: string, data: Uint8Array) => {
+      await writeFile(path, data);
+    };
+    const tamperedEntries = unzipSync(archive);
+    tamperedEntries["sidepanel/sidebar.css"] = new TextEncoder().encode(".persisted-tamper { color: red; }");
+    const tamperedArchive = zipSync(tamperedEntries);
+
+    await expect(
+      persistAndVerifyArchive(result.archivePath, archive, fixture.dist, {
+        write: mutateAfterWrite,
+        read: async () => tamperedArchive,
+      }),
+    ).rejects.toThrow(/ZIP|archive|bytes|entries/i);
+    await expect(readFile(result.archivePath)).rejects.toThrow();
+  });
+
+  it("rejects duplicate ZIP entry names in the central directory", async () => {
+    const fixture = await createReleaseFixture();
+    const { packageDist, verifyArchiveMatchesDist } = await loadPackage();
+    const result = await packageDist(fixture.root);
+    const duplicate = duplicateCentralEntry(await readFile(result.archivePath));
+
+    await expect(verifyArchiveMatchesDist(fixture.dist, duplicate)).rejects.toThrow(
+      /duplicate/i,
+    );
+  });
+
   it("creates the same ZIP in UTC, Shanghai, and Los Angeles", async () => {
     const helper = resolve(import.meta.dirname, "helpers/package-release.mjs");
     const hashes: Record<string, string> = {};
@@ -627,6 +727,15 @@ describe("release packaging", () => {
 });
 
 describe("Node dependency contract", () => {
+  it("runs the sensitive information gate before all package checks and ZIP creation", async () => {
+    const packageJson = JSON.parse(await readFile(resolve("package.json"), "utf8"));
+
+    expect(packageJson.scripts["check:sensitive"]).toBe("node scripts/check-sensitive.mjs");
+    expect(packageJson.scripts.package).toBe(
+      "npm run check:sensitive && npm run check && node scripts/package.mjs",
+    );
+  });
+
   it("provides an observational tab renderer benchmark outside the release package", async () => {
     const packageJson = JSON.parse(await readFile(resolve("package.json"), "utf8"));
 

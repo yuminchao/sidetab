@@ -1,0 +1,229 @@
+// @vitest-environment node
+
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+
+type SensitiveFinding = {
+  category: string;
+  path: string;
+  line: number;
+  column: number;
+};
+
+type SensitiveCheckModule = {
+  scanSensitiveInformation(projectRoot: string): Promise<readonly SensitiveFinding[]>;
+};
+
+const temporaryRoots = new Set<string>();
+
+afterEach(async () => {
+  await Promise.all(
+    [...temporaryRoots].map((root) => rm(root, { recursive: true, force: true })),
+  );
+  temporaryRoots.clear();
+});
+
+async function loadSensitiveCheck(): Promise<SensitiveCheckModule> {
+  const modulePath = "../scripts/check-sensitive.mjs";
+  return import(/* @vite-ignore */ modulePath) as Promise<SensitiveCheckModule>;
+}
+
+async function createScanFixture(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "sidetab-sensitive-"));
+  temporaryRoots.add(root);
+  for (const path of [
+    "manifest.json",
+    "package.json",
+    "package-lock.json",
+    "README.md",
+    "update.log",
+    "docs/privacy-policy.md",
+    "docs/chrome-web-store-checklist.md",
+    "THIRD_PARTY_NOTICES.md",
+    "src/config.ts",
+    "scripts/build.mjs",
+  ]) {
+    const target = join(root, ...path.split("/"));
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, "clean release text\n");
+  }
+  await mkdir(join(root, "assets"), { recursive: true });
+  await writeFile(join(root, "assets", "icon.txt"), "clean asset\n");
+  return root;
+}
+
+describe("pre-package sensitive information check", () => {
+  it("reports a credential assignment by location without exposing its value", async () => {
+    const root = await createScanFixture();
+    const secretValue = "D0-not-print-this-credential";
+    await writeFile(join(root, "src/config.ts"), `const password = "${secretValue}";\n`);
+    const { scanSensitiveInformation } = await loadSensitiveCheck();
+
+    const findings = await scanSensitiveInformation(root);
+
+    expect(findings).toEqual([
+      {
+        category: "credential-assignment",
+        path: "src/config.ts",
+        line: 1,
+        column: 7,
+      },
+    ]);
+    expect(JSON.stringify(findings)).not.toContain(secretValue);
+  });
+
+  it("classifies credential, personal, company, and internal endpoint signals", async () => {
+    const root = await createScanFixture();
+    const sensitiveValues = [
+      "github_pat_A1B2C3D4E5F6G7H8",
+      "ghp_1234567890abcdefghij",
+      "release-owner@private-company.cn",
+      "13812345678",
+      "11010519900101123X",
+      "https://admin.corp.internal/api",
+      "示例科技有限公司",
+      "-----BEGIN PRIVATE KEY-----",
+    ];
+    await writeFile(
+      join(root, "src/config.ts"),
+      [
+        sensitiveValues[0],
+        sensitiveValues[2],
+        sensitiveValues[3],
+        sensitiveValues[4],
+        sensitiveValues[5],
+        sensitiveValues[6],
+        sensitiveValues[7],
+      ].join("\n"),
+    );
+    await writeFile(join(root, "README.md"), `${sensitiveValues[1]}\n`);
+    const { scanSensitiveInformation } = await loadSensitiveCheck();
+
+    const findings = await scanSensitiveInformation(root);
+
+    expect(findings.map((finding) => finding.category).sort()).toEqual([
+      "company-identifier",
+      "email",
+      "github-token",
+      "github-token",
+      "internal-endpoint",
+      "mainland-id",
+      "mainland-phone",
+      "private-key",
+    ]);
+    for (const value of sensitiveValues) {
+      expect(JSON.stringify(findings)).not.toContain(value);
+    }
+  });
+
+  it("allows explicit public examples and ignores non-release instruction or fixture paths", async () => {
+    const root = await createScanFixture();
+    await writeFile(
+      join(root, "src/config.ts"),
+      [
+        "support@example.com",
+        "http://localhost:4173/",
+        'const token = "REDACTED";',
+      ].join("\n"),
+    );
+    for (const path of [
+      "docs/superpowers/plan.md",
+      "tests/fixtures/config.ts",
+    ]) {
+      const target = join(root, ...path.split("/"));
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, 'const password = "excluded-real-looking-value";\n');
+    }
+    const { scanSensitiveInformation } = await loadSensitiveCheck();
+
+    await expect(scanSensitiveInformation(root)).resolves.toEqual([]);
+  });
+
+  it("detects quoted JSON keys and unquoted uppercase environment assignments", async () => {
+    const root = await createScanFixture();
+    await writeFile(join(root, "manifest.json"), '{"client_secret":"real-secret"}\n');
+    await writeFile(join(root, "THIRD_PARTY_NOTICES.md"), "API_KEY=real-api-key\n");
+    const { scanSensitiveInformation } = await loadSensitiveCheck();
+
+    const findings = await scanSensitiveInformation(root);
+
+    expect(findings.map(({ category, path }) => ({ category, path }))).toEqual([
+      { category: "credential-assignment", path: "manifest.json" },
+      { category: "credential-assignment", path: "THIRD_PARTY_NOTICES.md" },
+    ]);
+  });
+
+  it("allows credential placeholders and environment references", async () => {
+    const root = await createScanFixture();
+    await writeFile(
+      join(root, "src/config.ts"),
+      [
+        'const password = "REDACTED";',
+        "API_KEY=${API_KEY}",
+        "CLIENT_SECRET=process.env.CLIENT_SECRET",
+        'const access_token = "example";',
+        'const token = "search";',
+      ].join("\n"),
+    );
+    const { scanSensitiveInformation } = await loadSensitiveCheck();
+
+    await expect(scanSensitiveInformation(root)).resolves.toEqual([]);
+  });
+
+  it("detects a quoted token JSON key without flagging ordinary token variables", async () => {
+    const root = await createScanFixture();
+    await writeFile(join(root, "manifest.json"), '{"token":"real-token"}\n');
+    await writeFile(join(root, "src/config.ts"), 'const token = "search";\n');
+    const { scanSensitiveInformation } = await loadSensitiveCheck();
+
+    await expect(scanSensitiveInformation(root)).resolves.toMatchObject([
+      { category: "credential-assignment", path: "manifest.json" },
+    ]);
+  });
+
+  it("scans its own scanner source", async () => {
+    const root = await createScanFixture();
+    await writeFile(join(root, "scripts", "check-sensitive.mjs"), 'const password = "real-self-secret";\n');
+    const { scanSensitiveInformation } = await loadSensitiveCheck();
+
+    await expect(scanSensitiveInformation(root)).resolves.toMatchObject([
+      { category: "credential-assignment", path: "scripts/check-sensitive.mjs" },
+    ]);
+  });
+
+  it("fails closed when a scanned directory contains a symlink", async () => {
+    const root = await createScanFixture();
+    const target = join(root, "secret.txt");
+    await writeFile(target, "github_pat_hidden_12345678\n");
+    try {
+      await symlink(target, join(root, "assets", "linked-secret.txt"));
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (process.platform === "win32" && ["EPERM", "EACCES"].includes(code ?? "")) return;
+      throw error;
+    }
+    const { scanSensitiveInformation } = await loadSensitiveCheck();
+
+    await expect(scanSensitiveInformation(root)).rejects.toThrow(/link|reparse|scan/i);
+  });
+
+  it("runs as a redacted CLI gate with success and failure exit codes", async () => {
+    const root = await createScanFixture();
+    const script = resolve("scripts/check-sensitive.mjs");
+    const clean = spawnSync(process.execPath, [script, root], { encoding: "utf8" });
+
+    expect(clean.status).toBe(0);
+    expect(clean.stdout).toMatch(/sensitive information check passed/i);
+
+    const secretValue = "github_pat_must_not_appear_987654321";
+    await writeFile(join(root, "README.md"), `${secretValue}\n`);
+    const dirty = spawnSync(process.execPath, [script, root], { encoding: "utf8" });
+
+    expect(dirty.status).toBe(1);
+    expect(dirty.stderr).toContain("README.md:1:1 [github-token]");
+    expect(`${dirty.stdout}\n${dirty.stderr}`).not.toContain(secretValue);
+  });
+});

@@ -10,8 +10,9 @@
     "benchmark:tabs": "node scripts/benchmark-tab-renderer.mjs",
     "build": "node scripts/build.mjs",
     "check": "npm run typecheck && npm test -- --run && npm run build && node scripts/check-dist.mjs",
+    "check:sensitive": "node scripts/check-sensitive.mjs",
     "generate:icons": "node scripts/generate-icons.mjs",
-    "package": "npm run check && node scripts/package.mjs",
+    "package": "npm run check:sensitive && npm run check && node scripts/package.mjs",
     "test": "vitest",
     "typecheck": "tsc --noEmit"
   },

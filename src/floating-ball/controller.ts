@@ -18,14 +18,23 @@ export type FloatingBallController = {
   /**
    * 应用悬浮球设置并同步界面生命周期。
    *
-   * @param settings 当前持久化配置。
-   * @returns 界面完成挂载或卸载时解决的 Promise。
+   * Args:
+   *   settings: 当前持久化配置。
+   * Returns:
+   *   界面完成挂载或卸载时解决的 Promise。
+   * Raises:
+   *   无。
    */
   applySettings(settings: FloatingBallSettings): Promise<void>;
   /**
    * 销毁页面中的悬浮球和全部事件监听。
    *
-   * @returns 无返回值。
+   * Args:
+   *   无。
+   * Returns:
+   *   无返回值。
+   * Raises:
+   *   无。
    */
   destroy(): void;
 };
@@ -33,8 +42,12 @@ export type FloatingBallController = {
 /**
  * 创建网页悬浮球控制器。
  *
- * @param deps 页面 DOM、窗口、设置存储和后台消息适配器。
- * @returns 可重复应用设置的控制器。
+ * Args:
+ *   deps: 页面 DOM、窗口、设置存储和后台消息适配器。
+ * Returns:
+ *   可重复应用设置的控制器。
+ * Raises:
+ *   无；运行时消息失败会转换为界面错误状态。
  */
 export function createFloatingBallController(
   deps: ControllerDependencies,
@@ -142,50 +155,137 @@ export function createFloatingBallController(
     let menuOpen = false;
     let selectedResult = -1;
     let searchResults: Array<{ title: string; url: string; source: "bookmark" | "history" }> = [];
+    let localQueryPending = false;
+    let settledEmptyQuery: string | undefined;
+    let webSearchRequest: Readonly<{ generation: number; query: string }> | undefined;
     let commandBusy = false;
     let dragStart: { x: number; y: number; left: number; top: number } | undefined;
     let dragged = false;
     const toggleSearch = (): void => {
-      searchOpen = !searchOpen;
-      search.hidden = !searchOpen;
+      if (searchOpen) {
+        closeSurfaces();
+        return;
+      }
+      searchOpen = true;
+      search.hidden = false;
       menuOpen = false;
       menu.hidden = true;
-      if (searchOpen) {
-        selectedResult = -1;
-        results.replaceChildren();
-        input.focus();
-        void runSearch("");
-      } else {
-        requestGeneration += 1;
-      }
+      selectedResult = -1;
+      results.replaceChildren();
+      input.focus();
+      void runSearch("");
     };
+    /**
+     * 从后台读取与当前输入对应的收藏夹和历史记录。
+     *
+     * Args:
+     *   query: 输入框当前查询文本。
+     * Returns:
+     *   查询完成或被新代次失效时解决的 Promise。
+     * Raises:
+     *   无；运行时异常会转换为本地错误消息。
+     */
     const runSearch = async (query: string): Promise<void> => {
       const generation = ++requestGeneration;
-      const response = await deps.runtime.sendMessage({ type: "floating-ball/search", query });
+      const trimmedQuery = query.trim();
+      localQueryPending = true;
+      settledEmptyQuery = undefined;
+      searchResults = [];
+      selectedResult = -1;
+      results.textContent = "正在搜索…";
+      let response: FloatingBallResponse<unknown>;
+      try {
+        response = await deps.runtime.sendMessage({ type: "floating-ball/search", query });
+      } catch {
+        response = { ok: false, error: "operation-failed", message: "无法读取搜索记录" };
+      }
       if (generation !== requestGeneration || !searchOpen) return;
+      localQueryPending = false;
       results.replaceChildren();
       if (!response.ok || !response.value) {
+        searchResults = [];
+        settledEmptyQuery = undefined;
         results.textContent = response.ok ? "暂无记录" : response.message;
         return;
       }
       const items = Array.isArray(response.value) ? response.value : [];
       searchResults = items;
+      settledEmptyQuery = items.length === 0 && trimmedQuery ? trimmedQuery : undefined;
       selectedResult = -1;
       for (const [index, item] of searchResults.entries()) {
         const option = deps.document.createElement("button");
         option.type = "button";
         option.dataset.index = String(index);
-        option.textContent = `${item.title || item.url} · ${item.source === "bookmark" ? "收藏夹" : "历史记录"}`;
+        option.setAttribute("role", "option");
+        const title = deps.document.createElement("span");
+        title.className = "result-title";
+        title.textContent = item.title || item.url;
+        const source = deps.document.createElement("span");
+        source.className = "result-source";
+        source.dataset.source = item.source;
+        source.textContent = item.source === "bookmark" ? "收藏夹" : "历史记录";
+        option.append(title, source);
         option.addEventListener("click", () => {
-          void deps.runtime.sendMessage({ type: "floating-ball/open-search-result", url: item.url });
-          searchOpen = false;
-          search.hidden = true;
+          void Promise.resolve(deps.runtime.sendMessage({
+            type: "floating-ball/open-search-result",
+            url: item.url,
+          })).catch(() => undefined);
+          closeSurfaces();
         });
         results.append(option);
       }
     };
+    /**
+     * 在本地查询确认无结果后调用浏览器默认搜索。
+     *
+     * Args:
+     *   无。
+     * Returns:
+     *   搜索完成或被后续界面状态失效时解决的 Promise。
+     * Raises:
+     *   无；失败会在结果区域显示受控提示。
+     */
+    const searchWeb = async (): Promise<void> => {
+      const query = input.value.trim();
+      const generation = requestGeneration;
+      const pendingRequest = webSearchRequest;
+      if (
+        !searchOpen
+        || !query
+        || localQueryPending
+        || searchResults.length > 0
+        || settledEmptyQuery !== query
+        || (pendingRequest?.generation === generation && pendingRequest.query === query)
+      ) return;
+      const request = { generation, query };
+      webSearchRequest = request;
+      try {
+        const response = await deps.runtime.sendMessage({ type: "floating-ball/search-web", query });
+        if (generation !== requestGeneration || !searchOpen) return;
+        if (!response.ok) {
+          searchResults = [];
+          results.textContent = "无法打开浏览器搜索";
+          return;
+        }
+        input.value = "";
+        closeSurfaces();
+      } catch {
+        if (generation === requestGeneration && searchOpen) {
+          searchResults = [];
+          results.textContent = "无法打开浏览器搜索";
+        }
+      } finally {
+        if (webSearchRequest === request) webSearchRequest = undefined;
+      }
+    };
     const onInput = (): void => {
       if (searchTimer !== undefined) deps.window.clearTimeout(searchTimer);
+      requestGeneration += 1;
+      localQueryPending = true;
+      settledEmptyQuery = undefined;
+      searchResults = [];
+      selectedResult = -1;
+      results.textContent = "正在搜索…";
       searchTimer = deps.window.setTimeout(() => {
         searchTimer = undefined;
         void runSearch(input.value);
@@ -197,9 +297,9 @@ export function createFloatingBallController(
     };
     const onContextMenu = (event: MouseEvent): void => {
       event.preventDefault();
-      searchOpen = false;
-      search.hidden = true;
-      menuOpen = !menuOpen;
+      const openMenu = !menuOpen;
+      closeSurfaces();
+      menuOpen = openMenu;
       menu.hidden = !menuOpen;
       if (menuOpen && pinAction) {
         void Promise.resolve(deps.runtime.sendMessage({ type: "floating-ball/get-tab-state" })).then((response) => {
@@ -207,12 +307,18 @@ export function createFloatingBallController(
             const state = response.value as { pinned?: unknown };
             pinAction!.textContent = state.pinned ? "取消固定标签页" : "固定标签页";
           }
-        });
+        }).catch(() => undefined);
       }
     };
     const closeSurfaces = (): void => {
       if (!searchOpen && !menuOpen) return;
       requestGeneration += 1;
+      if (searchTimer !== undefined) deps.window.clearTimeout(searchTimer);
+      searchTimer = undefined;
+      localQueryPending = false;
+      settledEmptyQuery = undefined;
+      searchResults = [];
+      selectedResult = -1;
       searchOpen = false;
       menuOpen = false;
       search.hidden = true;
@@ -224,8 +330,8 @@ export function createFloatingBallController(
         ball.focus();
         return;
       }
-      if (!searchOpen || searchResults.length === 0) return;
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (!searchOpen) return;
+      if (searchResults.length > 0 && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
         event.preventDefault();
         const step = event.key === "ArrowDown" ? 1 : -1;
         selectedResult = (selectedResult + step + searchResults.length) % searchResults.length;
@@ -238,8 +344,16 @@ export function createFloatingBallController(
         event.preventDefault();
         const selected = searchResults[selectedResult];
         if (!selected) return;
-        void deps.runtime.sendMessage({ type: "floating-ball/open-search-result", url: selected.url });
+        void Promise.resolve(deps.runtime.sendMessage({
+          type: "floating-ball/open-search-result",
+          url: selected.url,
+        })).catch(() => undefined);
         closeSurfaces();
+        return;
+      }
+      if (event.key === "Enter" && searchResults.length === 0) {
+        event.preventDefault();
+        void searchWeb();
       }
     };
     const onDocumentPointerDown = (event: PointerEvent): void => {
@@ -288,6 +402,9 @@ export function createFloatingBallController(
     deps.window.addEventListener("resize", onResize);
     cleanup = () => {
       requestGeneration += 1;
+      localQueryPending = false;
+      settledEmptyQuery = undefined;
+      searchResults = [];
       ball.removeEventListener("click", onClick);
       ball.removeEventListener("contextmenu", onContextMenu);
       ball.removeEventListener("pointerdown", onPointerDown);
@@ -328,6 +445,6 @@ export function createFloatingBallController(
 
 function createStyle(document: Document): HTMLStyleElement {
   const style = document.createElement("style");
-  style.textContent = `:host{all:initial}.widget{position:absolute;right:0;bottom:0;width:44px;height:44px}.search{position:absolute;right:52px;bottom:0;width:300px;padding:8px;border:1px solid #d9dee6;border-radius:8px;background:#fff;box-shadow:0 8px 24px rgba(0,0,0,.18)}.search[hidden],.menu[hidden]{display:none}.search input{box-sizing:border-box;width:100%;height:40px;border:2px solid #1a73e8;border-radius:20px;padding:0 12px;font:13px Arial}.results{max-height:240px;overflow:auto;margin-bottom:8px}.results button,.menu button{display:block;width:100%;padding:8px;border:0;background:#fff;text-align:left;font:12px Arial}.results button:hover,.menu button:hover{background:#eef4ff}.menu{position:absolute;right:0;bottom:52px;width:180px;padding:4px;border:1px solid #d9dee6;border-radius:8px;background:#fff;box-shadow:0 8px 24px rgba(0,0,0,.18)}.widget>button{width:44px;height:44px;border:0;border-radius:50%;background:#1769e0;box-shadow:0 5px 16px rgba(23,105,224,.36);color:#fff;cursor:pointer}.ball-icon{display:block;width:20px;height:20px;margin:auto;border:2px solid currentColor;border-radius:4px;position:relative}.ball-icon:before{content:"";position:absolute;left:5px;top:0;bottom:0;border-left:2px solid currentColor}.ball-icon:after{content:"";position:absolute;left:9px;right:2px;top:5px;height:2px;background:currentColor;box-shadow:0 5px 0 currentColor,0 10px 0 currentColor}`;
+  style.textContent = `:host{all:initial}.widget{position:absolute;right:0;bottom:0;width:44px;height:44px}.search{position:absolute;right:52px;bottom:0;width:300px;padding:8px;border:1px solid #d9dee6;border-radius:8px;background:#fff;box-shadow:0 8px 24px rgba(0,0,0,.18)}.search[hidden],.menu[hidden]{display:none}.search input{box-sizing:border-box;width:100%;height:40px;border:2px solid #1a73e8;border-radius:20px;padding:0 12px;font:13px Arial}.results{max-height:240px;overflow:auto;margin-bottom:8px;font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;font-size:13px;letter-spacing:0}.results button{box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;width:100%;min-height:34px;padding:8px;border:0;background:#fff;text-align:left;font:inherit;letter-spacing:0}.result-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.result-source{height:18px;line-height:18px;padding:0 6px;border-radius:9px;font-size:11px;white-space:nowrap}.result-source[data-source=bookmark]{background:#e8f0fe;color:#174ea6}.result-source[data-source=history]{background:#f1f3f4;color:#5f6368}.menu button{display:block;width:100%;padding:8px;border:0;background:#fff;text-align:left;font:12px Arial}.results button:hover,.menu button:hover{background:#eef4ff}.menu{position:absolute;right:0;bottom:52px;width:180px;padding:4px;border:1px solid #d9dee6;border-radius:8px;background:#fff;box-shadow:0 8px 24px rgba(0,0,0,.18)}.widget>button{width:44px;height:44px;border:0;border-radius:50%;background:#1769e0;box-shadow:0 5px 16px rgba(23,105,224,.36);color:#fff;cursor:pointer}.ball-icon{display:block;width:20px;height:20px;margin:auto;border:2px solid currentColor;border-radius:4px;position:relative}.ball-icon:before{content:"";position:absolute;left:5px;top:0;bottom:0;border-left:2px solid currentColor}.ball-icon:after{content:"";position:absolute;left:9px;right:2px;top:5px;height:2px;background:currentColor;box-shadow:0 5px 0 currentColor,0 10px 0 currentColor}`;
   return style;
 }

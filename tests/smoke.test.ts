@@ -57,6 +57,7 @@ describe("extension manifest", () => {
       "sessions",
       "bookmarks",
       "scripting",
+      "search",
     ]) {
       expect(readme).toContain(`\`${permission}\``);
       expect(checklist).toContain(`\`${permission}\``);
@@ -131,6 +132,63 @@ describe("extension manifest", () => {
     }
   });
 
+  it("documents hidden actions, exact bookmarking, and default-search fallback privacy", () => {
+    const readme = readFileSync("README.md", "utf8");
+    const privacyPolicy = readFileSync("docs/privacy-policy.md", "utf8");
+    const checklist = readFileSync("docs/chrome-web-store-checklist.md", "utf8");
+
+    for (const document of [readme, checklist]) {
+      expect(document).toContain("不可用的操作直接隐藏");
+      expect(document).toContain("精确查询当前 HTTP/HTTPS 标签页的完整 URL");
+      expect(document).toContain("两处搜索框");
+      expect(document).toContain("本地查询已完成且结果为空");
+      expect(document).toContain("默认搜索引擎");
+      expect(document).toContain("来源胶囊");
+    }
+    for (const detail of [
+      "生效日期：2026 年 9 月 5 日",
+      "不读取默认搜索引擎配置",
+      "不读取搜索结果页面内容",
+      "精确查询当前 HTTP/HTTPS 标签页的完整 URL",
+      "只创建一个收藏夹节点",
+      "本地查询已完成且结果为空",
+    ]) {
+      expect(privacyPolicy).toContain(detail);
+    }
+    for (const staleClaim of [
+      "叶子标签上的两项保持禁用",
+      "无可关闭目标时菜单禁用",
+      "没有标签记录时禁用",
+      "没有可恢复记录时该菜单项不可用",
+      "没有 host permission 和 content script",
+      "`bookmarks` 仅用于非空搜索时读取",
+    ]) {
+      expect(`${readme}\n${checklist}\n${privacyPolicy}`).not.toContain(staleClaim);
+    }
+  });
+
+  it("documents accurate search permission warnings and the current manual QA limitation", () => {
+    const readme = readFileSync("README.md", "utf8");
+    const privacyPolicy = readFileSync("docs/privacy-policy.md", "utf8");
+    const checklist = readFileSync("docs/chrome-web-store-checklist.md", "utf8");
+
+    for (const document of [readme, privacyPolicy, checklist]) {
+      expect(document).toContain("`search` 权限本身不会触发新增权限警告");
+      expect(document).toContain("HTTP/HTTPS 主机权限");
+    }
+    expect(checklist).toContain("自动验收记录（2026-08-29）");
+    expect(checklist).toContain("44x44 host");
+    expect(checklist).toContain("没有 `.result-source` 指纹");
+    expect(checklist).toContain("未获授权安装或重新加载 0.12.8");
+    expect(checklist).toContain("Chrome Web Store 页面不可脚本化");
+    for (const staleClaim of [
+      "升级到包含新增权限的版本时，Chrome 可能要求用户接受权限变更",
+      "已有安装升级到包含这些权限的版本时，Chrome 可能要求用户接受新增权限",
+    ]) {
+      expect(`${readme}\n${privacyPolicy}\n${checklist}`).not.toContain(staleClaim);
+    }
+  });
+
   it("records the 0.12.9 update release first", () => {
     const updateLog = readFileSync("update.log", "utf8");
     const nextVersion = updateLog.search(/\r?\n(?=\d+\.\d+\.\d+\r?$)/m);
@@ -188,7 +246,9 @@ describe("extension manifest", () => {
       "sessions",
       "bookmarks",
       "scripting",
+      "search",
     ]);
+    expect(manifest.permissions.filter((permission) => permission === "search")).toHaveLength(1);
     expect(manifest.host_permissions).toEqual(["http://*/*", "https://*/*"]);
     expect(manifest.content_scripts).toEqual([{
       matches: ["http://*/*", "https://*/*"],
@@ -227,7 +287,9 @@ describe("extension manifest", () => {
 
   it("builds the classic content script as an IIFE", () => {
     const buildSource = readFileSync("scripts/build.mjs", "utf8");
+    const serviceWorkerSource = readFileSync("src/background/service-worker.ts", "utf8");
     expect(buildSource).toContain('format: "iife"');
     expect(buildSource).toContain('"content/floating-ball"');
+    expect(serviceWorkerSource).toContain("search: chrome.search");
   });
 });

@@ -11,6 +11,7 @@ describe("floating ball messages", () => {
 
   it("validates search text and search result URLs", () => {
     expect(isFloatingBallRequest({ type: "floating-ball/search", query: " chrome " })).toBe(true);
+    expect(isFloatingBallRequest({ type: "floating-ball/search", query: "   " })).toBe(true);
     expect(isFloatingBallRequest({ type: "floating-ball/search", query: "chrome", tabId: 99 })).toBe(false);
     expect(isFloatingBallRequest({ type: "floating-ball/search", query: "x".repeat(201) })).toBe(false);
     expect(isFloatingBallRequest({
@@ -25,6 +26,23 @@ describe("floating ball messages", () => {
     expect(isFloatingBallRequest({
       type: "floating-ball/open-search-result",
       url: "javascript:alert(1)",
+    })).toBe(false);
+  });
+
+  it("accepts only bounded nonblank web-search requests with exact fields", () => {
+    expect(isFloatingBallRequest({
+      type: "floating-ball/search-web",
+      query: "  Chrome extension  ",
+    })).toBe(true);
+    expect(isFloatingBallRequest({ type: "floating-ball/search-web", query: "   " })).toBe(false);
+    expect(isFloatingBallRequest({
+      type: "floating-ball/search-web",
+      query: "x".repeat(201),
+    })).toBe(false);
+    expect(isFloatingBallRequest({
+      type: "floating-ball/search-web",
+      query: "Chrome",
+      tabId: 99,
     })).toBe(false);
   });
 });

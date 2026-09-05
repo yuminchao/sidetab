@@ -35,6 +35,7 @@ describe("floating ball background actions", () => {
       tabGroups: { query: vi.fn().mockResolvedValue([]), get: vi.fn(), update: vi.fn() },
       bookmarks: { search: vi.fn().mockResolvedValue([]) },
       history: { search: vi.fn().mockResolvedValue([]) },
+      search: { query: vi.fn().mockResolvedValue(undefined) },
       sidePanel: { open: vi.fn().mockResolvedValue(undefined) },
       scripting: { executeScript: vi.fn().mockResolvedValue(undefined) },
       storage: { get: vi.fn().mockResolvedValue({}), set: vi.fn().mockResolvedValue(undefined) },
@@ -81,6 +82,7 @@ describe("floating ball background actions", () => {
         get: vi.fn(), update: vi.fn(),
       },
       bookmarks: { search: vi.fn() }, history: { search: vi.fn() }, sidePanel: { open: vi.fn() },
+      search: { query: vi.fn() },
       scripting: { executeScript: vi.fn() },
       storage: { get: vi.fn().mockResolvedValue({}), set: vi.fn().mockResolvedValue(undefined) },
     };
@@ -88,5 +90,64 @@ describe("floating ball background actions", () => {
 
     await expect(background.handle({ type: "floating-ball/smart-group-window" }, sender())).resolves.toEqual({ ok: true });
     expect(deps.tabs.group).toHaveBeenCalledWith({ groupId: 9, tabIds: [42, 43] });
+  });
+
+  it("opens a trimmed query with the browser default search in a new tab", async () => {
+    const query = vi.fn().mockResolvedValue(undefined);
+    const background = createFloatingBallBackground({
+      tabs: {} as never,
+      tabGroups: {} as never,
+      bookmarks: {} as never,
+      history: {} as never,
+      search: { query },
+      sidePanel: {} as never,
+      scripting: {} as never,
+      storage: {} as never,
+    });
+
+    await expect(background.handle({
+      type: "floating-ball/search-web",
+      query: "  状态管理  ",
+    }, sender())).resolves.toEqual({ ok: true });
+    expect(query).toHaveBeenCalledWith({ text: "状态管理", disposition: "NEW_TAB" });
+  });
+
+  it("maps browser search rejection to a controlled operation failure", async () => {
+    const background = createFloatingBallBackground({
+      tabs: {} as never,
+      tabGroups: {} as never,
+      bookmarks: {} as never,
+      history: {} as never,
+      search: { query: vi.fn().mockRejectedValue(new Error("search unavailable")) },
+      sidePanel: {} as never,
+      scripting: {} as never,
+      storage: {} as never,
+    });
+
+    await expect(background.handle({
+      type: "floating-ball/search-web",
+      query: "missing",
+    }, sender())).resolves.toEqual({
+      ok: false,
+      error: "operation-failed",
+      message: "悬浮球操作失败",
+    });
+  });
+
+  it("requires a valid sender before opening browser search", async () => {
+    const query = vi.fn();
+    const background = createFloatingBallBackground({
+      search: { query },
+    } as never);
+
+    await expect(background.handle({
+      type: "floating-ball/search-web",
+      query: "missing",
+    }, {})).resolves.toEqual({
+      ok: false,
+      error: "invalid-sender",
+      message: "当前页面不可用",
+    });
+    expect(query).not.toHaveBeenCalled();
   });
 });

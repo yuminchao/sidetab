@@ -5,6 +5,7 @@ import { createShortcutStore, type StorageArea } from "./shortcut-store";
 import { createShortcutFaviconCacheStore } from "./shortcut-favicon-cache";
 import { createOriginFaviconMap, getHttpOrigin } from "./favicon-model";
 import type { BookmarkSearchApi } from "./bookmark-search";
+import { createBookmarkActions } from "./bookmark-actions";
 import {
   createRecentlyClosedTabController,
   type SessionsApi,
@@ -73,8 +74,19 @@ export type SidebarDependencies = {
   windows: Pick<typeof chrome.windows, "getCurrent">;
   storage: StorageArea;
   sessionStorage?: StorageArea;
-  bookmarks: BookmarkSearchApi;
+  bookmarks: BookmarkSearchApi & Pick<typeof chrome.bookmarks, "create">;
   history: HistorySearchApi;
+  /**
+   * 提供 Chrome 默认搜索 API。
+   *
+   * Args:
+   *   无。
+   * Returns:
+   *   提供默认搜索的 query 方法。
+   * Raises:
+   *   query 调用失败时由调用方处理。
+   */
+  search: Pick<typeof chrome.search, "query">;
   sessions: SessionsApi;
   document: Document;
   restoreGroups?(windowId: number): Promise<void>;
@@ -190,6 +202,7 @@ async function startSidebarInternal(
   const tabStore = new TabStore();
   const groupStore = new TabGroupStore();
   const tabActions = createTabActions(deps.tabs);
+  const bookmarkActions = createBookmarkActions(deps.bookmarks);
   const groupActions = createTabGroupActions(deps.tabs, deps.tabGroups);
   const shortcutStore = createShortcutStore(deps.storage);
   const floatingBallStore = createFloatingBallSettingsStore(deps.storage);
@@ -241,6 +254,7 @@ async function startSidebarInternal(
   let resyncFollowUpRequested = false;
   let resyncPromise: Promise<void> | undefined;
   let addShortcutBusy = false;
+  const bookmarkBusyTabIds = new Set<number>();
   let appearanceSettingsBusy = false;
   let restoreRecentlyClosedBusy = false;
   let groupsReady = false;
@@ -602,6 +616,19 @@ async function startSidebarInternal(
         } catch {
           throw new Error("无法打开历史记录");
         }
+      },
+      /**
+       * 使用 Chrome 默认搜索在新标签页中打开查询。
+       *
+       * Args:
+       *   text: 已去除首尾空白的搜索词。
+       * Returns:
+       *   Chrome 完成搜索页打开时解决的 Promise。
+       * Raises:
+       *   Chrome 搜索 API 调用失败时抛出错误。
+       */
+      async onSearchWeb(text) {
+        await deps.search.query({ text, disposition: "NEW_TAB" });
       },
       onOpenError: (message) => setStatus("operation", message),
     },
@@ -1014,6 +1041,9 @@ async function startSidebarInternal(
           canGroupAll: ready && !busy
             && allPlan !== undefined
             && !planHasOrdinaryGroupConflict(allPlan),
+          canManageGroupMembership: currentWindowId !== undefined
+            && !smartGroupingBusy
+            && !groupTabBusy.has(id),
           canCloseOtherSameSite: getOtherSameSiteTabIds(tabs, id).length > 0,
           canDissolveTree: subtreeIds.length > 1,
           canDeleteSubtree: subtreeIds.length > 1,
@@ -1021,8 +1051,25 @@ async function startSidebarInternal(
       },
       getGroups: () => groupStore.list(),
       getRecentlyClosedSessionId: () => recentlyClosed.getSessionId(),
+      canAddBookmark: (tab) => bookmarkBusyTabIds.has(tab.id)
+        ? Promise.resolve(false)
+        : bookmarkActions.canAdd(tab),
       onBeforeOpen: () => groupContextMenu?.close(),
       onCommand(command) {
+        if (command.action === "add-bookmark") {
+          const latestTab = tabStore.get(command.tabId);
+          if (
+            !latestTab
+            || latestTab.id !== command.tabId
+            || bookmarkBusyTabIds.has(command.tabId)
+          ) return;
+          bookmarkBusyTabIds.add(command.tabId);
+          runTabOperation(
+            bookmarkActions.add(latestTab),
+            () => bookmarkBusyTabIds.delete(command.tabId),
+          );
+          return;
+        }
         if (command.action === "add-shortcut") {
           void addTabShortcut(command.tabId);
           return;
@@ -1265,11 +1312,6 @@ async function startSidebarInternal(
           .filter((tab) => tab.groupId === group.id)
           .map((tab) => tab.id);
         if (tabIds.length === 0) return;
-        if (command.action === "close") {
-          void executeGroupCommand(group.id, () => groupActions.close(tabIds))
-            .catch(() => undefined);
-          return;
-        }
         void executeGroupCommand(group.id, () => groupActions.dissolve(tabIds))
           .catch(() => undefined);
       },
@@ -1735,7 +1777,11 @@ async function startSidebarInternal(
             : tabStore.get(tab.id);
           const model = tabStore.replace(tab);
           updates.push({ previous, model });
-          if (previous && model && previous.pinned !== model.pinned) {
+          if (
+            previous
+            && model
+            && (previous.pinned !== model.pinned || previous.url !== model.url)
+          ) {
             contextMenu.closeForTab(model.id);
           }
         }
@@ -2409,6 +2455,7 @@ if (typeof chrome !== "undefined" && typeof document !== "undefined") {
     windows: chrome.windows,
     bookmarks: chrome.bookmarks,
     history: chrome.history,
+    search: chrome.search,
     sessions: chrome.sessions,
     storage: chrome.storage.local,
     sessionStorage: chrome.storage.session,

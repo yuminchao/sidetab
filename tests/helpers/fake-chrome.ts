@@ -15,6 +15,7 @@ type DetachedListener = (tabId: number, info: chrome.tabs.OnDetachedInfo) => voi
 type ReplacedListener = (addedTabId: number, removedTabId: number) => void;
 type TabGroupListener = (group: chrome.tabGroups.TabGroup) => void;
 type SessionChangedListener = () => void;
+type BookmarkSearchQuery = string | { query?: string; url?: string; title?: string };
 
 export function fakeTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
   return {
@@ -53,6 +54,7 @@ export function createFakeChrome(options: {
 } = {}) {
   let tabState = (options.tabs ?? []).map((tab) => ({ ...tab }));
   let groupState = (options.groups ?? []).map((group) => ({ ...group }));
+  let bookmarkState = (options.bookmarkItems ?? []).map((item) => ({ ...item }));
   let recentlyClosedState = (options.recentlyClosedSessions ?? []).map((session) => ({
     ...session,
   }));
@@ -243,8 +245,29 @@ export function createFakeChrome(options: {
   const storageSet = vi.fn<(items: Record<string, unknown>) => Promise<void>>(
     async () => undefined,
   );
-  const bookmarkSearch = vi.fn(async () => options.bookmarkItems ?? []);
+  const bookmarkSearch = vi.fn(async (
+    query: BookmarkSearchQuery,
+  ): Promise<chrome.bookmarks.BookmarkTreeNode[]> => bookmarkState
+    .filter((item) => matchesBookmarkSearch(item, query))
+    .map((item) => ({ ...item })));
+  let nextBookmarkId = 1;
+  const bookmarkCreate = vi.fn(async (
+    details: chrome.bookmarks.CreateDetails,
+  ): Promise<chrome.bookmarks.BookmarkTreeNode> => {
+    while (bookmarkState.some((item) => item.id === `created-bookmark-${nextBookmarkId}`)) {
+      nextBookmarkId += 1;
+    }
+    const created = {
+      id: `created-bookmark-${nextBookmarkId++}`,
+      title: details.title ?? "",
+      url: details.url,
+      syncing: false,
+    };
+    bookmarkState.push(created);
+    return { ...created };
+  });
   const historySearch = vi.fn(async () => options.historyItems ?? []);
+  const searchQuery = vi.fn(async (_query: chrome.search.QueryInfo) => undefined);
   const sessionsGetRecentlyClosed = vi.fn(async () => recentlyClosedState);
   const sessionsRestore = vi.fn(async (sessionId: string) => {
     const index = recentlyClosedState.findIndex(
@@ -277,8 +300,12 @@ export function createFakeChrome(options: {
       move: groupMove,
     } as unknown as typeof chrome.tabGroups,
     windows: { getCurrent } as Pick<typeof chrome.windows, "getCurrent">,
-    bookmarks: { search: bookmarkSearch } as Pick<typeof chrome.bookmarks, "search">,
+    bookmarks: { search: bookmarkSearch, create: bookmarkCreate } as Pick<
+      typeof chrome.bookmarks,
+      "search" | "create"
+    >,
     history: { search: historySearch } as Pick<typeof chrome.history, "search">,
+    search: { query: searchQuery } as Pick<typeof chrome.search, "query">,
     sessions: {
       getRecentlyClosed: sessionsGetRecentlyClosed,
       restore: sessionsRestore,
@@ -305,7 +332,9 @@ export function createFakeChrome(options: {
       groupMove,
       getCurrent,
       bookmarkSearch,
+      bookmarkCreate,
       historySearch,
+      searchQuery,
       sessionsGetRecentlyClosed,
       sessionsRestore,
       storageGet,
@@ -328,4 +357,29 @@ export function deferred<T>() {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
+}
+
+/**
+ * 按 Chrome 收藏夹查询的已声明字段匹配测试节点。
+ *
+ * Args:
+ *   item: 待匹配的收藏夹节点。
+ *   search: 字符串查询或 query、title、url 组合查询。
+ * Returns:
+ *   节点满足所有已提供过滤条件时返回 true。
+ * Raises:
+ *   无。
+ */
+function matchesBookmarkSearch(
+  item: chrome.bookmarks.BookmarkTreeNode,
+  search: BookmarkSearchQuery,
+): boolean {
+  const query = typeof search === "string" ? search : search.query;
+  const normalizedQuery = query?.toLocaleLowerCase();
+  const matchesQuery = normalizedQuery === undefined
+    || item.title.toLocaleLowerCase().includes(normalizedQuery)
+    || (item.url?.toLocaleLowerCase().includes(normalizedQuery) ?? false);
+  if (!matchesQuery || typeof search === "string") return matchesQuery;
+  return (search.title === undefined || item.title === search.title)
+    && (search.url === undefined || item.url === search.url);
 }

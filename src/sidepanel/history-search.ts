@@ -53,6 +53,17 @@ export function createHistorySearchController(
     bookmarks: BookmarkSearchApi;
     history: HistorySearchApi;
     onOpen(url: string): void | Promise<void>;
+    /**
+     * 使用浏览器默认搜索打开查询词。
+     *
+     * Args:
+     *   query: 已去除首尾空白的查询词。
+     * Returns:
+     *   浏览器完成打开搜索页时解决的 Promise。
+     * Raises:
+     *   浏览器无法打开搜索页时抛出错误。
+     */
+    onSearchWeb(query: string): Promise<void>;
     onOpenError?(message: string): void;
   },
 ): HistorySearchController {
@@ -63,6 +74,9 @@ export function createHistorySearchController(
   let currentResults: SearchResult[] = [];
   let selectedIndex = -1;
   let openGeneration: number | undefined;
+  let localQueryPending = false;
+  let settledEmptyQuery: string | undefined;
+  let webSearchGeneration: number | undefined;
   let faviconsByOrigin = new Map<string, string>();
 
   if (!elements.results.id) elements.results.id = "history-search-results";
@@ -177,15 +191,19 @@ export function createHistorySearchController(
   const runQuery = async (query: string): Promise<void> => {
     const queryGeneration = ++generation;
     const trimmedQuery = query.trim();
+    localQueryPending = true;
+    settledEmptyQuery = undefined;
     renderMessage("正在搜索…");
 
     if (!trimmedQuery) {
       try {
         const items = await searchHistory(callbacks.history, "");
         if (!active || queryGeneration !== generation) return;
+        localQueryPending = false;
         renderResults(items, "");
       } catch {
         if (!active || queryGeneration !== generation) return;
+        localQueryPending = false;
         renderMessage("无法读取历史记录");
       }
       return;
@@ -197,19 +215,25 @@ export function createHistorySearchController(
     ]);
     if (!active || queryGeneration !== generation) return;
     if (bookmarkResult.status === "rejected" && historyResult.status === "rejected") {
+      localQueryPending = false;
       renderMessage("无法读取搜索记录");
       return;
     }
 
     const bookmarks = bookmarkResult.status === "fulfilled" ? bookmarkResult.value : [];
     const history = historyResult.status === "fulfilled" ? historyResult.value : [];
-    renderResults(mergeSearchResults(bookmarks, history), trimmedQuery);
+    const merged = mergeSearchResults(bookmarks, history);
+    localQueryPending = false;
+    settledEmptyQuery = merged.length === 0 ? trimmedQuery : undefined;
+    renderResults(merged, trimmedQuery);
   };
 
   const close = (): void => {
     generation += 1;
     clearTimer();
     clearBlurTimer();
+    localQueryPending = false;
+    settledEmptyQuery = undefined;
     currentResults = [];
     selectedIndex = -1;
     elements.results.hidden = true;
@@ -236,6 +260,41 @@ export function createHistorySearchController(
     }
   };
 
+  /**
+   * 在本地查询已确认无结果时调用浏览器默认搜索。
+   *
+   * Args:
+   *   无。
+   * Returns:
+   *   无返回值。
+   * Raises:
+   *   无；失败会显示在搜索面板中。
+   */
+  const searchWeb = async (): Promise<void> => {
+    const query = elements.input.value.trim();
+    const searchGeneration = generation;
+    if (
+      !query
+      || localQueryPending
+      || currentResults.length > 0
+      || settledEmptyQuery !== query
+      || webSearchGeneration === searchGeneration
+    ) return;
+    webSearchGeneration = searchGeneration;
+    try {
+      await callbacks.onSearchWeb(query);
+      if (!active || searchGeneration !== generation) return;
+      elements.input.value = "";
+      close();
+    } catch {
+      if (active && searchGeneration === generation) {
+        renderMessage("无法打开浏览器搜索");
+      }
+    } finally {
+      if (webSearchGeneration === searchGeneration) webSearchGeneration = undefined;
+    }
+  };
+
   const reopen = (): void => {
     clearBlurTimer();
     if (elements.results.hidden) void runQuery(elements.input.value);
@@ -252,6 +311,8 @@ export function createHistorySearchController(
   const onInput = (): void => {
     generation += 1;
     clearTimer();
+    localQueryPending = true;
+    settledEmptyQuery = undefined;
     renderMessage("正在搜索…");
     timer = setTimeout(() => {
       timer = undefined;
@@ -269,15 +330,18 @@ export function createHistorySearchController(
       close();
       return;
     }
-    if (elements.results.hidden || currentResults.length === 0) return;
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    if (elements.results.hidden) return;
+    if (currentResults.length > 0 && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
       event.preventDefault();
       const delta = event.key === "ArrowDown" ? 1 : -1;
       selectedIndex = (selectedIndex + delta + currentResults.length) % currentResults.length;
       syncSelection();
-    } else if (event.key === "Enter") {
+    } else if (currentResults.length > 0 && event.key === "Enter") {
       event.preventDefault();
       void openResult(selectedIndex);
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      void searchWeb();
     }
   };
 
