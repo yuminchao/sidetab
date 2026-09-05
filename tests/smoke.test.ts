@@ -16,13 +16,13 @@ function parseCsp(value: string): Record<string, string[]> {
 }
 
 describe("extension manifest", () => {
-  it("keeps the npm and extension release versions aligned at 0.12.7", () => {
+  it("keeps the npm and extension release versions aligned at 0.12.9", () => {
     const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
     const packageLock = JSON.parse(readFileSync("package-lock.json", "utf8"));
-    expect(manifest.version).toBe("0.12.7");
-    expect(packageJson.version).toBe("0.12.7");
-    expect(packageLock.version).toBe("0.12.7");
-    expect(packageLock.packages[""].version).toBe("0.12.7");
+    expect(manifest.version).toBe("0.12.9");
+    expect(packageJson.version).toBe("0.12.9");
+    expect(packageLock.version).toBe("0.12.9");
+    expect(packageLock.packages[""].version).toBe("0.12.9");
   });
 
   it("records the 0.10.4 context actions and visual refinements release", () => {
@@ -131,18 +131,18 @@ describe("extension manifest", () => {
     }
   });
 
-  it("records the 0.12.7 update release first", () => {
+  it("records the 0.12.9 update release first", () => {
     const updateLog = readFileSync("update.log", "utf8");
     const nextVersion = updateLog.search(/\r?\n(?=\d+\.\d+\.\d+\r?$)/m);
     const currentRelease = nextVersion === -1 ? updateLog : updateLog.slice(0, nextVersion);
 
-    expect(updateLog.split(/\r?\n/, 1)[0]).toBe("0.12.7");
+    expect(updateLog.split(/\r?\n/, 1)[0]).toBe("0.12.9");
     for (const detail of [
-      "网页悬浮球",
-      "自动聚焦",
-      "一键分组",
-      "scripting",
-      "无远程代码",
+      "自动恢复分组及网页",
+      "默认关闭",
+      "折叠或展开",
+      "HTTP/HTTPS",
+      "不新增权限",
     ]) {
       expect(currentRelease).toContain(detail);
     }

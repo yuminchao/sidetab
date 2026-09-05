@@ -1130,6 +1130,21 @@ input:focus-visible {
   background: Field;
 }
 
+#group-restore-state {
+  flex: 0 0 80px;
+  height: 32px;
+  padding: 0 7px;
+  border: 1px solid ButtonBorder;
+  border-radius: 5px;
+  color: FieldText;
+  background: Field;
+  font: inherit;
+}
+
+label[for="group-restore-enabled"] input {
+  flex-shrink: 0;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;

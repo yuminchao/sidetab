@@ -65,6 +65,7 @@ import {
 import { createTabIdReplacementMap, type ReadonlyTabIdReplacementMap } from "./tab-id-replacement";
 import { createTabUpdateScheduler } from "./tab-update-scheduler";
 import { createFloatingBallSettingsStore } from "../floating-ball/settings";
+import { createRestoreSettingsStore } from "../group-restore/settings";
 
 export type SidebarDependencies = {
   tabs: typeof chrome.tabs;
@@ -76,6 +77,7 @@ export type SidebarDependencies = {
   history: HistorySearchApi;
   sessions: SessionsApi;
   document: Document;
+  restoreGroups?(windowId: number): Promise<void>;
 };
 
 function resolveFlatTabDrop(request: TabTreeDropRequest): TabDropTarget | undefined {
@@ -191,6 +193,7 @@ async function startSidebarInternal(
   const groupActions = createTabGroupActions(deps.tabs, deps.tabGroups);
   const shortcutStore = createShortcutStore(deps.storage);
   const floatingBallStore = createFloatingBallSettingsStore(deps.storage);
+  const restoreSettingsStore = createRestoreSettingsStore(deps.storage);
   const treeSessionStore = createTabTreeSessionStore(deps.sessionStorage);
   const smartGroupSessionStore = createSmartGroupSessionStore(deps.sessionStorage ?? {
     get: async () => ({}),
@@ -217,6 +220,7 @@ async function startSidebarInternal(
   const bufferedAttachedTabs = new WeakSet<chrome.tabs.Tab>();
   const bufferedReplacementTabs = new WeakSet<chrome.tabs.Tab>();
   let shortcutSettingsReady = false;
+  let restoreGroupsEnabled = false;
   let treeSessionReady = false;
   let tabsReady = false;
   let shortcutSettings = createDefaultShortcutSettings();
@@ -492,6 +496,8 @@ async function startSidebarInternal(
       fontSize: elements.tabTitleFontSize,
       contentTreeEnabled: elements.contentTreeEnabled,
       floatingBallEnabled: elements.floatingBallEnabled,
+      restoreEnabled: deps.document.querySelector<HTMLInputElement>("#group-restore-enabled") ?? undefined,
+      restoreCollapsed: deps.document.querySelector<HTMLSelectElement>("#group-restore-state") ?? undefined,
       editor: elements.shortcutEditor,
       error: elements.shortcutError,
       add: elements.shortcutAdd,
@@ -561,6 +567,14 @@ async function startSidebarInternal(
         shortcutRenderer.setFloatingBallEnabled(enabled);
         if (enabled && typeof chrome !== "undefined") {
           void chrome.runtime.sendMessage({ type: "floating-ball/ensure-injected" }).catch(() => undefined);
+        }
+      },
+      async onRestoreSettingsSave(settings) {
+        if (!deps.document.getElementById("group-restore-enabled")) return;
+        await restoreSettingsStore.save(settings);
+        if (typeof chrome !== "undefined" && currentWindowId !== undefined) {
+          const response = await chrome.runtime.sendMessage({ type: "group-restore/settings-saved", windowId: currentWindowId });
+          if (response?.error) throw new Error(response.error);
         }
       },
     },
@@ -2074,12 +2088,22 @@ async function startSidebarInternal(
       (cache) => ({ cache, error: "" }),
       () => ({ cache: new Map<string, string>(), error: "无法读取快捷网站图标缓存" }),
     ),
-  ]).then(([settingsResult, cacheResult]) => {
+    restoreSettingsStore.load().then(
+      (settings) => {
+        if (active) {
+          restoreGroupsEnabled = settings.enabled;
+          shortcutRenderer.setRestoreSettings(settings);
+        }
+        return "";
+      },
+      () => "无法读取分组恢复设置",
+    ),
+  ]).then(([settingsResult, cacheResult, restoreError]) => {
     if (!active) return;
     faviconCacheStore.prune(createShortcutOrigins(settingsResult.settings));
     const cache = faviconCacheStore.snapshot();
     finishShortcutLoad(settingsResult.settings, cache);
-    const message = [settingsResult.error, cacheResult.error].filter(Boolean).join("；");
+    const message = [settingsResult.error, cacheResult.error, restoreError].filter(Boolean).join("；");
     setStatus("shortcuts", message);
     flushFaviconCache();
   }).catch(() => {
@@ -2155,6 +2179,13 @@ async function startSidebarInternal(
       groupEventHandlers,
     );
     void resyncTabsAndGroups(true);
+    if (deps.restoreGroups) {
+      void loadShortcuts.then(async () => {
+        if (!active || !restoreGroupsEnabled) return;
+        await deps.restoreGroups!(windowId);
+        if (active) await resyncTabsAndGroups();
+      }).catch(() => setStatus("operation", "无法恢复分组，请重新打开侧边栏重试"));
+    }
   } catch {
     if (active) {
       setStatus("tabs", "无法读取当前窗口的标签页");
@@ -2377,5 +2408,9 @@ if (typeof chrome !== "undefined" && typeof document !== "undefined") {
     storage: chrome.storage.local,
     sessionStorage: chrome.storage.session,
     document,
+    async restoreGroups(windowId) {
+      const response = await chrome.runtime.sendMessage({ type: "group-restore/open", windowId });
+      if (response?.error) throw new Error(response.error);
+    },
   }, window);
 }

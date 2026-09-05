@@ -205,6 +205,27 @@ async function startSidebar(
 }
 
 describe("sidebar lifecycle", () => {
+  it("requests group restoration only after enabled settings load and refreshes restored tabs", async () => {
+    const fake = createFakeChrome({ stored: { groupRestoreSettings: { enabled: true, collapsed: true } } });
+    const restoreGroups = vi.fn(async (windowId: number) => {
+      expect(windowId).toBe(10);
+      fake.setTabs([fakeTab({ id: 99 })]);
+    });
+    const cleanup = await startSidebarRaw({ ...fake, restoreGroups });
+    await vi.waitFor(() => expect(rowIds()).toEqual([99]));
+    expect(restoreGroups).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it("does not request group restoration when the switch is disabled", async () => {
+    const fake = createFakeChrome();
+    const restoreGroups = vi.fn(async () => undefined);
+    const cleanup = await startSidebarRaw({ ...fake, restoreGroups });
+    await flush();
+    expect(restoreGroups).not.toHaveBeenCalled();
+    cleanup();
+  });
+
   it("does not restore a removed tab from a queued update", async () => {
     const fake = createFakeChrome({
       tabs: [fakeTab({ id: 1, index: 0, title: "Original" })],
@@ -4030,7 +4051,7 @@ describe("sidebar lifecycle", () => {
     const sidebarModule = await import("../src/sidepanel/sidebar");
     expect(sidebarModule).not.toHaveProperty("bootstrapSidebar");
     expect(fake.methods.getCurrent).toHaveBeenCalledOnce();
-    expect(fake.methods.storageGet).toHaveBeenCalledTimes(2);
+    expect(fake.methods.storageGet).toHaveBeenCalledTimes(3);
     expect(fake.methods.storageGet).toHaveBeenCalledWith("shortcutSettings");
     expect(fake.methods.storageGet).toHaveBeenCalledWith("shortcutFaviconCacheV1");
     window.dispatchEvent(new Event("pagehide"));

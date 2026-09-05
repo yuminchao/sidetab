@@ -7,6 +7,7 @@ import {
   type ShortcutSettings,
 } from "./shortcut-model";
 import { createFaviconCandidates, getAllowedImageUrl, getHttpOrigin } from "./favicon-model";
+import type { RestoreSettings } from "../group-restore/settings";
 
 export type ShortcutRendererElements = {
   strip: HTMLElement;
@@ -16,6 +17,8 @@ export type ShortcutRendererElements = {
   fontSize: HTMLInputElement;
   contentTreeEnabled: HTMLInputElement;
   floatingBallEnabled: HTMLInputElement;
+  restoreEnabled?: HTMLInputElement;
+  restoreCollapsed?: HTMLSelectElement;
   editor: HTMLElement;
   error: HTMLElement;
   add: HTMLButtonElement;
@@ -31,6 +34,7 @@ export type ShortcutRendererCallbacks = {
   onCachedFaviconFailed?(origin: string, url: string): void;
   onSave(settings: ShortcutSettings): Promise<ShortcutSettings>;
   onFloatingBallEnabledChange?(enabled: boolean): Promise<void>;
+  onRestoreSettingsSave?(settings: RestoreSettings): Promise<void>;
 };
 
 export type ShortcutRenderer = {
@@ -39,6 +43,7 @@ export type ShortcutRenderer = {
   setCachedFaviconsByOrigin(favicons: ReadonlyMap<string, string>): void;
   openSettings(settings: ShortcutSettings): void;
   setFloatingBallEnabled(enabled: boolean): void;
+  setRestoreSettings(settings: RestoreSettings): void;
   setError(message: string): void;
   destroy(): void;
 };
@@ -60,6 +65,12 @@ export function createShortcutRenderer(
   let faviconsByOrigin = new Map<string, string>();
   let cachedFaviconsByOrigin = new Map<string, string>();
   let currentFloatingBallEnabled = false;
+  let currentRestoreSettings: RestoreSettings = { enabled: false, collapsed: true };
+
+  const showRestoreSettings = (settings: RestoreSettings) => {
+    if (elements.restoreEnabled) elements.restoreEnabled.checked = settings.enabled;
+    if (elements.restoreCollapsed) elements.restoreCollapsed.value = settings.collapsed ? "collapsed" : "expanded";
+  };
   const shortcutButtons = new Map<string, HTMLButtonElement>();
 
   const setError = (message: string) => {
@@ -75,8 +86,8 @@ export function createShortcutRenderer(
     active && session === candidate && candidate.generation === generation;
 
   const setFormBusy = (busy: boolean) => {
-    const controls = elements.form.querySelectorAll<HTMLInputElement | HTMLButtonElement>(
-      "input, button",
+    const controls = elements.form.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>(
+      "input, button, select",
     );
     for (const control of Array.from(controls)) {
       control.disabled = busy || control.dataset.boundaryDisabled === "true";
@@ -135,6 +146,7 @@ export function createShortcutRenderer(
     elements.fontSize.value = String(session.draft.tabTitleFontSize);
     elements.contentTreeEnabled.checked = session.draft.contentTreeEnabled;
     elements.floatingBallEnabled.checked = currentFloatingBallEnabled;
+    showRestoreSettings(currentRestoreSettings);
     setError("");
     renderEditor();
     if (!elements.dialog.open) {
@@ -331,6 +343,7 @@ export function createShortcutRenderer(
       return;
     }
     session.draft = createDefaultShortcutSettings();
+    showRestoreSettings({ enabled: false, collapsed: true });
     elements.enabled.checked = session.draft.enabled;
     elements.fontSize.value = String(session.draft.tabTitleFontSize);
     elements.contentTreeEnabled.checked = session.draft.contentTreeEnabled;
@@ -396,12 +409,20 @@ export function createShortcutRenderer(
       const floatingBallSave = elements.floatingBallEnabled.id === "floating-ball-enabled"
         ? callbacks.onFloatingBallEnabledChange?.(floatingBallEnabled) ?? Promise.resolve()
         : Promise.resolve();
-      const [saved] = await Promise.all([callbacks.onSave(validation.value), floatingBallSave]);
+      const restoreSettings = {
+        enabled: elements.restoreEnabled?.checked ?? currentRestoreSettings.enabled,
+        collapsed: elements.restoreCollapsed ? elements.restoreCollapsed.value === "collapsed" : currentRestoreSettings.collapsed,
+      };
+      const [saved] = await Promise.all([
+        callbacks.onSave(validation.value), floatingBallSave,
+        callbacks.onRestoreSettingsSave?.(restoreSettings),
+      ]);
       if (!isCurrentSession(submittedSession)) {
         return;
       }
       current = copySettings(saved);
       currentFloatingBallEnabled = floatingBallEnabled;
+      currentRestoreSettings = restoreSettings;
       renderStrip(current);
       previewFontSize(current.tabTitleFontSize);
       submittedSession.saving = false;
@@ -486,6 +507,10 @@ export function createShortcutRenderer(
     setFloatingBallEnabled(enabled) {
       currentFloatingBallEnabled = enabled;
       if (!session) elements.floatingBallEnabled.checked = enabled;
+    },
+    setRestoreSettings(settings) {
+      currentRestoreSettings = { ...settings };
+      if (!session) showRestoreSettings(settings);
     },
 
     setError,

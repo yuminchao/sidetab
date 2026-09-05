@@ -1,5 +1,8 @@
 import { createFloatingBallBackground } from "../floating-ball/background-actions";
 import { isFloatingBallRequest } from "../floating-ball/messages";
+import { registerGroupRestore } from "../group-restore/background";
+
+registerGroupRestore(chrome);
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
 
