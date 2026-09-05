@@ -412,7 +412,6 @@ describe("TabStore", () => {
 
     expect(store.snapshot().map((item) => item.id)).toEqual([1, 2]);
   });
-
   it("keeps snapshot ordering identical to list ordering", () => {
     const store = new TabStore();
     store.initialize([

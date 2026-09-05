@@ -1265,6 +1265,11 @@ async function startSidebarInternal(
           .filter((tab) => tab.groupId === group.id)
           .map((tab) => tab.id);
         if (tabIds.length === 0) return;
+        if (command.action === "close") {
+          void executeGroupCommand(group.id, () => groupActions.close(tabIds))
+            .catch(() => undefined);
+          return;
+        }
         void executeGroupCommand(group.id, () => groupActions.dissolve(tabIds))
           .catch(() => undefined);
       },

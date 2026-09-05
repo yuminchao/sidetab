@@ -3235,7 +3235,6 @@ describe("sidebar lifecycle", () => {
     expect(fake.methods.remove).toHaveBeenCalledWith([2, 3]);
     cleanup();
   });
-
   it("disables close-group while the group is busy", async () => {
     const pending = deferred<void>();
     const fake = createFakeChrome({

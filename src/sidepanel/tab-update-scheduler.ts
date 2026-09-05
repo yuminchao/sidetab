@@ -130,7 +130,6 @@ export function createTabUpdateScheduler(
       if (!active) return;
       runFlush();
     },
-
     get pendingCount(): number {
       return pending.size;
     },
